@@ -1,0 +1,1433 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =============================================================================
+   COMMUNICATIONIQ DESIGN SYSTEM — the single source of design truth.
+   Product: Communication IQ · placement-readiness assessment and training
+   Owner:   SaashX AI Labs
+
+   The theme token blocks below are ported from the QSprint design system so
+   the two products share one visual language and one switching mechanism —
+   sixteen themes, swapped by `data-theme` on <html>.
+
+   Everything visual lives here:
+     1. Theme tokens (colors, radius, shadow, font) — swapped via data-theme.
+     2. Typography.
+     3. Component classes: buttons, inputs, cards, chips, kbd, tables.
+     4. Side-nav rail.
+     5. Motion & effects.
+     6. Assessment surfaces: test runner, meters, score reveal.
+
+   The rule that keeps sixteen themes working: components consume ONLY these
+   tokens and classes. A literal colour in a TSX file is a bug in fifteen
+   themes you did not look at.
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   1 · THEME TOKENS
+   ------------------------------------------------------------------------- */
+
+/* RAG — red / amber / green, and only ever those.
+   --------------------------------------------------------------------------
+   Project health is a traffic light. Its whole job is to be readable in a
+   glance across a portfolio, and that reading is carried by the colour, not
+   the words: nobody scans twenty cards for the phrase "Off track".
+
+   These are deliberately outside the theme blocks below, which are free to
+   restyle --success/--warning/--error to suit a brand. One of them does: the
+   Ocean Blue theme sets all three to shades of blue ("no green/orange/red
+   anywhere, incl. status colors"), which rendered On track as light blue and
+   Off track as navy — the same hue, differing only in darkness, on the one
+   control where the difference matters most (BUG_QS_ID_034).
+
+   So a brand palette can own the buttons and the chrome. It does not get to
+   own the traffic light. Every theme inherits these unchanged; the dark block
+   below lightens them for contrast, and nothing else overrides them. */
+:root {
+  --rag-green: #16a34a;
+  --rag-amber: #d97706;
+  --rag-red:   #dc2626;
+}
+
+/* Dark surfaces need lighter, less saturated RAG or the red goes muddy. */
+[data-theme="quadrant-dark"],
+[data-theme="midnight"],
+[data-theme="liquid-glass"],
+[data-theme="ai-futurism"],
+[data-theme="dark-console"],
+[data-theme="luxury"],
+[data-theme="cyberpunk"] {
+  --rag-green: #34d399;
+  --rag-amber: #fbbf24;
+  --rag-red:   #fb7185;
+}
+
+:root,
+[data-theme="quadrant"] {
+  --bg: #f4f7fb;
+  --surface: #ffffff;
+  --surface-2: #eef3f9;
+  --text: #0d1b2a;
+  --muted: #5c6e84;
+  --border: #e1e8f1;
+  --primary: #1273e6;          /* Quadrant blue  */
+  --secondary: #2fa268;        /* Quadrant green */
+  --accent: #7c5cfc;           /* AI violet      */
+  --success: #16a34a;
+  --warning: #d97706;
+  --error: #dc2626;
+  --radius: 12px;
+  --shadow: 0 1px 2px rgba(13, 27, 42, .05), 0 8px 24px rgba(13, 27, 42, .06);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --brand-grad: linear-gradient(135deg, #1273e6, #2fa268);
+  --bg-fx: radial-gradient(900px 500px at 85% -10%, rgba(18, 115, 230, .09), transparent 60%),
+           radial-gradient(700px 500px at 0% 110%, rgba(47, 162, 104, .07), transparent 55%);
+  --glass: 0;
+}
+
+[data-theme="quadrant-dark"] {
+  --bg: #0a1220;
+  --surface: #101c30;
+  --surface-2: #16253e;
+  --text: #e6eefb;
+  --muted: #8ba0bd;
+  --border: #1f3350;
+  --primary: #3f92f5;
+  --secondary: #3fbc80;
+  --accent: #9d85ff;
+  --success: #34d399;
+  --warning: #fbbf24;
+  --error: #fb7185;
+  --radius: 12px;
+  --shadow: 0 0 0 1px rgba(63, 146, 245, .10), 0 12px 40px rgba(0, 0, 0, .40);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --brand-grad: linear-gradient(135deg, #3f92f5, #3fbc80);
+  --bg-fx: radial-gradient(800px 500px at 90% -5%, rgba(63, 146, 245, .16), transparent 55%),
+           radial-gradient(700px 500px at 0% 105%, rgba(63, 188, 128, .10), transparent 60%);
+  --glass: 0;
+}
+
+[data-theme="minimal"] {
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f7f8fa;
+  --text: #111318;
+  --muted: #6b7280;
+  --border: #ebedf1;
+  --primary: #111318;
+  --secondary: #1273e6;
+  --accent: #1273e6;
+  --success: #1a8f3c;
+  --warning: #b25e00;
+  --error: #d12f2f;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 8px 24px rgba(0, 0, 0, .05);
+  --font: "Inter", -apple-system, "SF Pro Text", system-ui, sans-serif;
+  --brand-grad: linear-gradient(135deg, #111318, #3a3f4a);
+  --bg-fx: none;
+  --glass: 0;
+}
+
+[data-theme="midnight"] {
+  --bg: #0b0e12;
+  --surface: #12161c;
+  --surface-2: #171d25;
+  --text: #d7dee8;
+  --muted: #7d8a9c;
+  --border: #232a34;
+  --primary: #00d99b;
+  --secondary: #38bdf8;
+  --accent: #c084fc;
+  --success: #22c55e;
+  --warning: #eab308;
+  --error: #f43f5e;
+  --radius: 8px;
+  --shadow: 0 1px 0 rgba(255, 255, 255, .03), 0 10px 30px rgba(0, 0, 0, .5);
+  --font: "Inter", system-ui, sans-serif;
+  --brand-grad: linear-gradient(135deg, #00d99b, #38bdf8);
+  --bg-fx: radial-gradient(800px 500px at 100% 0%, rgba(0, 217, 155, .08), transparent 55%);
+  --glass: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   1b · CLIENT THEMES — ported from the AgamaPro client-screen design system
+   (prototype/frontend, commit bf9d53d). Same token contract; each block adds
+   the QSprint-only --brand-grad. Ocean Blue & Royal Blue are the two palettes
+   Rahul pushed — Ocean is monochrome blue (status colors included); Royal is
+   pure white + a saturated true-blue ramp with a wide lightness spread so
+   status badges stay distinguishable.
+   ------------------------------------------------------------------------- */
+
+[data-theme="enterprise"] {
+  --bg: #f5f7fb; --surface: #ffffff; --surface-2: #eef2f8;
+  --text: #0e1726; --muted: #5a6b82; --border: #e2e8f2;
+  --primary: #2f6bff; --secondary: #6366f1; --accent: #14b8a6;
+  --success: #16a34a; --warning: #d97706; --error: #dc2626;
+  --radius: 12px; --shadow: 0 1px 2px rgba(16,23,42,.06), 0 8px 24px rgba(16,23,42,.06);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --brand-grad: linear-gradient(135deg, #2f6bff, #6366f1);
+  --bg-fx: radial-gradient(900px 500px at 85% -10%, rgba(47,107,255,.10), transparent 60%);
+  --glass: 0;
+}
+
+[data-theme="material"] {
+  --bg: #f6f2fb; --surface: #ffffff; --surface-2: #f1ecf8;
+  --text: #1c1b1f; --muted: #5d5b66; --border: #e7e0ee;
+  --primary: #6750a4; --secondary: #625b71; --accent: #7d5260;
+  --success: #2e7d32; --warning: #ed6c02; --error: #b3261e;
+  --radius: 16px; --shadow: 0 1px 2px rgba(0,0,0,.10), 0 6px 16px rgba(103,80,164,.10);
+  --font: "Roboto", "Inter", system-ui, sans-serif;
+  --brand-grad: linear-gradient(135deg, #6750a4, #7d5260);
+  --bg-fx: radial-gradient(800px 500px at 0% 0%, rgba(103,80,164,.10), transparent 55%);
+  --glass: 0;
+}
+
+[data-theme="bento"] {
+  --bg: #f3f4f7; --surface: #ffffff; --surface-2: #f6f7fa;
+  --text: #14161c; --muted: #5d6470; --border: #e6e8ee;
+  --primary: #111827; --secondary: #ff6b4a; --accent: #4f46e5;
+  --success: #059669; --warning: #ea580c; --error: #e11d48;
+  --radius: 20px; --shadow: 0 2px 4px rgba(20,22,28,.04), 0 12px 30px rgba(20,22,28,.08);
+  --font: "Inter", system-ui, sans-serif;
+  --brand-grad: linear-gradient(135deg, #111827, #ff6b4a);
+  --bg-fx: none;
+  --glass: 0;
+}
+
+[data-theme="gold"] {
+  --bg: #f8f8f7; --surface: #ffffff; --surface-2: #fcfbf9;
+  --text: #1a1a1a; --muted: #5f6368; --border: #ececec;
+  --primary: #d69200; --secondary: #d69200; --accent: #8b5cf6;
+  --success: #22a447; --warning: #d69200; --error: #f15a29;
+  --radius: 20px; --shadow: 0 4px 24px rgba(0,0,0,.05);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --brand-grad: linear-gradient(135deg, #d69200, #f0b429);
+  --bg-fx: radial-gradient(900px 500px at 85% -10%, rgba(214,146,0,.08), transparent 60%);
+  --glass: 0;
+}
+
+/* Campus — the palette and typefaces from the Campus Intelligence site.
+   ---------------------------------------------------------------------------
+   Values taken from that prototype's own tokens.css rather than sampled off a
+   screenshot, so the teal, the mint and the orange are the same numbers rather
+   than close ones.
+
+   The one deliberate departure: no --bg-fx. Every other theme decorates with
+   soft radial circles; this one decorates with words instead (see .word-field
+   below), which is the whole reason it exists as a separate skin. */
+[data-theme="campus"] {
+  --bg: #f2faf7; --surface: #ffffff; --surface-2: #e9f4f0;
+  --text: #10201c; --muted: #4f645e; --border: #d8e7e1;
+  --primary: #0d9488; --secondary: #0f766e; --accent: #d97706;
+  --success: #0d9488; --warning: #a86a00; --error: #c2410c;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(16,32,28,.05), 0 10px 30px rgba(13,148,136,.07);
+  /* Local stacks keep production builds independent of Google Fonts. */
+  --font: "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-display: "Trebuchet MS", "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, ui-monospace, monospace;
+  --brand-grad: linear-gradient(135deg, #0d9488, #5eead4);
+  /* Intentionally none. The word field is the decoration. */
+  --bg-fx: none;
+  --glass: 0;
+}
+
+/* Headings and the brand lockup take the display face; small uppercase labels
+   and numbers take the mono. Scoped to the theme so the other sixteen are
+   untouched. */
+[data-theme="campus"] h1,
+[data-theme="campus"] h2,
+[data-theme="campus"] h3,
+[data-theme="campus"] .b-name,
+[data-theme="campus"] .ds-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+[data-theme="campus"] .chip,
+[data-theme="campus"] .badge,
+[data-theme="campus"] .countdown,
+[data-theme="campus"] .ds-mono {
+  font-family: var(--font-mono);
+}
+
+/* The word field — decoration that reads as texture, not as content.
+   ---------------------------------------------------------------------------
+   Other themes float translucent circles behind the page. This one floats the
+   vocabulary of the thing the product is about. The rules that keep it
+   decoration rather than clutter:
+
+   * Very low contrast, on purpose. At this opacity the words register as
+     grey shapes with rhythm; you can read one if you stop and look for it,
+     which is the intent, and you never read them by accident while working.
+   * aria-hidden and pointer-events:none, so nothing here reaches a screen
+     reader or eats a click.
+   * Fixed behind everything at z-index -1, like .bgfx, so scrolling content
+     passes over a still background rather than dragging it along.
+   * Hidden entirely under prefers-reduced-motion is unnecessary -- it does not
+     move -- but it IS hidden when a printer asks, since faint grey words
+     behind a printed report is exactly the wrong place for them. */
+.word-field {
+  position: fixed; inset: 0; z-index: -1; overflow: hidden;
+  pointer-events: none; user-select: none;
+  display: none;
+}
+[data-theme="campus"] .word-field { display: block; }
+
+.word-field span {
+  position: absolute;
+  white-space: nowrap;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: var(--primary);
+  /* The contrast is the design. Anything higher and it competes with the
+     interface it sits behind. */
+  opacity: .055;
+}
+.word-field span.is-mono {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  opacity: .05;
+}
+.word-field span.is-warm { color: var(--accent); opacity: .05; }
+
+@media print {
+  .word-field { display: none !important; }
+}
+
+/* Ocean Blue — monochrome blue palette only (no green/orange/red anywhere,
+   incl. status colors). All values sampled from the client's blue swatch set. */
+[data-theme="blue"] {
+  --bg: #f4fbfe; --surface: #ffffff; --surface-2: #e3f3fa;
+  --text: #04263b; --muted: #4e8096; --border: #b0e4eb;
+  --primary: #0081b3; --secondary: #34a7e9; --accent: #3bbddf;
+  --success: #64c3ea; --warning: #387a9b; --error: #004572;
+  --radius: 12px; --shadow: 0 1px 2px rgba(0,69,114,.08), 0 8px 24px rgba(0,129,179,.10);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --brand-grad: linear-gradient(135deg, #0081b3, #3bbddf);
+  --bg-fx: radial-gradient(900px 500px at 85% -10%, rgba(59,189,223,.14), transparent 60%),
+           radial-gradient(700px 500px at 5% 100%, rgba(169,222,255,.20), transparent 60%);
+  --glass: 0;
+}
+
+/* Royal Blue — pure white background, saturated "true blue" ramp everywhere
+   (status colors included). Bolder/higher-contrast than Ocean Blue by design. */
+[data-theme="royal-blue"] {
+  --bg: #ffffff; --surface: #ffffff; --surface-2: #eef4ff;
+  --text: #0a1930; --muted: #64748b; --border: #cddbf2;
+  --primary: #1d4ed8; --secondary: #2563eb; --accent: #3b82f6;
+  --success: #0ea5e9; --warning: #0c4a6e; --error: #172554;
+  --radius: 12px; --shadow: 0 1px 2px rgba(10,25,48,.08), 0 8px 24px rgba(29,78,216,.10);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --brand-grad: linear-gradient(135deg, #1d4ed8, #3b82f6);
+  --bg-fx: radial-gradient(900px 500px at 85% -10%, rgba(37,99,235,.08), transparent 60%);
+  --glass: 0;
+}
+
+[data-theme="glassmorphism"] {
+  --bg: #eaf0ff; --surface: rgba(255,255,255,.55); --surface-2: rgba(255,255,255,.35);
+  --text: #0f1b33; --muted: #4b5a72; --border: rgba(255,255,255,.6);
+  --primary: #7c3aed; --secondary: #2dd4bf; --accent: #f59e0b;
+  --success: #10b981; --warning: #f59e0b; --error: #ef4444;
+  --radius: 18px; --shadow: 0 8px 32px rgba(31,38,135,.18);
+  --font: "Inter", system-ui, sans-serif;
+  --brand-grad: linear-gradient(135deg, #7c3aed, #2dd4bf);
+  --bg-fx: linear-gradient(135deg, rgba(124,58,237,.22), rgba(45,212,191,.20));
+  --glass: 1;
+}
+
+[data-theme="liquid-glass"] {
+  --bg: #0a1124; --surface: rgba(255,255,255,.08); --surface-2: rgba(255,255,255,.05);
+  --text: #eaf2ff; --muted: #9fb2d6; --border: rgba(255,255,255,.14);
+  --primary: #38bdf8; --secondary: #a78bfa; --accent: #f0abfc;
+  --success: #34d399; --warning: #fcd34d; --error: #fb7185;
+  --radius: 22px; --shadow: 0 8px 40px rgba(56,189,248,.16);
+  --font: "Inter", system-ui, sans-serif;
+  --brand-grad: linear-gradient(135deg, #38bdf8, #a78bfa);
+  --bg-fx: radial-gradient(700px 600px at 90% 0%, rgba(56,189,248,.28), transparent 55%),
+           radial-gradient(600px 600px at 0% 100%, rgba(167,139,250,.24), transparent 60%);
+  --glass: 1;
+}
+
+[data-theme="ai-futurism"] {
+  --bg: #070b18; --surface: #0e1730; --surface-2: #131e3c;
+  --text: #e7eefc; --muted: #8aa0c8; --border: #1e2c50;
+  --primary: #6d5efc; --secondary: #22d3ee; --accent: #f472b6;
+  --success: #34d399; --warning: #fbbf24; --error: #fb7185;
+  --radius: 14px; --shadow: 0 0 0 1px rgba(109,94,252,.15), 0 12px 40px rgba(34,211,238,.10);
+  --font: "Inter", system-ui, sans-serif;
+  --brand-grad: linear-gradient(135deg, #6d5efc, #22d3ee);
+  --bg-fx: radial-gradient(700px 500px at 80% 0%, rgba(109,94,252,.30), transparent 55%),
+           radial-gradient(600px 500px at 10% 100%, rgba(34,211,238,.18), transparent 60%);
+  --glass: 0;
+}
+
+[data-theme="dark-console"] {
+  --bg: #0b0e12; --surface: #12161c; --surface-2: #171c24;
+  --text: #d7dee8; --muted: #7d8a9c; --border: #232a34;
+  --primary: #00e5a8; --secondary: #38bdf8; --accent: #c084fc;
+  --success: #22c55e; --warning: #eab308; --error: #f43f5e;
+  --radius: 6px; --shadow: 0 1px 0 rgba(255,255,255,.03), 0 10px 30px rgba(0,0,0,.5);
+  --font: "JetBrains Mono", ui-monospace, "Cascadia Code", "Segoe UI", monospace;
+  --brand-grad: linear-gradient(135deg, #00e5a8, #38bdf8);
+  --bg-fx: radial-gradient(800px 500px at 100% 0%, rgba(0,229,168,.10), transparent 55%);
+  --glass: 0;
+}
+
+[data-theme="luxury"] {
+  --bg: #0f0f12; --surface: #17171d; --surface-2: #1d1d25;
+  --text: #efe9dd; --muted: #a89e8c; --border: #2a2a33;
+  --primary: #c9a227; --secondary: #b08d57; --accent: #e5c07b;
+  --success: #7bbf6a; --warning: #d9a441; --error: #c75c5c;
+  --radius: 4px; --shadow: 0 1px 0 rgba(201,162,39,.12), 0 16px 40px rgba(0,0,0,.45);
+  --font: "Inter", system-ui, sans-serif;
+  --brand-grad: linear-gradient(135deg, #c9a227, #b08d57);
+  --bg-fx: radial-gradient(900px 600px at 50% -15%, rgba(201,162,39,.10), transparent 60%);
+  --glass: 0;
+}
+
+[data-theme="cyberpunk"] {
+  --bg: #07070d; --surface: #0e0e1a; --surface-2: #14142a;
+  --text: #e8f7ff; --muted: #8ab0c8; --border: #25254a;
+  --primary: #ff2bd1; --secondary: #00fff0; --accent: #faff00;
+  --success: #39ff14; --warning: #ffb300; --error: #ff3860;
+  --radius: 2px; --shadow: 0 0 0 1px rgba(255,43,209,.3), 0 0 24px rgba(0,255,240,.18);
+  --font: "JetBrains Mono", ui-monospace, monospace;
+  --brand-grad: linear-gradient(135deg, #ff2bd1, #00fff0);
+  --bg-fx: radial-gradient(700px 600px at 85% -5%, rgba(255,43,209,.18), transparent 55%),
+           radial-gradient(600px 600px at 5% 100%, rgba(0,255,240,.14), transparent 60%);
+  --glass: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   2 · BASE / TYPOGRAPHY
+   ------------------------------------------------------------------------- */
+
+* { border-color: var(--border); }
+html { color-scheme: light dark; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  transition: background .4s ease, color .4s ease;
+  -webkit-font-smoothing: antialiased;
+}
+.bgfx {
+  position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background: var(--bg-fx); transition: background .5s ease;
+}
+/* effect themes: frosted surfaces when --glass:1 */
+[data-theme="glassmorphism"] .ds-card,
+[data-theme="liquid-glass"] .ds-card {
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+/* cyberpunk scanlines */
+[data-theme="cyberpunk"] .bgfx::after {
+  content: ""; position: absolute; inset: 0;
+  background: repeating-linear-gradient(0deg, rgba(0,255,240,.05) 0 1px, transparent 1px 3px);
+}
+h1, h2, h3, h4 { letter-spacing: -0.01em; }
+::selection { background: color-mix(in srgb, var(--primary) 28%, transparent); }
+
+/* ---------------------------------------------------------------------------
+   3 · COMPONENT CLASSES (buttons, inputs, cards, chips…)
+   ------------------------------------------------------------------------- */
+
+/* Cards / surfaces */
+.ds-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+.ds-inset { background: var(--surface-2); border-radius: calc(var(--radius) - 4px); }
+
+/* Focus ring — one definition for every interactive element */
+.ds-focus:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  border-radius: var(--radius);
+  padding: .625rem 1rem;
+  font-size: .8125rem; font-weight: 600; line-height: 1;
+  transition: filter .15s ease, background .15s ease, transform .05s ease;
+  cursor: pointer; white-space: nowrap;
+}
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: .55; cursor: not-allowed; }
+.btn-primary { background: var(--brand-grad); color: #fff; }
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+.btn-ghost:hover { background: var(--surface-2); }
+.btn-soft { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); }
+.btn-soft:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.btn-danger { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); }
+.btn-danger:hover { background: color-mix(in srgb, var(--error) 22%, transparent); }
+.btn-sm { padding: .375rem .625rem; font-size: .75rem; border-radius: calc(var(--radius) - 4px); }
+.btn-icon { padding: .5rem; border-radius: calc(var(--radius) - 2px); }
+
+/* Inputs */
+.ds-label { display: block; font-size: .75rem; font-weight: 600; color: var(--muted); margin-bottom: .375rem; }
+.ds-input, .ds-select, .ds-textarea {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  padding: .55rem .75rem;
+  font-size: .8125rem; color: var(--text);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.ds-input::placeholder, .ds-textarea::placeholder { color: var(--muted); opacity: .7; }
+.ds-input:focus, .ds-select:focus, .ds-textarea:focus {
+  outline: none; border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.ds-textarea { min-height: 90px; resize: vertical; }
+
+/* Chips / badges / kbd */
+.chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  border-radius: 999px; padding: .15rem .55rem;
+  font-size: 11px; font-weight: 600;
+}
+.kbd {
+  display: inline-block; border: 1px solid var(--border); border-bottom-width: 2px;
+  border-radius: 6px; background: var(--surface-2);
+  padding: .1rem .4rem; font-size: 10px; font-weight: 600; color: var(--muted);
+}
+
+/* AI marker — anything AI-generated carries this */
+.ai-chip {
+  display: inline-flex; align-items: center; gap: .3rem;
+  border-radius: 999px; padding: .15rem .55rem;
+  font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* Tables */
+.ds-table { width: 100%; text-align: left; font-size: .75rem; }
+.ds-table th {
+  border-bottom: 1px solid var(--border); padding: .5rem .75rem;
+  font-weight: 600; color: var(--muted); white-space: nowrap;
+}
+.ds-table td { border-bottom: 1px solid var(--border); padding: .625rem .75rem; color: var(--text); }
+.ds-table tbody tr { transition: background .12s ease; }
+.ds-table tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+
+/* Progress bars */
+.ds-track { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.ds-fill { height: 100%; border-radius: 999px; background: var(--brand-grad); transition: width .4s ease; }
+
+/* ---------------------------------------------------------------------------
+   4 · SIDE-NAV RAIL (navy, tinted toward each theme's primary)
+   ------------------------------------------------------------------------- */
+
+:root {
+  --rail: color-mix(in srgb, var(--primary) 10%, #0a2540);
+  --rail-2: color-mix(in srgb, var(--primary) 20%, #103a5e);
+  --rail-line: rgba(255, 255, 255, .09);
+  --rail-text: #f4f9ff;
+  --rail-muted: rgba(230, 240, 252, .66);
+}
+/* Collapsible rail.
+   ---------------------------------------------------------------------------
+   Collapsed means an icon rail, not a hidden one. Hiding navigation entirely
+   trades a little width for a click every time somebody wants to move, and
+   the people who collapse it are the ones moving around most -- a trainer
+   flicking between cohorts and flags all afternoon. At 3.5rem every
+   destination is still one click away and still in the same vertical order,
+   so muscle memory survives the toggle.
+
+   Width is a custom property rather than two classes so the transition has
+   something to animate and the header can line up with it. */
+.app-shell-nav {
+  width: var(--rail-w, 14rem);
+  transition: width .18s ease;
+}
+.app-shell-nav.is-collapsed { --rail-w: 3.5rem; }
+
+.app-shell-nav.is-collapsed .rail-section-title,
+.app-shell-nav.is-collapsed .rail-label,
+.app-shell-nav.is-collapsed .rail-badge { display: none; }
+
+.app-shell-nav.is-collapsed .rail-item {
+  justify-content: center;
+  padding-left: 0; padding-right: 0;
+}
+.app-shell-nav.is-collapsed .rail-head { justify-content: center; padding: 0; }
+
+/* A rule of section separation survives the collapse: without the titles the
+   groups would run together into one undifferentiated column of icons. */
+.app-shell-nav.is-collapsed .rail-group + .rail-group {
+  border-top: 1px solid var(--rail-line);
+  padding-top: .5rem;
+}
+
+/* The label has to go somewhere when the width does. A CSS tooltip rather
+   than the browser's own `title`, because that one takes about a second to
+   appear -- long enough that people give up and expand the rail instead. */
+.app-shell-nav.is-collapsed .rail-item { position: relative; }
+.app-shell-nav.is-collapsed .rail-item::after {
+  content: attr(data-label);
+  position: absolute; left: calc(100% + .5rem); top: 50%;
+  transform: translateY(-50%) translateX(-.25rem);
+  padding: .3rem .5rem; border-radius: 6px;
+  background: var(--rail-2, #103a5e); color: var(--rail-text, #fff);
+  font-size: 11px; font-weight: 600; white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0,0,0,.28);
+  opacity: 0; pointer-events: none;
+  transition: opacity .12s ease, transform .12s ease;
+  z-index: 50;
+}
+.app-shell-nav.is-collapsed .rail-item:hover::after,
+.app-shell-nav.is-collapsed .rail-item:focus-visible::after {
+  opacity: 1; transform: translateY(-50%) translateX(0);
+}
+
+
+/* Somebody who cannot see motion gets the same rail, instantly. */
+@media (prefers-reduced-motion: reduce) {
+  .app-shell-nav,
+  .app-shell-nav.is-collapsed .rail-item::after { transition: none; }
+}
+
+/* Floating attribution.
+   ---------------------------------------------------------------------------
+   Pinned bottom-right rather than sitting under the navigation, so it stays
+   visible with the rail collapsed and on pages that have no rail at all.
+
+   z-index 30 is chosen, not arbitrary: above page content, below the mobile
+   navigation sheet (40) and well below the runner (50) and modals (60). A
+   credit line floating over a dialog would be the wrong kind of persistent.
+
+   Deliberately quiet. It sits at reduced opacity and lifts on hover, so it
+   reads as a mark rather than as UI competing with the page. */
+.powered-float {
+  position: fixed;
+  /* Centred on the viewport, not the content area: it is an attribution for
+     the whole product, and anchoring it to a column that changes width when
+     the rail collapses would make it drift. */
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: max(.75rem, env(safe-area-inset-bottom));
+  z-index: 30;
+  display: inline-flex; align-items: center;
+  padding: .3rem .55rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .08);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  opacity: .72;
+  transition: opacity .15s ease, transform .15s ease;
+}
+/* The hover lift has to carry the centring translate with it, or the badge
+   jumps to the left edge the moment a pointer touches it. */
+.powered-float:hover,
+.powered-float:focus-within {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-1px);
+}
+
+@media print { .powered-float { display: none !important; } }
+
+/* The rail is the positioning context for the collapsed-mode tooltips,
+   which are deliberately placed outside it. No overflow clipping here. */
+.app-shell-nav, .rail-sheet { position: relative; }
+.rail-head, .rail-nav, .rail-foot { position: relative; z-index: 1; }
+
+/* Tinted rail icons.
+   ---------------------------------------------------------------------------
+   Colour identifies a destination; it never carries meaning on its own. Every
+   item keeps its glyph and its label, so the rail works identically for
+   somebody who cannot distinguish these hues.
+
+   Idle icons sit slightly under full strength. Eight saturated glyphs in a
+   column is a paint chart, not navigation -- pulling them back lets the
+   active row and whatever the pointer is on stand out, which is the only
+   contrast that has to survive. */
+.rail-icon { opacity: .82; transition: opacity .15s ease; }
+.rail-item:hover .rail-icon,
+.rail-item.is-active .rail-icon { opacity: 1; }
+
+/* The active row already carries a background and full-strength text; its
+   icon keeps the tint rather than being overridden, so the row you are on is
+   still identifiable at a glance when the rail is collapsed to icons. */
+
+.rail-item {
+  color: var(--rail-muted);
+  transition: background .15s ease, color .15s ease;
+}
+.rail-item:hover { color: var(--rail-text); background: rgba(255, 255, 255, .07); }
+.rail-item.is-active { color: var(--rail-text); background: var(--rail-2); }
+
+/* ---------------------------------------------------------------------------
+   5 · MOTION & EFFECTS
+   ------------------------------------------------------------------------- */
+
+.thin-scroll { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.thin-scroll::-webkit-scrollbar { height: 5px; width: 5px; }
+.thin-scroll::-webkit-scrollbar-track { background: transparent; }
+.thin-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
+.thin-scroll::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+@keyframes fade-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+/* `backwards`, not `both`. With `both` the final keyframe stays applied, so
+   every page wrapper kept a transform — and a transformed ancestor becomes the
+   containing block for `position: fixed` children, which centred modals in the
+   *page* instead of the viewport. On a long page you had to scroll to find the
+   dialog you had just opened. `backwards` gives the same animation and leaves
+   no transform behind once it finishes. */
+.animate-fade-up { animation: fade-up .5s cubic-bezier(.4, 0, .2, 1) backwards; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+.animate-fade-in { animation: fade-in .25s ease both; }
+
+@keyframes slide-in-r { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+.animate-slide-in-r { animation: slide-in-r .3s cubic-bezier(.4, 0, .2, 1) backwards; }
+
+@keyframes pulse-dot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-2px); } }
+.copilot-dot { animation: pulse-dot 1.2s infinite ease-in-out; }
+.copilot-dot:nth-child(2) { animation-delay: .15s; }
+.copilot-dot:nth-child(3) { animation-delay: .3s; }
+
+/* soft dot-grid used behind the auth hero panel */
+.auth-dotgrid {
+  background-image: radial-gradient(rgba(255, 255, 255, .35) 1px, transparent 1px);
+  background-size: 22px 22px;
+  -webkit-mask-image: radial-gradient(120% 100% at 15% 10%, #000 40%, transparent 85%);
+  mask-image: radial-gradient(120% 100% at 15% 10%, #000 40%, transparent 85%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-up, .animate-fade-in, .animate-slide-in-r, .copilot-dot { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   6 · ASSESSMENT SURFACES
+   The screens QSprint has no equivalent of: the test runner, the meters and
+   the score reveal. Every one of them is token-driven, so a Read Aloud item
+   under Cyberpunk and under Minimal is the same component with the same
+   contrast guarantees.
+   ------------------------------------------------------------------------- */
+
+/* The runner takes the whole viewport. No nav, no escape hatch, no back
+   button — a simulation that can be paused is not a simulation (SIM-03). */
+.runner {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; flex-direction: column;
+  background: var(--bg); color: var(--text);
+}
+.runner-body {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 1.5rem; padding: 2rem; text-align: center;
+}
+/* SVAR screens stack far more than a short prompt -- section banner, question
+   bar, mic tile, hint, the recording circle and the button. Centring that tall
+   column in a fixed-height body clips both ends with no way to scroll to them:
+   the Start Recording button fell off the bottom and was unreachable. Top-align
+   and allow scrolling so every control is reachable, which also matches the
+   reference's top-down flow. Non-SVAR screens are short and keep centring. */
+.runner.svar .runner-body {
+  justify-content: flex-start;
+  overflow-y: auto;
+  gap: 1rem;
+  padding: 1.25rem 2rem 1.75rem;
+}
+/* The pre-test check is a dialog, not a page.
+   ---------------------------------------------------------------------------
+   It is modal in the strict sense: the scrim swallows clicks, Escape does
+   nothing, and the only way out is the Quit button. That is not UI fussiness.
+   The check is the last point at which a dead microphone can be caught before
+   it costs a student an attempt, and a panel a nervous tester can dismiss by
+   tapping slightly off-target is a panel they will dismiss. */
+.modal-scrim {
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.25rem;
+  /* Tinted from the theme rather than flat black, so sixteen themes do not
+     become one grey. */
+  background: color-mix(in srgb, var(--bg) 55%, rgba(0, 0, 0, .55));
+  backdrop-filter: blur(3px);
+  overflow-y: auto;
+}
+.modal-panel {
+  width: 100%; max-width: 30rem;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-lg, 14px);
+  box-shadow: 0 24px 60px -12px rgba(0, 0, 0, .35);
+  padding: 1.5rem;
+  max-height: calc(100dvh - 2.5rem);
+  overflow-y: auto;
+}
+.modal-quit {
+  display: block; margin: .875rem auto 0;
+  font-size: 11px; color: var(--muted);
+  background: none; border: 0; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.modal-quit:hover { color: var(--text); }
+
+/* A page that is only a dialog still needs a floor under it, or the theme
+   stops at the panel edge and the rest is browser white. */
+.modal-page { position: fixed; inset: 0; background: var(--bg); }
+
+.runner-prompt {
+  font-size: clamp(1.25rem, 2.6vw, 2rem);
+  line-height: 1.5; font-weight: 600; max-width: 46ch;
+}
+.runner-instruction { font-size: .8125rem; color: var(--muted); max-width: 52ch; }
+
+/* Countdown. Amber under ten seconds, red under three — the colour is the
+   warning, because a student under pressure is not reading a number. */
+.countdown {
+  font-variant-numeric: tabular-nums;
+  font-size: 2.25rem; font-weight: 700; letter-spacing: -.02em;
+}
+.countdown-warn { color: var(--rag-amber); }
+.countdown-critical { color: var(--rag-red); }
+
+/* Microphone state. One dot, four meanings, never ambiguous. */
+.mic-dot {
+  width: 12px; height: 12px; border-radius: 999px;
+  display: inline-block; flex: 0 0 12px;
+}
+.mic-idle { background: var(--muted); }
+.mic-armed { background: var(--rag-amber); }
+.mic-recording { background: var(--rag-red); animation: mic-pulse 1.4s ease-in-out infinite; }
+.mic-done { background: var(--rag-green); }
+@keyframes mic-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rag-red) 55%, transparent); }
+  60% { box-shadow: 0 0 0 10px transparent; }
+}
+
+/* Live input level, drawn as bars rather than a number. */
+.level-meter { display: flex; align-items: flex-end; gap: 3px; height: 32px; }
+.level-bar {
+  width: 4px; border-radius: 2px; background: var(--primary);
+  transition: height .08s linear, opacity .08s linear;
+}
+
+/* Waveform / annotated listen-back (DIAG-02). Pauses are gaps you can see. */
+.wave { position: relative; width: 100%; height: 72px; }
+.wave-pause {
+  position: absolute; top: 0; bottom: 0;
+  background: color-mix(in srgb, var(--rag-amber) 18%, transparent);
+}
+.wave-cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--primary); }
+.transcript-word { padding: 1px 2px; border-radius: 3px; cursor: pointer; }
+.transcript-word:hover { background: var(--surface-2); }
+.transcript-filler { background: color-mix(in srgb, var(--rag-amber) 22%, transparent); }
+.transcript-error { background: color-mix(in srgb, var(--rag-red) 18%, transparent); }
+
+/* The two progress bars of GAM-03, kept visually distinct on purpose.
+   Level is effort and always rises; the Gap Meter is mastery and may stall.
+   Making them look alike would be the dishonesty the requirement forbids. */
+.meter-level { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.meter-level > span { display: block; height: 100%; background: var(--brand-grad); transition: width .5s ease; }
+.meter-gap {
+  height: 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--rag-red) 16%, var(--surface-2));
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+}
+.meter-gap > span { display: block; height: 100%; background: var(--rag-green); transition: width .6s ease; }
+
+/* Staged score reveal (GAM-18): sub-scores animate in sequence, biggest lever
+   last. Information as the reward, never chance. */
+.reveal { animation: fade-up .45s cubic-bezier(.4,0,.2,1) backwards; }
+.reveal-1 { animation-delay: .05s; }
+.reveal-2 { animation-delay: .25s; }
+.reveal-3 { animation-delay: .45s; }
+.reveal-4 { animation-delay: .65s; }
+.reveal-lever { animation-delay: .95s; }
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal, .mic-recording { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
+   Login hero: 3D microphone with sound waves (components/brand/HeroMic.tsx)
+
+   A speaking-assessment product should show the instrument it measures. This
+   is a microphone built from CSS 3D transforms and one glow — no asset, no
+   request, so it clears the CSP and works offline. Colours are theme tokens,
+   so the scene is tinted by whichever of the 17 palettes is live.
+--------------------------------------------------------------------------- */
+.hero-mic {
+  position: relative;
+  width: 100%;
+  height: clamp(220px, 34vh, 360px);
+  margin: 0 auto;
+  perspective: 900px;
+  transform-style: preserve-3d;
+}
+
+/* The rig floats as one piece, tilted so the capsule reads as a cylinder. */
+.hero-mic__rig {
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 132px; height: 260px;
+  transform: translate(-50%, -50%) rotateX(8deg) rotateZ(-9deg);
+  transform-style: preserve-3d;
+  animation: hero-mic-float 6s ease-in-out infinite;
+}
+
+/* Capsule: a metallic cylinder made from stacked gradients. */
+.hero-mic__body {
+  position: absolute;
+  left: 50%; top: 0;
+  width: 132px; height: 168px;
+  transform: translateX(-50%);
+  border-radius: 66px / 74px;
+  background:
+    linear-gradient(105deg,
+      color-mix(in srgb, var(--rail-text) 12%, transparent) 0%,
+      color-mix(in srgb, var(--primary) 55%, #0a1220) 30%,
+      color-mix(in srgb, var(--primary) 30%, #060b16) 62%,
+      #05080f 100%);
+  box-shadow:
+    inset 0 2px 6px color-mix(in srgb, var(--rail-text) 40%, transparent),
+    inset -14px 0 26px rgba(0,0,0,.55),
+    inset 14px 0 20px color-mix(in srgb, var(--primary) 22%, transparent),
+    0 24px 50px rgba(0,0,0,.5);
+}
+
+/* Wire grille: the top two-thirds, a fine mesh with a specular sweep. */
+.hero-mic__grille {
+  position: absolute;
+  left: 8px; right: 8px; top: 8px;
+  height: 104px;
+  border-radius: 58px / 60px;
+  overflow: hidden;
+  background:
+    repeating-linear-gradient(78deg,
+      color-mix(in srgb, var(--rail-text) 16%, transparent) 0 1px,
+      transparent 1px 6px),
+    repeating-linear-gradient(-78deg,
+      color-mix(in srgb, var(--rail-text) 10%, transparent) 0 1px,
+      transparent 1px 6px),
+    radial-gradient(120% 80% at 34% 22%,
+      color-mix(in srgb, var(--primary) 40%, transparent) 0%,
+      transparent 60%);
+  box-shadow: inset 0 0 22px rgba(0,0,0,.6);
+}
+
+/* A moving highlight so the metal looks lit rather than painted. */
+.hero-mic__grille::after {
+  content: "";
+  position: absolute; inset: -20% -60%;
+  background: linear-gradient(100deg, transparent 40%,
+    color-mix(in srgb, var(--rail-text) 55%, transparent) 50%, transparent 60%);
+  animation: hero-mic-sheen 5.5s ease-in-out infinite;
+}
+
+/* Level bars living inside the grille — the mic reacting to a voice. */
+.hero-mic__bars {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  gap: 5px;
+}
+.hero-mic__bars i {
+  width: 5px; height: 20%;
+  border-radius: 3px;
+  background: linear-gradient(180deg,
+    var(--accent), color-mix(in srgb, var(--primary) 80%, #fff 10%));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
+  animation: hero-mic-bar 1.1s ease-in-out infinite;
+  animation-delay: var(--d);
+}
+
+/* Chrome band separating grille from handle, plus a lower accent ring. */
+.hero-mic__ring {
+  position: absolute; left: 6px; right: 6px; top: 116px;
+  height: 12px; border-radius: 50%;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--rail-text) 60%, transparent),
+    color-mix(in srgb, var(--primary) 40%, #05080f));
+  box-shadow: 0 2px 6px rgba(0,0,0,.5),
+              inset 0 1px 2px color-mix(in srgb, var(--rail-text) 60%, transparent);
+}
+.hero-mic__ring--2 {
+  top: 140px; height: 8px;
+  background: color-mix(in srgb, var(--accent) 55%, #05080f);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* Handle, and a round weighted base with a soft cast shadow. */
+.hero-mic__neck {
+  position: absolute; left: 50%; top: 160px;
+  width: 34px; height: 78px;
+  transform: translateX(-50%);
+  border-radius: 0 0 14px 14px;
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--rail-text) 14%, transparent),
+    color-mix(in srgb, var(--primary) 26%, #060b16) 45%, #05080f);
+  box-shadow: inset -6px 0 12px rgba(0,0,0,.5),
+              inset 6px 0 8px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.hero-mic__base {
+  position: absolute; left: 50%; top: 228px;
+  width: 96px; height: 26px;
+  transform: translateX(-50%) rotateX(64deg);
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--primary) 45%, #0a1220), #05080f 80%);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--primary) 30%, transparent);
+}
+.hero-mic__shadow {
+  position: absolute; left: 50%; top: 250px;
+  width: 150px; height: 26px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0,0,0,.55), transparent 72%);
+  filter: blur(3px);
+  animation: hero-mic-shadow 6s ease-in-out infinite;
+}
+
+/* A halo behind the capsule so it sits in light, not on a flat panel. */
+.hero-mic__glow {
+  position: absolute; left: 50%; top: 46px;
+  width: 260px; height: 260px;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: radial-gradient(closest-side,
+    color-mix(in srgb, var(--primary) 34%, transparent),
+    transparent 70%);
+  filter: blur(6px);
+  animation: hero-mic-glow 4.5s ease-in-out infinite;
+}
+
+/* Concentric sound rings, expanding out of the capsule and fading. */
+.hero-mic__waves {
+  position: absolute; left: 50%; top: 44%;
+  width: 0; height: 0;
+  transform: translate(-50%, -50%);
+}
+.hero-mic__waves span {
+  position: absolute; left: 50%; top: 50%;
+  width: 120px; height: 120px;
+  margin: -60px 0 0 -60px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  opacity: 0;
+  animation: hero-mic-wave 3.2s ease-out infinite;
+  animation-delay: calc(var(--i) * .8s);
+}
+
+/* Floating motes for depth. */
+.hero-mic__motes span {
+  position: absolute;
+  left: var(--mx); top: var(--my);
+  width: 5px; height: 5px; border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 80%, var(--rail-text));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent);
+  opacity: .5;
+  animation: hero-mic-mote 5s ease-in-out infinite;
+  animation-delay: var(--md);
+}
+
+@keyframes hero-mic-float {
+  0%, 100% { transform: translate(-50%, -50%) rotateX(8deg) rotateZ(-9deg) translateY(0); }
+  50%      { transform: translate(-50%, -52%) rotateX(8deg) rotateZ(-9deg) translateY(-10px); }
+}
+@keyframes hero-mic-shadow {
+  0%, 100% { opacity: .5; transform: translateX(-50%) scale(1); }
+  50%      { opacity: .32; transform: translateX(-50%) scale(.86); }
+}
+@keyframes hero-mic-glow {
+  0%, 100% { opacity: .7; }
+  50%      { opacity: 1; }
+}
+@keyframes hero-mic-sheen {
+  0%, 100% { transform: translateX(-30%); }
+  50%      { transform: translateX(30%); }
+}
+@keyframes hero-mic-bar {
+  0%, 100% { height: 16%; }
+  50%      { height: 74%; }
+}
+@keyframes hero-mic-wave {
+  0%   { opacity: 0; transform: scale(.35); }
+  15%  { opacity: .85; }
+  100% { opacity: 0; transform: scale(2.4); }
+}
+@keyframes hero-mic-mote {
+  0%, 100% { transform: translateY(0); opacity: .35; }
+  50%      { transform: translateY(-14px); opacity: .8; }
+}
+
+/* The scene stays; the motion stops. */
+@media (prefers-reduced-motion: reduce) {
+  .hero-mic__rig, .hero-mic__shadow, .hero-mic__glow,
+  .hero-mic__grille::after, .hero-mic__bars i,
+  .hero-mic__waves span, .hero-mic__motes span {
+    animation: none;
+  }
+  /* Without the expand animation the rings would collapse to a dot, so give
+     them a static resting spread. */
+  .hero-mic__waves span { opacity: .3; transform: scale(1.4); }
+  .hero-mic__bars i { height: 45%; }
+}
+
+/* ---------------------------------------------------------------------------
+   AI narrator avatar for listening practice (components/brand/AiNarrator.tsx)
+
+   A headphoned AI face that speaks: equalizer mouth and sound rings animate
+   while a passage plays (.is-speaking) and settle to a calm idle when it
+   stops. CSS only, theme-tokened, so it clears the CSP and tints with the
+   live palette.
+--------------------------------------------------------------------------- */
+.ai-narrator {
+  position: relative;
+  width: 168px; height: 168px;
+  margin: 0 auto 8px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* Head: a soft AI orb, breathing gently at rest, alert while speaking. */
+.ai-narrator__head {
+  position: relative;
+  width: 108px; height: 108px;
+  border-radius: 50%;
+  background:
+    radial-gradient(120% 120% at 32% 26%,
+      color-mix(in srgb, var(--rail-text, #fff) 26%, transparent) 0%,
+      color-mix(in srgb, var(--primary) 78%, #0a1220) 34%,
+      color-mix(in srgb, var(--accent) 60%, #0a1220) 100%);
+  box-shadow:
+    inset 0 3px 8px color-mix(in srgb, var(--rail-text, #fff) 34%, transparent),
+    inset 0 -10px 20px rgba(0,0,0,.35),
+    0 16px 34px color-mix(in srgb, var(--primary) 30%, transparent);
+  animation: ai-breathe 4s ease-in-out infinite;
+}
+.ai-narrator.is-speaking .ai-narrator__head {
+  animation: ai-nod 1.2s ease-in-out infinite;
+}
+
+/* Headphones. */
+.ai-narrator__band {
+  position: absolute; left: 50%; top: -10px;
+  width: 118px; height: 70px;
+  transform: translateX(-50%);
+  border: 7px solid color-mix(in srgb, var(--rail-text, #fff) 70%, var(--primary));
+  border-bottom: none;
+  border-radius: 60px 60px 0 0;
+  opacity: .85;
+}
+.ai-narrator__cup {
+  position: absolute; top: 42px;
+  width: 22px; height: 40px; border-radius: 8px;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--rail-text, #fff) 55%, var(--primary)),
+    color-mix(in srgb, var(--primary) 60%, #05080f));
+  box-shadow: 0 3px 8px rgba(0,0,0,.4);
+}
+.ai-narrator__cup--l { left: -10px; }
+.ai-narrator__cup--r { right: -10px; }
+/* Cups light up while speaking. */
+.ai-narrator.is-speaking .ai-narrator__cup {
+  box-shadow: 0 3px 8px rgba(0,0,0,.4),
+              0 0 14px color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.ai-narrator__face {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 12px;
+}
+
+/* Eyes: bright, with a slow blink. Speaking makes them a touch brighter. */
+.ai-narrator__eye {
+  position: absolute; top: 40px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--rail-text, #fff);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--rail-text, #fff) 80%, transparent);
+  animation: ai-blink 5s ease-in-out infinite;
+}
+.ai-narrator__eye--l { left: 34px; }
+.ai-narrator__eye--r { right: 34px; }
+
+/* Mouth: five equalizer bars. Flat and low at rest; dancing while speaking. */
+.ai-narrator__mouth {
+  position: absolute; bottom: 30px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px;
+  height: 26px;
+}
+.ai-narrator__mouth i {
+  width: 5px; height: 5px; border-radius: 3px;
+  background: var(--rail-text, #fff);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--rail-text, #fff) 60%, transparent);
+  transition: height .2s ease;
+}
+.ai-narrator.is-speaking .ai-narrator__mouth i {
+  animation: ai-talk 0.7s ease-in-out infinite;
+  animation-delay: var(--d);
+}
+
+/* Sound rings, only while speaking. */
+.ai-narrator__waves {
+  position: absolute; left: 50%; top: 50%;
+  width: 0; height: 0; transform: translate(-50%, -50%);
+}
+.ai-narrator__waves span {
+  position: absolute; left: 50%; top: 50%;
+  width: 118px; height: 118px; margin: -59px 0 0 -59px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  opacity: 0;
+}
+.ai-narrator.is-speaking .ai-narrator__waves span {
+  animation: ai-ring 2.4s ease-out infinite;
+  animation-delay: calc(var(--i) * .8s);
+}
+
+/* "AI voice" tag pinned under the chin. */
+.ai-narrator__tag {
+  position: absolute; bottom: 2px; left: 50%;
+  transform: translateX(-50%);
+  font-size: 10px; font-weight: 700;
+  letter-spacing: .08em; text-transform: uppercase;
+  padding: 2px 8px; border-radius: 999px;
+  color: var(--primary);
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+@keyframes ai-breathe {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.03); }
+}
+@keyframes ai-nod {
+  0%, 100% { transform: translateY(0) scale(1.02); }
+  50%      { transform: translateY(-3px) scale(1.02); }
+}
+@keyframes ai-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  96%           { transform: scaleY(.1); }
+}
+@keyframes ai-talk {
+  0%, 100% { height: 5px; }
+  50%      { height: 22px; }
+}
+@keyframes ai-ring {
+  0%   { opacity: 0; transform: scale(.7); }
+  15%  { opacity: .8; }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-narrator__head, .ai-narrator__eye,
+  .ai-narrator.is-speaking .ai-narrator__head,
+  .ai-narrator.is-speaking .ai-narrator__mouth i,
+  .ai-narrator.is-speaking .ai-narrator__waves span {
+    animation: none;
+  }
+  /* A steady "on air" look without motion: mouth mid-open, one ring resting. */
+  .ai-narrator.is-speaking .ai-narrator__mouth i { height: 14px; }
+  .ai-narrator.is-speaking .ai-narrator__waves span:first-child {
+    opacity: .3; transform: scale(1.3);
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   SVAR-style runner skin. A deliberate visual match to the real SVAR test
+   screens, applied only inside the runner when the format is svar_style, so a
+   student practising for that test sits something that looks like it. Fixed
+   blue palette on purpose — this one surface imitates a specific product, so
+   it does not follow the app's themes.
+--------------------------------------------------------------------------- */
+.svar {
+  --svar-navy: #1e3a6b;
+  --svar-navy-2: #16305c;
+  --svar-blue: #3f7cbf;
+  --svar-blue-2: #5a93cf;
+  --svar-ink: #1f2d3d;
+  --svar-bg: #ffffff;
+  --svar-band: #eaf1fb;
+  --svar-line: #d6e2f2;
+  background: var(--svar-bg);
+  color: var(--svar-ink);
+}
+.svar-section-banner {
+  background: var(--svar-band);
+  border-bottom: 2px solid var(--svar-navy);
+  padding: 14px 20px;
+  /* The reference sits the section title flush left, not centred -- the
+     runner-body centres its children, so this is set explicitly. */
+  text-align: left;
+}
+.svar-section-banner h1 {
+  color: var(--svar-navy); font-weight: 800; font-size: 1.15rem; letter-spacing: -0.01em;
+}
+.svar-instruct { color: var(--svar-navy); font-weight: 700; text-align: center; font-size: 1.05rem; }
+.svar-qbar {
+  background: var(--svar-navy); color: #fff; padding: 14px 20px; border-radius: 4px;
+  font-size: 1.05rem; line-height: 1.5;
+}
+.svar-qbar b { color: #cfe0f7; }
+/* "Question # N:" reads in white, like the reference, not the light-blue the
+   other bold spans in this bar use. */
+.svar-qbar b.svar-qnum { color: #fff; }
+.svar-note { border-left: 3px solid var(--svar-blue); background: var(--svar-band);
+  padding: 12px 16px; border-radius: 4px; }
+.svar-note li { margin: 4px 0; color: var(--svar-ink); }
+
+/* The black mic tile + "Record your response / Recording Time: N Sec". */
+.svar-record-head { display: flex; align-items: center; gap: 14px; justify-content: center; }
+.svar-mic-tile {
+  width: 56px; height: 56px; border-radius: 10px; background: #10151c;
+  display: flex; align-items: center; justify-content: center; color: #fff;
+}
+.svar-hint {
+  background: var(--svar-band); color: var(--svar-navy); border-radius: 6px;
+  padding: 12px 18px; text-align: center; font-style: italic; max-width: 40rem;
+}
+
+/* The big recording / thinking circle. */
+.svar-circle {
+  width: 156px; height: 156px; border-radius: 50%;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: #fff; text-align: center; margin: 2px auto;
+  box-shadow: 0 10px 30px rgba(30,58,107,.25);
+}
+.svar-circle--record { background: radial-gradient(120% 120% at 40% 30%, var(--svar-blue-2), var(--svar-blue)); }
+.svar-circle--think { background: #fff; color: var(--svar-navy);
+  border: 8px solid var(--svar-blue); }
+.svar-circle .n { font-size: 2.15rem; font-weight: 800; line-height: 1; }
+.svar-circle .lbl { font-size: .8rem; opacity: .95; margin-top: 4px; }
+.svar-circle--record.is-live { animation: svar-pulse 1.4s ease-in-out infinite; }
+@keyframes svar-pulse { 0%,100% { box-shadow: 0 10px 30px rgba(63,124,191,.25);} 50% { box-shadow: 0 10px 44px rgba(63,124,191,.55);} }
+
+.svar-btn {
+  background: var(--svar-navy); color: #fff; border-radius: 999px;
+  padding: 10px 26px; font-weight: 700; font-size: .95rem; border: none; cursor: pointer;
+}
+.svar-btn:hover { background: var(--svar-navy-2); }
+.svar-btn:disabled { opacity: .5; cursor: default; }
+.svar-btn--ghost { background: transparent; color: var(--svar-navy); border: 1.5px solid var(--svar-line); }
+
+/* Progress "N/M" top-right and the section-part strip. */
+.svar-progress { color: var(--svar-navy); font-weight: 700; }
+
+/* The listening waveform box. */
+.svar-wave-wrap { display: flex; align-items: center; gap: 18px; justify-content: center; }
+.svar-wave-you { text-align: center; color: var(--svar-ink); }
+.svar-wave {
+  background: #2b2f36; border-radius: 6px; padding: 14px 18px;
+  display: flex; align-items: flex-end; gap: 2px; height: 120px; min-width: 320px; max-width: 620px;
+}
+.svar-wave .titlebar { position: absolute; }
+.svar-wave i { width: 3px; background: #cfd6de; border-radius: 2px; opacity: .9; }
+
+/* Grammar "Type" / keyboard tile column. */
+.svar-type-tile { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--svar-ink); }
+.svar-input {
+  border: none; border-bottom: 2px solid var(--svar-navy); background: transparent;
+  font-size: 1.05rem; padding: 4px 8px; min-width: 160px; text-align: center; outline: none;
+}
+.svar-optrow {
+  display: flex; align-items: center; gap: 12px; padding: 12px 16px;
+  border: 1.5px solid var(--svar-line); border-radius: 8px; background: #fff;
+  cursor: pointer; width: 100%; text-align: left; font-size: 1rem; color: var(--svar-ink);
+}
+.svar-optrow.is-sel { border-color: var(--svar-navy); background: var(--svar-band); font-weight: 600; }
+.svar-radio { width: 18px; height: 18px; border-radius: 50%; border: 2px solid #94a3b8;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.svar-optrow.is-sel .svar-radio { border-color: var(--svar-navy); }
+.svar-radio .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--svar-navy); }
+
+/* --------------------------------------------------------------------------
+   Vendor skins: the same assessment shell, retinted.
+   The .svar block above defines the tokens; each skin only overrides them, so
+   layout, timers and controls are identical across every skinned format.
+   -------------------------------------------------------------------------- */
+
+/* TCS iON family (TCS / Infosys / Wipro company rounds): the brighter iON
+   blue, flat white cards, a solid blue section band with white text. */
+.svar.skin-ion {
+  --svar-navy: #1b5cab;
+  --svar-navy-2: #144a8f;
+  --svar-blue: #2f7fd1;
+  --svar-blue-2: #5b9be0;
+  --svar-band: #eaf2fb;
+  --svar-line: #cfe0f4;
+}
+.svar.skin-ion .svar-section-banner {
+  background: var(--svar-navy);
+  border-bottom-color: var(--svar-navy-2);
+}
+.svar.skin-ion .svar-section-banner h1 { color: #fff; }
+
+/* Mercer | Mettl (SpeechX): dark navy chrome, gold accent ring, white cards. */
+.svar.skin-mettl {
+  --svar-navy: #10265c;
+  --svar-navy-2: #0b1b45;
+  --svar-blue: #24408f;
+  --svar-blue-2: #3d5cb8;
+  --svar-band: #eef1f9;
+  --svar-line: #d4dcef;
+  --mettl-gold: #f0a500;
+}
+.svar.skin-mettl .svar-topbar {
+  background: var(--svar-navy); border-bottom: none;
+}
+.svar.skin-mettl .svar-topbar .svar-count,
+.svar.skin-mettl .svar-topbar .svar-timer { color: #fff !important; }
+.svar.skin-mettl .svar-progressbar > span { background: var(--mettl-gold); }
+.svar.skin-mettl .svar-circle--think {
+  border-color: var(--mettl-gold); color: var(--svar-navy);
+}
+
+/* Pearson Versant: teal on white, the halftone-dot motif, headphone cues. */
+.svar.skin-versant {
+  --svar-navy: #11838c;
+  --svar-navy-2: #0c6b73;
+  --svar-blue: #23a3ad;
+  --svar-blue-2: #4dbcc5;
+  --svar-band: #e8f6f7;
+  --svar-line: #c8e8ea;
+}
+.svar.skin-versant .runner-body {
+  /* The reference slides carry a teal halftone bloom in the lower right. */
+  background-image: radial-gradient(circle at 96% 88%,
+    color-mix(in srgb, var(--svar-blue) 22%, transparent) 0,
+    color-mix(in srgb, var(--svar-blue) 10%, transparent) 22%,
+    transparent 45%);
+}
+.svar.skin-versant .svar-section-banner {
+  background: transparent; border-bottom-color: var(--svar-navy);
+}
+
+/* Slim top bar for SVAR: a continuous whole-test count and the sitting timer,
+   in place of the app chrome -- the reference header is minimal, and the blue
+   section banner below already says which part you are in. */
+.svar-topbar {
+  display: flex; align-items: center; gap: 14px;
+  padding: 0 20px; height: 48px; flex-shrink: 0;
+  background: #fff; border-bottom: 1px solid var(--svar-line);
+}
+.svar-topbar .svar-count {
+  color: var(--svar-navy); font-weight: 800; font-size: .95rem; letter-spacing: .02em;
+  font-variant-numeric: tabular-nums;
+}
+.svar-topbar .svar-timer { font-variant-numeric: tabular-nums; font-weight: 700; }
+.svar-topbar .svar-owed { color: #b45309; font-weight: 700; font-size: .8rem; }
+/* One continuous fill over the whole 70-item sitting, not one bar per part. */
+.svar-progressbar { height: 4px; background: var(--svar-line); flex-shrink: 0; }
+.svar-progressbar > span {
+  display: block; height: 100%; background: var(--svar-navy); transition: width .3s ease;
+}

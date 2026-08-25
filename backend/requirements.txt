@@ -1,0 +1,37 @@
+fastapi>=0.115.6
+uvicorn[standard]>=0.34.0
+# Beanie ODM for MongoDB — the only database layer. No SQL, no PostgreSQL.
+beanie>=1.28
+motor>=3.5
+pymongo[srv]>=4.10
+# SQLAlchemy remains the in-process query-expression API consumed by
+# app.mongolayer; it does not install or connect to PostgreSQL.
+SQLAlchemy>=2.0,<2.1
+pydantic>=2.10
+pydantic-settings==2.7.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.20
+httpx==0.28.1
+pytest==8.3.4
+pytest-asyncio==0.25.0
+pytest-asyncio==0.25.0
+email-validator==2.2.0
+numpy==2.2.1
+requests==2.32.3
+
+# The speech engine lives in requirements-engine.txt, not here.
+#
+# Split because the two have very different costs: this file installs in
+# seconds and runs in a few hundred megabytes, while the engine pulls PyTorch
+# and needs gigabytes of RAM to hold its models. A deployment that cannot
+# afford the second can still run everything else.
+#
+# Installing only this file is a supported configuration, not a broken one.
+# The engine's imports are inside its providers, so the app starts, and each
+# affected dimension reports itself unscored with a reason rather than being
+# guessed at. `GET /healthz` says which tier is live.
+#
+#   pip install -r requirements.txt                      # Tier 0 only
+#   pip install -r requirements.txt -r requirements-engine.txt   # full
