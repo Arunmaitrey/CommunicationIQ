@@ -30,7 +30,7 @@ class User(Document):
     """An institution user: tenant admin, trainer, or student."""
 
     id: str = Field(default_factory=_uuid)
-    email: str = Indexed(unique=True)
+    email: str = Field(unique=True, index=True)
     full_name: str
     password_hash: str
     role: str = "student"
@@ -55,8 +55,8 @@ class ConsentRecord(Document):
     """Verifiable consent, captured before the first recording (STU-02, DPDP)."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    scope: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    scope: str = Field(default="", index=True)
     granted: bool = True
     notice_version: str = "1.0"
     notice_language: str = "en"
@@ -88,8 +88,8 @@ class Cohort(Document):
 
 class CohortMember(Document):
     id: str = Field(default_factory=_uuid)
-    cohort_id: str = Indexed()
-    user_id: str = Indexed()
+    cohort_id: str = Field(default="", index=True)
+    user_id: str = Field(default="", index=True)
     joined_at: datetime = Field(default_factory=_now)
 
     class Settings:
@@ -104,8 +104,8 @@ class Invitation(Document):
     """A link that lets one external person sit one assessment, once."""
 
     id: str = Field(default_factory=_uuid)
-    token: str = Indexed(unique=True)
-    profile_id: str = Indexed()
+    token: str = Field(unique=True, index=True)
+    profile_id: str = Field(default="", index=True)
     invited_name: str = ""
     invited_email: str = ""
     reference: str = ""
@@ -125,7 +125,7 @@ class SimulationProfile(Document):
     """A configured test: which sections, in what order, with what timing (SIM-01)."""
 
     id: str = Field(default_factory=_uuid)
-    code: str = Indexed()
+    code: str = Field(default="", index=True)
     name: str
     style: str = "diagnostic"
     company: str = ""
@@ -153,10 +153,10 @@ class ProfileSection(Document):
     """One section of a profile — a task type plus its pacing rules."""
 
     id: str = Field(default_factory=_uuid)
-    profile_id: str = Indexed()
+    profile_id: str = Field(default="", index=True)
     position: int = 1
     title: str
-    task_type: str = Indexed()
+    task_type: str = Field(default="", index=True)
     instructions: str = ""
     item_count: int = 5
     prep_seconds: int = 0
@@ -176,7 +176,7 @@ class TaskItem(Document):
     """One speaking item in the bank (CONTENT-01)."""
 
     id: str = Field(default_factory=_uuid)
-    task_type: str = Indexed()
+    task_type: str = Field(default="", index=True)
     prompt_text: str = ""
     prompt_audio_key: str = ""
     prompt_accent: str = "indian"
@@ -205,7 +205,7 @@ class QuizItem(Document):
     """MCQ / fill-in-the-blank / error-ID item (QUIZ-01)."""
 
     id: str = Field(default_factory=_uuid)
-    category: str = Indexed()
+    category: str = Field(default="", index=True)
     stem: str
     options: list = Field(default_factory=list)
     correct_index: int = 0
@@ -266,8 +266,8 @@ class WritingSubmissionRow(Document):
     """One piece of writing and what it scored."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    prompt_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    prompt_id: str = Field(default="", index=True)
     text: str = ""
     word_count: int = 0
     minutes_spent: int = 0
@@ -300,8 +300,8 @@ class ReadingAttempt(Document):
     """One student, one passage: how fast they read it and how much they took in."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    passage_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    passage_id: str = Field(default="", index=True)
     read_ms: int = 0
     words_per_minute: int | None = None
     correct: int = 0
@@ -318,8 +318,8 @@ class ListeningAttempt(Document):
     """One student, one passage, one sitting."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    passage_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    passage_id: str = Field(default="", index=True)
     plays_used: int = 0
     correct: int = 0
     total: int = 0
@@ -335,8 +335,8 @@ class Assignment(Document):
     """A profile assigned to a cohort with a deadline (TEN-06)."""
 
     id: str = Field(default_factory=_uuid)
-    cohort_id: str = Indexed()
-    profile_id: str = Indexed()
+    cohort_id: str = Field(default="", index=True)
+    profile_id: str = Field(default="", index=True)
     assigned_by: str | None = Field(default=None, index=True)
     mandatory: bool = True
     opens_at: datetime | None = None
@@ -356,8 +356,8 @@ class Attempt(Document):
     """One sitting of one profile by one student."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    profile_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    profile_id: str = Field(default="", index=True)
     assignment_id: str | None = Field(default=None, index=True)
     attempt_number: int = 1
     status: str = "created"
@@ -379,7 +379,7 @@ class Response(Document):
     """One item's worth of a student's attempt."""
 
     id: str = Field(default_factory=_uuid)
-    attempt_id: str = Indexed()
+    attempt_id: str = Field(default="", index=True)
     section_id: str | None = Field(default=None, index=True)
     item_id: str | None = Field(default=None, index=True)
     quiz_item_id: str | None = Field(default=None, index=True)
@@ -404,7 +404,7 @@ class ResponseAudio(Document):
     """The recording. Holds a storage *key*, never a filesystem path."""
 
     id: str = Field(default_factory=_uuid)
-    response_id: str = Indexed(unique=True)
+    response_id: str = Field(unique=True, index=True)
     storage_key: str
     mime_type: str = "audio/webm"
     bytes: int = 0
@@ -425,7 +425,7 @@ class FeatureRecord(Document):
     """Raw engine output for one response — transcript, timings, acoustics."""
 
     id: str = Field(default_factory=_uuid)
-    response_id: str = Indexed()
+    response_id: str = Field(default="", index=True)
     transcript: str = ""
     word_timings: list = Field(default_factory=list)
     speech_segments: list = Field(default_factory=list)
@@ -444,7 +444,7 @@ class SectionResult(Document):
     """One section of one attempt, scored and stored."""
 
     id: str = Field(default_factory=_uuid)
-    attempt_id: str = Indexed()
+    attempt_id: str = Field(default="", index=True)
     section_id: str = ""
     position: int = 0
     title: str = ""
@@ -468,9 +468,9 @@ class ScoreRecord(Document):
     """A score, and exactly what produced it."""
 
     id: str = Field(default_factory=_uuid)
-    attempt_id: str = Indexed()
+    attempt_id: str = Field(default="", index=True)
     response_id: str | None = Field(default=None, index=True)
-    dimension: str = Indexed()
+    dimension: str = Field(default="", index=True)
     score: float
     scale_min: float = 20
     scale_max: float = 80
@@ -495,8 +495,8 @@ class SkillMastery(Document):
     """Per-student, per-sub-skill mastery — the honest half of the progress UI."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    skill: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    skill: str = Field(default="", index=True)
     mastery: float = 0.0
     confidence: float = 0.0
     observations: int = 0
@@ -513,8 +513,8 @@ class Drill(Document):
     """One run through the fail → why → similar items → challenge → re-test loop."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    target_skill: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    target_skill: str = Field(default="", index=True)
     source: str = "auto"
     assigned_by: str | None = Field(default=None, index=True)
     origin_response_id: str | None = Field(default=None, index=True)
@@ -534,14 +534,14 @@ class MistakeBankEntry(Document):
     """A wrong answer on a spaced-repetition schedule (QUIZ-05)."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
     quiz_item_id: str | None = Field(default=None, index=True)
     task_item_id: str | None = Field(default=None, index=True)
     skill: str = ""
     times_wrong: int = 1
     times_right_since: int = 0
     interval_days: int = 1
-    due_at: datetime = Indexed(default_factory=_now)
+    due_at: datetime = Field(default_factory=_now, index=True)
     mastered: bool = False
     created_at: datetime = Field(default_factory=_now)
 
@@ -557,8 +557,8 @@ class XPLedger(Document):
     """Append-only XP record (NFR-15)."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    activity: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    activity: str = Field(default="", index=True)
     ref_type: str = ""
     ref_id: str = ""
     base_xp: int = 0
@@ -567,7 +567,7 @@ class XPLedger(Document):
     awarded_xp: int = 0
     cap_applied: str = ""
     target_skill: str = ""
-    at: datetime = Indexed(default_factory=_now)
+    at: datetime = Field(default_factory=_now, index=True)
 
     class Settings:
         name = "xp_ledger"
@@ -577,7 +577,7 @@ class StreakState(Document):
     """Current streak and freeze inventory (GAM-04/05)."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed(unique=True)
+    user_id: str = Field(unique=True, index=True)
     current_streak: int = 0
     best_streak: int = 0
     last_qualifying_day: date | None = None
@@ -595,9 +595,9 @@ class Quest(Document):
     """A daily or weekly objective built from the student's own weakest skill."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
     kind: str = "daily"
-    for_date: date = Indexed()
+    for_date: date = Field(default_factory=lambda: datetime.now(timezone.utc).date(), index=True)
     title: str
     description: str = ""
     target_skill: str = ""
@@ -617,7 +617,7 @@ class SeasonPlan(Document):
     """The countdown to a real drive date, and the weekly plan derived from it."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
     cohort_id: str | None = Field(default=None, index=True)
     drive_date: datetime | None = None
     starts_on: date
@@ -636,7 +636,7 @@ class Badge(Document):
     """Badge definition. Criteria are versioned so an earned badge stays meaningful."""
 
     id: str = Field(default_factory=_uuid)
-    code: str = Indexed(unique=True)
+    code: str = Field(unique=True, index=True)
     name: str
     description: str = ""
     category: str = "mastery"
@@ -650,8 +650,8 @@ class Badge(Document):
 
 class EarnedBadge(Document):
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    badge_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    badge_id: str = Field(default="", index=True)
     criteria_version: int = 1
     earned_at: datetime = Field(default_factory=_now)
 
@@ -663,9 +663,9 @@ class LeagueMembership(Document):
     """Weekly league placement (GAM-11) — opt-in, pseudonymous."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    week_start: date = Indexed()
-    group_key: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    week_start: date = Field(default_factory=lambda: datetime.now(timezone.utc).date(), index=True)
+    group_key: str = Field(default="", index=True)
     tier: str = "bronze"
     display_name: str = ""
     week_xp: int = 0
@@ -683,11 +683,11 @@ class EngagementEvent(Document):
     """Telemetry behind healthy-vs-hollow engagement analysis (PLAT-18)."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    event: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    event: str = Field(default="", index=True)
     payload: dict = Field(default_factory=dict)
     weakness_targeted: bool = False
-    at: datetime = Indexed(default_factory=_now)
+    at: datetime = Field(default_factory=_now, index=True)
 
     class Settings:
         name = "engagement_events"
@@ -697,7 +697,7 @@ class NotificationLog(Document):
     """Sent notifications, with the cap accounting that NOTIF-05 requires."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
+    user_id: str = Field(default="", index=True)
     channel: str = "in_app"
     category: str = "engagement"
     template: str = ""
@@ -705,7 +705,7 @@ class NotificationLog(Document):
     body: str = ""
     suppressed_reason: str = ""
     read_at: datetime | None = None
-    sent_at: datetime = Indexed(default_factory=_now)
+    sent_at: datetime = Field(default_factory=_now, index=True)
 
     class Settings:
         name = "notification_log"
@@ -715,8 +715,8 @@ class StudentFlag(Document):
     """Trainer's at-risk flag with a staff-visible note (TRN-03)."""
 
     id: str = Field(default_factory=_uuid)
-    user_id: str = Indexed()
-    raised_by: str = Indexed()
+    user_id: str = Field(default="", index=True)
+    raised_by: str = Field(default="", index=True)
     reason: str = "at_risk"
     note: str = ""
     auto_suggested: bool = False
@@ -736,7 +736,7 @@ class AttemptNarration(Document):
     """The AI explanation of one finished attempt — and its own durable job."""
 
     id: str = Field(default_factory=_uuid)
-    attempt_id: str = Indexed(unique=True)
+    attempt_id: str = Field(unique=True, index=True)
     status: str = "pending"
     attempt_count: int = 0
     next_retry_at: datetime | None = Field(default=None, index=True)

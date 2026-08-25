@@ -467,176 +467,180 @@ async def seed_platform(reset: bool) -> dict:
                 await db.drop_collection(col_name)
     await init_store()
 
-    async with platform_sessionmaker()() as s:
-        if (await s.execute(select(Plan))).scalars().first() is not None and not reset:
-            print("platform already seeded — skipping")
-            return {}
+    # Check if already seeded
+    if await Plan.find().first_or_none() is not None and not reset:
+        print("platform already seeded — skipping")
+        return {}
 
-        plans = [
-            Plan(code="pilot", name="Pilot (free)", billing_model="pilot",
-                 price_per_seat=0, attempt_allowance=3,
-                 features={"gamification": True, "leagues": False, "sso": False}),
-            Plan(code="seat_standard", name="Standard (per seat)", billing_model="per_seat",
-                 price_per_seat=450, attempt_allowance=5,
-                 features={"gamification": True, "leagues": True, "sso": False}),
-            Plan(code="institution_flat", name="Institution (flat)", billing_model="flat",
-                 price_flat=250000, attempt_allowance=8,
-                 features={"gamification": True, "leagues": True, "sso": True}),
-        ]
-        s.add_all(plans)
-        await s.flush()
+    plans = [
+        Plan(code="pilot", name="Pilot (free)", billing_model="pilot",
+             price_per_seat=0, attempt_allowance=3,
+             features={"gamification": True, "leagues": False, "sso": False}),
+        Plan(code="seat_standard", name="Standard (per seat)", billing_model="per_seat",
+             price_per_seat=450, attempt_allowance=5,
+             features={"gamification": True, "leagues": True, "sso": False}),
+        Plan(code="institution_flat", name="Institution (flat)", billing_model="flat",
+             price_flat=250000, attempt_allowance=8,
+             features={"gamification": True, "leagues": True, "sso": True}),
+    ]
+    await Plan.insert_many(plans)
 
-        staff = [
-            PlatformUser(email="admin@saashx.ai", full_name="Platform Super Admin",
-                         password_hash=hash_password(DEMO_PASSWORD), role="super_admin",
-                         mfa_enabled=True),
-            PlatformUser(email="finance@saashx.ai", full_name="Finance Operator",
-                         password_hash=hash_password(DEMO_PASSWORD), role="finance"),
-            PlatformUser(email="content@saashx.ai", full_name="Content Lead",
-                         password_hash=hash_password(DEMO_PASSWORD), role="content"),
-        ]
-        s.add_all(staff)
+    staff = [
+        PlatformUser(email="admin@saashx.ai", full_name="Platform Super Admin",
+                     password_hash=hash_password(DEMO_PASSWORD), role="super_admin",
+                     mfa_enabled=True),
+        PlatformUser(email="finance@saashx.ai", full_name="Finance Operator",
+                     password_hash=hash_password(DEMO_PASSWORD), role="finance"),
+        PlatformUser(email="content@saashx.ai", full_name="Content Lead",
+                     password_hash=hash_password(DEMO_PASSWORD), role="content"),
+    ]
+    await PlatformUser.insert_many(staff)
 
-        # The game economy, seeded with defaults rather than hard-coded anywhere.
-        s.add(GamificationConfig(
-            tenant_id=None,
-            xp_table={"attempt_completed": 120, "drill_completed": 60,
-                      "quiz_completed": 25, "quest_completed": 80,
-                      "streak_milestone": 150},
-            difficulty_multipliers={"below_ability": 0.6, "at_ability": 1.0,
-                                    "above_ability": 1.4},
-            weakness_multiplier=1.5,
-            streak_rules={"qualifies_on": "daily_quest_completed",
-                          "milestones": [7, 14, 30, 60, 90]},
-            free_freezes_per_month=2,
-            quiz_xp_cap_percent=40,
-            leagues_enabled=True,
-            max_engagement_notifications_per_day=1,
-        ))
+    # The game economy, seeded with defaults rather than hard-coded anywhere.
+    await GamificationConfig(
+        tenant_id=None,
+        xp_table={"attempt_completed": 120, "drill_completed": 60,
+                  "quiz_completed": 25, "quest_completed": 80,
+                  "streak_milestone": 150},
+        difficulty_multipliers={"below_ability": 0.6, "at_ability": 1.0,
+                                "above_ability": 1.4},
+        weakness_multiplier=1.5,
+        streak_rules={"qualifies_on": "daily_quest_completed",
+                      "milestones": [7, 14, 30, 60, 90]},
+        free_freezes_per_month=2,
+        quiz_xp_cap_percent=40,
+        leagues_enabled=True,
+        max_engagement_notifications_per_day=1,
+    ).insert()
 
-        # Provider registry. Rows whose implementation does not exist yet stay
-        # inactive, so the console shows the real state rather than an
-        # optimistic one. VAD and fluency are live as of M1.
-        registry = [
-            # No Tier-0 ASR is registered on purpose. Transcription cannot be
-            # faked from an energy envelope, and a provider that returned the
-            # reference text would inflate every scripted score it touched.
-            ProviderRegistry(capability="asr", provider_key="faster_whisper",
-                             name="faster-whisper (Tier 1, local)", tier=1, version="0.1.0",
-                             entrypoint="app.engine.providers.tier1.asr:FasterWhisperASR",
-                             active=True),
-            ProviderRegistry(capability="vad", provider_key="energy_vad",
-                             name="Energy-threshold VAD (Tier 0)", tier=0, version="0.1.0",
-                             entrypoint="app.engine.providers.tier0.vad:EnergyVAD",
-                             active=True),
-            ProviderRegistry(capability="vad", provider_key="silero_vad",
-                             name="Silero VAD (Tier 1)", tier=1, version="0.1.0",
-                             entrypoint="app.engine.providers.tier1.vad:SileroVAD",
-                             active=True),
-            ProviderRegistry(capability="accuracy", provider_key="reference_match",
-                             name="Reference word match (Tier 1)", tier=1, version="0.1.0",
-                             entrypoint="app.engine.providers.tier1.accuracy:ReferenceMatchAccuracy",
-                             active=True),
-            ProviderRegistry(capability="disfluency", provider_key="transcript_disfluency",
-                             name="Transcript disfluency (Tier 1)", tier=1, version="0.1.0",
-                             entrypoint="app.engine.providers.tier1.disfluency:TranscriptDisfluency",
-                             active=True),
-            ProviderRegistry(capability="grammar", provider_key="common_error_rules",
-                             name="Common error patterns (Tier 1)", tier=1, version="0.1.0",
-                             entrypoint="app.engine.providers.tier1.grammar:CommonErrorGrammar",
-                             active=True),
-            ProviderRegistry(capability="content_relevance", provider_key="rubric_coverage",
-                             name="Rubric key-point coverage (Tier 1)", tier=1, version="0.1.0",
-                             entrypoint="app.engine.providers.tier1.relevance:RubricRelevance",
-                             active=True),
-            ProviderRegistry(capability="pronunciation", provider_key="wav2vec2_gop",
-                             name="wav2vec2 goodness of pronunciation (Tier 1)",
-                             tier=1, version="0.1.0",
-                             entrypoint="app.engine.providers.tier1.pronunciation:Wav2VecGOP",
-                             active=True),
-            ProviderRegistry(capability="fluency", provider_key="feature_fluency",
-                             name="Feature-based fluency (Tier 0)", tier=0, version="0.1.0",
-                             entrypoint="app.engine.providers.tier0.fluency:FeatureFluency",
-                             active=True),
-            ProviderRegistry(capability="storage", provider_key="local_tmp",
-                             name="Local working storage (tmp/)", tier=0, version="0.1.0",
-                             entrypoint="app.storage.local:LocalTempStorage",
-                             active=True),
-            ProviderRegistry(capability="notification", provider_key="in_app",
-                             name="In-app notifications", tier=0, version="0.1.0",
-                             entrypoint="app.engine.providers.tier0.notify:InAppNotifier",
-                             active=False),
-            ProviderRegistry(capability="payment", provider_key="razorpay",
-                             name="Razorpay", tier=2, version="0.1.0",
-                             entrypoint="app.engine.providers.tier2.razorpay:RazorpayGateway",
-                             active=False),
-        ]
-        s.add_all(registry)
-        await s.flush()
+    # Provider registry. Rows whose implementation does not exist yet stay
+    # inactive, so the console shows the real state rather than an
+    # optimistic one. VAD and fluency are live as of M1.
+    registry = [
+        # No Tier-0 ASR is registered on purpose. Transcription cannot be
+        # faked from an energy envelope, and a provider that returned the
+        # reference text would inflate every scripted score it touched.
+        ProviderRegistry(capability="asr", provider_key="faster_whisper",
+                         name="faster-whisper (Tier 1, local)", tier=1, version="0.1.0",
+                         entrypoint="app.engine.providers.tier1.asr:FasterWhisperASR",
+                         active=True),
+        ProviderRegistry(capability="vad", provider_key="energy_vad",
+                         name="Energy-threshold VAD (Tier 0)", tier=0, version="0.1.0",
+                         entrypoint="app.engine.providers.tier0.vad:EnergyVAD",
+                         active=True),
+        ProviderRegistry(capability="vad", provider_key="silero_vad",
+                         name="Silero VAD (Tier 1)", tier=1, version="0.1.0",
+                         entrypoint="app.engine.providers.tier1.vad:SileroVAD",
+                         active=True),
+        ProviderRegistry(capability="accuracy", provider_key="reference_match",
+                         name="Reference word match (Tier 1)", tier=1, version="0.1.0",
+                         entrypoint="app.engine.providers.tier1.accuracy:ReferenceMatchAccuracy",
+                         active=True),
+        ProviderRegistry(capability="disfluency", provider_key="transcript_disfluency",
+                         name="Transcript disfluency (Tier 1)", tier=1, version="0.1.0",
+                         entrypoint="app.engine.providers.tier1.disfluency:TranscriptDisfluency",
+                         active=True),
+        ProviderRegistry(capability="grammar", provider_key="common_error_rules",
+                         name="Common error patterns (Tier 1)", tier=1, version="0.1.0",
+                         entrypoint="app.engine.providers.tier1.grammar:CommonErrorGrammar",
+                         active=True),
+        ProviderRegistry(capability="content_relevance", provider_key="rubric_coverage",
+                         name="Rubric key-point coverage (Tier 1)", tier=1, version="0.1.0",
+                         entrypoint="app.engine.providers.tier1.relevance:RubricRelevance",
+                         active=True),
+        ProviderRegistry(capability="pronunciation", provider_key="wav2vec2_gop",
+                         name="wav2vec2 goodness of pronunciation (Tier 1)",
+                         tier=1, version="0.1.0",
+                         entrypoint="app.engine.providers.tier1.pronunciation:Wav2VecGOP",
+                         active=True),
+        ProviderRegistry(capability="fluency", provider_key="feature_fluency",
+                         name="Feature-based fluency (Tier 0)", tier=0, version="0.1.0",
+                         entrypoint="app.engine.providers.tier0.fluency:FeatureFluency",
+                         active=True),
+        ProviderRegistry(capability="storage", provider_key="local_tmp",
+                         name="Local working storage (tmp/)", tier=0, version="0.1.0",
+                         entrypoint="app.storage.local:LocalTempStorage",
+                         active=True),
+        ProviderRegistry(capability="notification", provider_key="in_app",
+                         name="In-app notifications", tier=0, version="0.1.0",
+                         entrypoint="app.engine.providers.tier0.notify:InAppNotifier",
+                         active=False),
+        ProviderRegistry(capability="payment", provider_key="razorpay",
+                         name="Razorpay", tier=2, version="0.1.0",
+                         entrypoint="app.engine.providers.tier2.razorpay:RazorpayGateway",
+                         active=False),
+    ]
+    await ProviderRegistry.insert_many(registry)
 
-        by_key = {r.provider_key: r for r in registry}
-        s.add_all([
-            ProviderConfig(capability="storage", tenant_id=None,
-                           primary_provider_id=by_key["local_tmp"].id,
-                           mode="live", timeout_ms=5000),
-            # Tier 1 leads; Tier 0 catches it. This is the first place the
-            # fallback in ENG-19 is doing real work rather than being
-            # available: if the speech model will not load on a given host,
-            # latency and pause structure are still measured.
-            ProviderConfig(capability="vad", tenant_id=None,
-                           primary_provider_id=by_key["silero_vad"].id,
-                           fallback_provider_id=by_key["energy_vad"].id,
-                           mode="live", timeout_ms=15000),
-            ProviderConfig(capability="asr", tenant_id=None,
-                           primary_provider_id=by_key["faster_whisper"].id,
-                           mode="live", timeout_ms=60000),
-            # Feature-based fluency has no Tier-1 replacement yet, and does not
-            # need one: it reads the VAD output, which just got better.
-            ProviderConfig(capability="fluency", tenant_id=None,
-                           primary_provider_id=by_key["feature_fluency"].id,
-                           mode="live", timeout_ms=5000),
-            ProviderConfig(capability="accuracy", tenant_id=None,
-                           primary_provider_id=by_key["reference_match"].id,
-                           mode="live", timeout_ms=5000),
-            ProviderConfig(capability="disfluency", tenant_id=None,
-                           primary_provider_id=by_key["transcript_disfluency"].id,
-                           mode="live", timeout_ms=5000),
-            ProviderConfig(capability="grammar", tenant_id=None,
-                           primary_provider_id=by_key["common_error_rules"].id,
-                           mode="live", timeout_ms=5000),
-            ProviderConfig(capability="content_relevance", tenant_id=None,
-                           primary_provider_id=by_key["rubric_coverage"].id,
-                           mode="live", timeout_ms=5000),
-            ProviderConfig(capability="pronunciation", tenant_id=None,
-                           primary_provider_id=by_key["wav2vec2_gop"].id,
-                           mode="live", timeout_ms=30000),
-        ])
+    by_key = {r.provider_key: r for r in registry}
+    await ProviderConfig.insert_many([
+        ProviderConfig(capability="storage", tenant_id=None,
+                       primary_provider_id=by_key["local_tmp"].id,
+                       mode="live", timeout_ms=5000),
+        # Tier 1 leads; Tier 0 catches it. This is the first place the
+        # fallback in ENG-19 is doing real work rather than being
+        # available: if the speech model will not load on a given host,
+        # latency and pause structure are still measured.
+        ProviderConfig(capability="vad", tenant_id=None,
+                       primary_provider_id=by_key["silero_vad"].id,
+                       fallback_provider_id=by_key["energy_vad"].id,
+                       mode="live", timeout_ms=15000),
+        ProviderConfig(capability="asr", tenant_id=None,
+                       primary_provider_id=by_key["faster_whisper"].id,
+                       mode="live", timeout_ms=60000),
+        # Feature-based fluency has no Tier-1 replacement yet, and does not
+        # need one: it reads the VAD output, which just got better.
+        ProviderConfig(capability="fluency", tenant_id=None,
+                       primary_provider_id=by_key["feature_fluency"].id,
+                       mode="live", timeout_ms=5000),
+        ProviderConfig(capability="accuracy", tenant_id=None,
+                       primary_provider_id=by_key["reference_match"].id,
+                       mode="live", timeout_ms=5000),
+        ProviderConfig(capability="disfluency", tenant_id=None,
+                       primary_provider_id=by_key["transcript_disfluency"].id,
+                       mode="live", timeout_ms=5000),
+        ProviderConfig(capability="grammar", tenant_id=None,
+                       primary_provider_id=by_key["common_error_rules"].id,
+                       mode="live", timeout_ms=5000),
+        ProviderConfig(capability="content_relevance", tenant_id=None,
+                       primary_provider_id=by_key["rubric_coverage"].id,
+                       mode="live", timeout_ms=5000),
+        ProviderConfig(capability="pronunciation", tenant_id=None,
+                       primary_provider_id=by_key["wav2vec2_gop"].id,
+                       mode="live", timeout_ms=30000),
+    ])
 
-        tenants = [
-            Tenant(name="St Mary's Institute of Technology", slug="stmarys",
-                   status="active", plan_id=plans[1].id, seat_limit=250,
-                   season_start=datetime.now(timezone.utc) + timedelta(days=52),
-                   season_end=datetime.now(timezone.utc) + timedelta(days=110),
-                   branding={"theme": "blue"}),
-            Tenant(name="Vignan Degree College", slug="vignan",
-                   status="trial", plan_id=plans[0].id, seat_limit=60,
-                   season_start=datetime.now(timezone.utc) + timedelta(days=88),
-                   branding={"theme": "royal-blue"}),
-        ]
-        s.add_all(tenants)
-        await s.flush()
+    tenants = [
+        Tenant(name="St Mary's Institute of Technology", slug="stmarys",
+               status="active", plan_id=plans[1].id, seat_limit=250,
+               season_start=datetime.now(timezone.utc) + timedelta(days=52),
+               season_end=datetime.now(timezone.utc) + timedelta(days=110),
+               branding={"theme": "blue"}),
+        Tenant(name="Vignan Degree College", slug="vignan",
+               status="trial", plan_id=plans[0].id, seat_limit=60,
+               season_start=datetime.now(timezone.utc) + timedelta(days=88),
+               branding={"theme": "royal-blue"}),
+    ]
+    await Tenant.insert_many(tenants)
 
-        for t in tenants:
-            s.add(Subscription(tenant_id=t.id, plan_id=t.plan_id or plans[0].id,
-                               status="active" if t.status == "active" else "trialing",
-                               seats=t.seat_limit))
-            s.add(AuditLog(actor_type="platform_user", actor_id=staff[0].id,
-                           actor_label=staff[0].email, tenant_id=t.id,
-                           action="tenant.created", entity="Tenant", entity_id=t.id,
-                           after={"name": t.name, "slug": t.slug}))
+    # Create subscriptions and audit logs for tenants
+    subs = []
+    audit_logs = []
+    for t in tenants:
+        subs.append(Subscription(tenant_id=t.id, plan_id=t.plan_id or plans[0].id,
+                       status="active" if t.status == "active" else "trialing",
+                       seats=t.seat_limit))
+        audit_logs.append(AuditLog(actor_type="platform_user", actor_id=staff[0].id,
+                       actor_label=staff[0].email, tenant_id=t.id,
+                       action="tenant.created", entity="Tenant", entity_id=t.id,
+                       after={"name": t.name, "slug": t.slug}))
 
-        await s.commit()
-        return {t.slug: t.id for t in tenants}
+    if subs:
+        await Subscription.insert_many(subs)
+    if audit_logs:
+        await AuditLog.insert_many(audit_logs)
+
+    return {t.slug: t.id for t in tenants}
 
 
 # --------------------------------------------------------------------------

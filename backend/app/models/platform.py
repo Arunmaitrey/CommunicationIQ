@@ -29,7 +29,7 @@ class Plan(Document):
     """Versioned pricing template (PLAT-03)."""
 
     id: str = Field(default_factory=_uuid)
-    code: str = Indexed()
+    code: str = Field(default="", index=True)
     name: str
     version: int = 1
     # per_seat | flat | usage | pilot
@@ -73,7 +73,7 @@ class Tenant(Document):
 
     id: str = Field(default_factory=_uuid)
     name: str
-    slug: str = Indexed(unique=True)
+    slug: str = Field(unique=True, index=True)
     tenant_type: str = "engineering_college"
     # active | trial | suspended | offboarding | closed
     status: str = "trial"
@@ -95,7 +95,7 @@ class Subscription(Document):
     __tablename__ = "subscriptions"
 
     id: str = Field(default_factory=_uuid)
-    tenant_id: str = Indexed()
+    tenant_id: str = Field(default="", index=True)
     plan_id: str
     status: str = "trialing"
     seats: int = 0
@@ -112,8 +112,8 @@ class Invoice(Document):
     """GST-compliant invoice record (BILL-04)."""
 
     id: str = Field(default_factory=_uuid)
-    tenant_id: str = Indexed()
-    number: str = Indexed(unique=True)
+    tenant_id: str = Field(default="", index=True)
+    number: str = Field(unique=True, index=True)
     period_start: datetime
     period_end: datetime
     subtotal: float = 0
@@ -137,7 +137,7 @@ class PlatformUser(Document):
     """Internal staff account (PLAT-16)."""
 
     id: str = Field(default_factory=_uuid)
-    email: str = Indexed(unique=True)
+    email: str = Field(unique=True, index=True)
     full_name: str
     password_hash: str
     role: str = "support"
@@ -154,9 +154,9 @@ class InvitationDirectory(Document):
     """Redemption lookup: token -> which institution to open a session against."""
 
     id: str = Field(default_factory=_uuid)
-    token: str = Indexed(unique=True)
-    tenant_id: str = Indexed()
-    tenant_slug: str = Indexed()
+    token: str = Field(unique=True, index=True)
+    tenant_id: str = Field(default="", index=True)
+    tenant_slug: str = Field(default="", index=True)
     created_at: datetime = Field(default_factory=_now)
 
     class Settings:
@@ -167,9 +167,9 @@ class TenantUserDirectory(Document):
     """Sign-in lookup: email -> which institution to open a session against."""
 
     id: str = Field(default_factory=_uuid)
-    email: str = Indexed(unique=True)
-    tenant_id: str = Indexed()
-    tenant_slug: str = Indexed()
+    email: str = Field(unique=True, index=True)
+    tenant_id: str = Field(default="", index=True)
+    tenant_slug: str = Field(default="", index=True)
     active: bool = True
     created_at: datetime = Field(default_factory=_now)
 
@@ -185,7 +185,7 @@ class ProviderRegistry(Document):
     """One registered implementation of one capability."""
 
     id: str = Field(default_factory=_uuid)
-    capability: str = Indexed()
+    capability: str = Field(default="", index=True)
     provider_key: str
     name: str
     tier: int = 0
@@ -203,7 +203,7 @@ class ProviderConfig(Document):
     """Which provider serves a capability, for whom, and what happens on failure."""
 
     id: str = Field(default_factory=_uuid)
-    capability: str = Indexed()
+    capability: str = Field(default="", index=True)
     tenant_id: str | None = Field(default=None, index=True)
     primary_provider_id: str
     fallback_provider_id: str | None = None
@@ -221,7 +221,7 @@ class ModelVersion(Document):
     """A promotable version of a model behind a provider."""
 
     id: str = Field(default_factory=_uuid)
-    provider_id: str = Indexed()
+    provider_id: str = Field(default="", index=True)
     version: str
     notes: str = ""
     eval_metrics: dict = Field(default_factory=dict)
@@ -236,8 +236,8 @@ class ProviderCall(Document):
     """Per-call telemetry feeding the provider performance dashboard (PLAT-13)."""
 
     id: str = Field(default_factory=_uuid)
-    capability: str = Indexed()
-    provider_id: str = Indexed()
+    capability: str = Field(default="", index=True)
+    provider_id: str = Field(default="", index=True)
     provider_version: str = ""
     tenant_id: str | None = Field(default=None, index=True)
     latency_ms: int = 0
@@ -276,7 +276,7 @@ class GamificationConfig(Document):
 
 class FeatureFlag(Document):
     id: str = Field(default_factory=_uuid)
-    key: str = Indexed()
+    key: str = Field(default="", index=True)
     tenant_id: str | None = Field(default=None, index=True)
     enabled: bool = False
     description: str = ""
@@ -293,7 +293,7 @@ class AuditLog(Document):
     actor_id: str = ""
     actor_label: str = ""
     tenant_id: str | None = Field(default=None, index=True)
-    action: str = Indexed()
+    action: str = Field(default="", index=True)
     entity: str = ""
     entity_id: str = ""
     before: dict = Field(default_factory=dict)
@@ -308,7 +308,7 @@ class PlatformSetting(Document):
     """Operator-editable configuration, one JSON document per key."""
 
     id: str = Field(default_factory=_uuid)
-    key: str = Indexed(unique=True)
+    key: str = Field(unique=True, index=True)
     value: dict = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=_now)
 

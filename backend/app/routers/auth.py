@@ -67,7 +67,9 @@ async def login(body: LoginRequest) -> LoginResponse:
                             "This institution's access is not currently active")
 
     tenant_models = await ensure_tenant_models(tenant.slug)
+    print(f"DEBUG LOGIN: tenant_slug={tenant.slug}, models.User={tenant_models.User}")
     user = await tenant_models.User.find(tenant_models.User.email == email).first_or_none()
+    print(f"DEBUG LOGIN: user_found={user is not None}, user_active={user.active if user else None}, password_verify={verify_password(body.password, user.password_hash) if user else None}")
     if user is None or not user.active or not verify_password(body.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _REJECT)
     user.last_login_at = datetime.now(timezone.utc)

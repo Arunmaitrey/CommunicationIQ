@@ -10,22 +10,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from app.config import settings
 
-_pwd = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(raw: str) -> str:
-    return _pwd.hash(raw)
+    return bcrypt.hashpw(raw.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(raw: str, hashed: str) -> bool:
     try:
-        return _pwd.verify(raw, hashed)
-    except ValueError:
+        return bcrypt.checkpw(raw.encode(), hashed.encode())
+    except (ValueError, TypeError):
         return False
 
 
@@ -37,7 +35,6 @@ class TokenPrincipal:
     email: str
     full_name: str
     role: str
-    # "platform" | "tenant"
     scope: str
     tenant_id: str | None = None
     tenant_slug: str | None = None
@@ -74,8 +71,6 @@ def decode_token(token: str) -> TokenPrincipal | None:
 
     scope = claims.get("scope")
     slug = claims.get("tslug")
-    # A tenant-scoped token without a slug is not a degraded token, it is a
-    # broken one — there is no default institution to fall back to.
     if scope == "tenant" and not slug:
         return None
 

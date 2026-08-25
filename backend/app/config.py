@@ -142,7 +142,7 @@ class Settings(BaseSettings):
     narration_lease_seconds: int = 120
     # The in-process recovery sweeper. It is the restart-safety net; the
     # BackgroundTask kick is the fast path. Disable to run the CLI worker only.
-    narration_worker_enabled: bool = True
+    narration_worker_enabled: bool = False
     narration_worker_interval_s: float = 15.0
     # How many due jobs one sweeper tick claims per tenant.
     narration_worker_batch: int = 20
