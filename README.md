@@ -121,13 +121,46 @@ cd backend
 python -m app.seed --reset
 ```
 
-### Default Accounts
+### Login Credentials
+
+**Platform Staff:**
+
+| Email | Password | Role | Scope |
+|-------|----------|------|-------|
+| admin@saashx.ai | Password123! | super_admin | platform |
+| finance@saashx.ai | Password123! | finance | platform |
+| content@saashx.ai | Password123! | content | platform |
+
+**St Mary's Institute (tenant: stmarys):**
 
 | Email | Password | Role |
 |-------|----------|------|
-| admin@saashx.ai | Password123! | Platform super_admin |
-| finance@saashx.ai | Password123! | Platform finance |
-| content@saashx.ai | Password123! | Platform content |
+| admin@stmarys.edu | Password123! | admin |
+| trainer@stmarys.edu | Password123! | trainer |
+| student@stmarys.edu | Password123! | student |
+| priya@stmarys.edu | Password123! | student |
+| rahul@stmarys.edu | Password123! | student |
+| anita@stmarys.edu | Password123! | student |
+
+**Vignan University (tenant: vignan):**
+
+| Email | Password | Role |
+|-------|----------|------|
+| admin@vignan.edu | Password123! | admin |
+| trainer@vignan.edu | Password123! | trainer |
+| student@vignan.edu | Password123! | student |
+| priya@vignan.edu | Password123! | student |
+| rahul@vignan.edu | Password123! | student |
+| anita@vignan.edu | Password123! | student |
+
+### Audit Logging
+
+Every login and write operation (user create/update, cohort changes, profile modifications, etc.) is recorded in the `audit_log` collection. Platform super_admins can view the full audit trail at `/platform/audit`. Each entry records:
+- **Actor**: who performed the action
+- **Action**: what was done (e.g., `auth.login`, `user.created`)
+- **Entity**: which model was affected
+- **Timestamp**: when it happened
+- **Before/After**: the state change
 
 ## Frontend Pages
 

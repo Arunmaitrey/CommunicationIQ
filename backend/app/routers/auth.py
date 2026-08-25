@@ -17,6 +17,7 @@ from app.models.platform import PlatformUser, Tenant, TenantUserDirectory
 from app.models.tenant import User
 from app.schemas import (ChangePasswordRequest, LoginRequest, LoginResponse,
                           SessionUser)
+from app import audit
 from app.security import (TokenPrincipal, create_token, hash_password,
                           verify_password)
 
@@ -49,6 +50,8 @@ async def login(body: LoginRequest) -> LoginResponse:
             user_id=staff.id, email=staff.email, full_name=staff.full_name,
             role=staff.role, scope="platform",
         )
+        await audit.record(principal, "auth.login", entity="PlatformUser",
+                           entity_id=staff.id)
         return LoginResponse(
             token=create_token(principal),
             user=SessionUser(
@@ -67,9 +70,7 @@ async def login(body: LoginRequest) -> LoginResponse:
                             "This institution's access is not currently active")
 
     tenant_models = await ensure_tenant_models(tenant.slug)
-    print(f"DEBUG LOGIN: tenant_slug={tenant.slug}, models.User={tenant_models.User}")
     user = await tenant_models.User.find(tenant_models.User.email == email).first_or_none()
-    print(f"DEBUG LOGIN: user_found={user is not None}, user_active={user.active if user else None}, password_verify={verify_password(body.password, user.password_hash) if user else None}")
     if user is None or not user.active or not verify_password(body.password, user.password_hash):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _REJECT)
     user.last_login_at = datetime.now(timezone.utc)
@@ -80,6 +81,8 @@ async def login(body: LoginRequest) -> LoginResponse:
         role=user.role, scope="tenant",
         tenant_id=tenant.id, tenant_slug=tenant.slug,
     )
+    await audit.record(principal, "auth.login", entity="User",
+                       entity_id=user.id, tenant_id=tenant.id)
     return LoginResponse(
         token=create_token(principal),
         user=SessionUser(
