@@ -120,7 +120,7 @@ async def momentum(principal: Principal,
         In(models.User.id, user_ids or [""]),
         models.User.role == "student").to_list()}
 
-    coll = models.Attempt.get_motor_collection()
+    coll = models.Attempt.get_pymongo_collection()
     activity_docs = await coll.aggregate([
         {"$match": {"user_id": {"$in": user_ids or [""]}}},
         {"$group": {"_id": "$user_id", "count": {"$sum": 1},

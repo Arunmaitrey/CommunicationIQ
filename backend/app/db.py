@@ -88,12 +88,8 @@ async def ensure_tenant_models(slug: str) -> SimpleNamespace:
             return cached
         from app.models.tenant import TENANT_DOCUMENTS
         db = tenant_db(slug)
-        classes = {
-            base.__name__: type(base.__name__, (base,), {})
-            for base in TENANT_DOCUMENTS
-        }
-        await init_beanie(database=db, document_models=list(classes.values()))
-        bundle = SimpleNamespace(**classes)
+        await init_beanie(database=db, document_models=list(TENANT_DOCUMENTS))
+        bundle = SimpleNamespace(**{cls.__name__: cls for cls in TENANT_DOCUMENTS})
         _tenant_bundles[slug] = bundle
         return bundle
 
@@ -107,31 +103,13 @@ def get_tenant_models(slug: str) -> SimpleNamespace:
 # Platform models accessor
 # ---------------------------------------------------------------------------
 
-_client_inited = False
-
-
-async def init_mongo() -> None:
-    """Ping and register the control-plane documents. Idempotent.
-
-    Raising here is tolerated by the caller (startup keeps serving), but the
-    control models will be unusable until a connection is available.
-    """
-    global _client_inited
-    if _client_inited:
-        return
-    await client.admin.command("ping")
-    # Import here to avoid circular imports
-    from app.models.platform import CONTROL_DOCUMENTS
-    await init_beanie(database=control_db(), document_models=CONTROL_DOCUMENTS)
-    global _client_inited
-    _client_inited = True
-
-
 async def ensure_platform_models() -> SimpleNamespace:
-    """Return a SimpleNamespace of control-plane Document classes."""
+    """Return a SimpleNamespace of control-plane Document classes.
+    
+    Control plane models are already registered with Beanie by init_mongo().
+    This function just wraps them in a namespace for backward compatibility.
+    """
     from app.models.platform import CONTROL_DOCUMENTS
-    # Ensure models are registered with Beanie (idempotent)
-    await init_beanie(database=control_db(), document_models=CONTROL_DOCUMENTS)
     return SimpleNamespace(**{cls.__name__: cls for cls in CONTROL_DOCUMENTS})
 
 
@@ -600,6 +578,7 @@ async def get_tenant_session(slug: str) -> AsyncIterator[Session]:
 
 async def get_platform_bundle() -> SimpleNamespace:
     """Get the control-plane Document bundle directly (for non-session code)."""
+    await init_mongo()
     return await ensure_platform_models()
 
 

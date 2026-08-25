@@ -37,7 +37,7 @@ def _label(point) -> str:
 
 
 async def _best_scores(models, user_id: str) -> dict[str, float]:
-    coll = models.WritingSubmissionRow.get_motor_collection()
+    coll = models.WritingSubmissionRow.get_pymongo_collection()
     cursor = coll.aggregate([
         {"$match": {"user_id": user_id, "overall": {"$ne": None}}},
         {"$group": {"_id": "$prompt_id", "max": {"$max": "$overall"}}},

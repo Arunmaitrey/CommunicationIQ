@@ -27,6 +27,7 @@ from app.deps import Principal, require_platform
 from app.engine.contracts import Capability
 from app.engine.registry import clear_provider_cache
 from app.models.platform import (GamificationConfig, Invoice, Plan,
+                                 TENANT_TYPES,
                                  ProviderConfig, ProviderRegistry, Subscription,
                                  Tenant, TenantUserDirectory)
 from app.provisioning import create_tenant_schema, validate_slug

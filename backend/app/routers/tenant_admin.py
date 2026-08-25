@@ -27,7 +27,7 @@ async def overview(principal: Principal, models: TenantModels) -> TenantOverview
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Institution not found")
     plan = await Plan.get(tenant.plan_id) if tenant.plan_id else None
 
-    role_docs = await models.User.get_motor_collection().aggregate([
+    role_docs = await models.User.get_pymongo_collection().aggregate([
         {"$match": {"active": True}},
         {"$group": {"_id": "$role", "n": {"$sum": 1}}},
     ]).to_list(None)
@@ -36,7 +36,7 @@ async def overview(principal: Principal, models: TenantModels) -> TenantOverview
     attempts = await models.Attempt.find_all().count()
 
     students = counts.get("student", 0)
-    consented_ids = await models.ConsentRecord.get_motor_collection().distinct(
+    consented_ids = await models.ConsentRecord.get_pymongo_collection().distinct(
         "user_id", {"scope": "recording", "granted": True})
     consented = len(consented_ids)
 
@@ -72,7 +72,7 @@ async def users(models: TenantModels, role: str | None = None) -> list[UserOut]:
 @router.get("/cohorts", response_model=list[CohortOut])
 async def cohorts(models: TenantModels) -> list[CohortOut]:
     rows = await models.Cohort.find_all().sort("name").to_list()
-    member_docs = await models.CohortMember.get_motor_collection().aggregate([
+    member_docs = await models.CohortMember.get_pymongo_collection().aggregate([
         {"$group": {"_id": "$cohort_id", "n": {"$sum": 1}}},
     ]).to_list(None)
     counts = {d["_id"]: int(d["n"]) for d in member_docs}

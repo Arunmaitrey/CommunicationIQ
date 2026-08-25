@@ -76,7 +76,7 @@ class Cohort(Document):
     branch: str = ""
     year_of_study: int | None = None
     section: str = ""
-    trainer_id: str | None = Indexed(default=None)
+    trainer_id: str | None = Field(default=None, index=True)
     drive_start: datetime | None = None
     drive_end: datetime | None = None
     active: bool = True
@@ -112,9 +112,9 @@ class Invitation(Document):
     status: str = "pending"
     expires_at: datetime | None = None
     redeemed_at: datetime | None = None
-    candidate_id: str | None = Indexed(default=None)
+    candidate_id: str | None = Field(default=None, index=True)
     attempt_id: str | None = None
-    created_by: str | None = Indexed(default=None)
+    created_by: str | None = Field(default=None, index=True)
     created_at: datetime = Field(default_factory=_now)
 
     class Settings:
@@ -337,7 +337,7 @@ class Assignment(Document):
     id: str = Field(default_factory=_uuid)
     cohort_id: str = Indexed()
     profile_id: str = Indexed()
-    assigned_by: str | None = Indexed(default=None)
+    assigned_by: str | None = Field(default=None, index=True)
     mandatory: bool = True
     opens_at: datetime | None = None
     due_at: datetime | None = None
@@ -358,7 +358,7 @@ class Attempt(Document):
     id: str = Field(default_factory=_uuid)
     user_id: str = Indexed()
     profile_id: str = Indexed()
-    assignment_id: str | None = Indexed(default=None)
+    assignment_id: str | None = Field(default=None, index=True)
     attempt_number: int = 1
     status: str = "created"
     mode: str = "practice"
@@ -380,10 +380,10 @@ class Response(Document):
 
     id: str = Field(default_factory=_uuid)
     attempt_id: str = Indexed()
-    section_id: str | None = Indexed(default=None)
-    item_id: str | None = Indexed(default=None)
-    quiz_item_id: str | None = Indexed(default=None)
-    prompt_id: str | None = Indexed(default=None)
+    section_id: str | None = Field(default=None, index=True)
+    item_id: str | None = Field(default=None, index=True)
+    quiz_item_id: str | None = Field(default=None, index=True)
+    prompt_id: str | None = Field(default=None, index=True)
     position: int = 1
     is_practice: bool = False
     prompt_plays: int = 0
@@ -413,7 +413,7 @@ class ResponseAudio(Document):
     peak_dbfs: float | None = None
     noise_floor_dbfs: float | None = None
     clipped: bool = False
-    delete_after: datetime | None = Indexed(default=None)
+    delete_after: datetime | None = Field(default=None, index=True)
     deleted_at: datetime | None = None
     created_at: datetime = Field(default_factory=_now)
 
@@ -469,7 +469,7 @@ class ScoreRecord(Document):
 
     id: str = Field(default_factory=_uuid)
     attempt_id: str = Indexed()
-    response_id: str | None = Indexed(default=None)
+    response_id: str | None = Field(default=None, index=True)
     dimension: str = Indexed()
     score: float
     scale_min: float = 20
@@ -516,8 +516,8 @@ class Drill(Document):
     user_id: str = Indexed()
     target_skill: str = Indexed()
     source: str = "auto"
-    assigned_by: str | None = Indexed(default=None)
-    origin_response_id: str | None = Indexed(default=None)
+    assigned_by: str | None = Field(default=None, index=True)
+    origin_response_id: str | None = Field(default=None, index=True)
     item_ids: list = Field(default_factory=list)
     status: str = "pending"
     items_completed: int = 0
@@ -535,8 +535,8 @@ class MistakeBankEntry(Document):
 
     id: str = Field(default_factory=_uuid)
     user_id: str = Indexed()
-    quiz_item_id: str | None = Indexed(default=None)
-    task_item_id: str | None = Indexed(default=None)
+    quiz_item_id: str | None = Field(default=None, index=True)
+    task_item_id: str | None = Field(default=None, index=True)
     skill: str = ""
     times_wrong: int = 1
     times_right_since: int = 0
@@ -618,7 +618,7 @@ class SeasonPlan(Document):
 
     id: str = Field(default_factory=_uuid)
     user_id: str = Indexed()
-    cohort_id: str | None = Indexed(default=None)
+    cohort_id: str | None = Field(default=None, index=True)
     drive_date: datetime | None = None
     starts_on: date
     ends_on: date
@@ -739,8 +739,8 @@ class AttemptNarration(Document):
     attempt_id: str = Indexed(unique=True)
     status: str = "pending"
     attempt_count: int = 0
-    next_retry_at: datetime | None = Indexed(default=None)
-    lease_until: datetime | None = Indexed(default=None)
+    next_retry_at: datetime | None = Field(default=None, index=True)
+    lease_until: datetime | None = Field(default=None, index=True)
     last_error_category: str = ""
     last_error_detail: str = ""
     prompt_version: str = ""

@@ -82,13 +82,13 @@ async def passages(principal: Principal,
         models.ReadingPassage.status == "published").sort(
         models.ReadingPassage.difficulty).to_list()
 
-    coll = models.QuizItem.get_motor_collection()
+    coll = models.QuizItem.get_pymongo_collection()
     counts = {doc["_id"]: doc["count"] for doc in await coll.aggregate([
         {"$match": {"category": "reading_comprehension", "status": "published"}},
         {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
     ]).to_list(None)}
 
-    coll = models.ReadingAttempt.get_motor_collection()
+    coll = models.ReadingAttempt.get_pymongo_collection()
     best = {doc["_id"]: doc["max"] for doc in await coll.aggregate([
         {"$match": {"user_id": principal.user_id, "score": {"$ne": None}}},
         {"$group": {"_id": "$passage_id", "max": {"$max": "$score"}}},

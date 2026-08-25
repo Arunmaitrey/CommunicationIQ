@@ -17,10 +17,11 @@ import asyncio
 import random
 from datetime import date, datetime, timedelta, timezone
 
+from beanie import Document
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.orm import selectinload
 
-from app.db import (PlatformBase, control_db, init_store,
+from app.db import (control_db, init_store,
                     platform_sessionmaker, tenant_sessionmaker)
 from app.models.platform import (AuditLog, GamificationConfig, Plan,
                                  PlatformUser, ProviderConfig,
@@ -43,8 +44,8 @@ from app import grammar_bank
 from app.voice_change_bank import ITEMS as VOICE_CHANGE_ITEMS
 from app.spoken_question_bank import ITEMS as SPOKEN_QUESTIONS
 from app.spoken_grammar_bank import (COMPLETIONS as SPOKEN_COMPLETIONS,
-                                     CORRECTIONS as SPOKEN_CORRECTIONS,
-                                     WORD_LIST_DIFFICULTY, WORD_LISTS)
+                                      CORRECTIONS as SPOKEN_CORRECTIONS,
+                                      WORD_LIST_DIFFICULTY, WORD_LISTS)
 from app.selection_bank import RESPONSES as RESPONSE_ITEMS
 from app.selection_bank import VOCABULARY as VOCABULARY_ITEMS
 from app.reconstruction_bank import PASSAGES as RECONSTRUCTIONS
@@ -52,7 +53,7 @@ from app.industry_bank import READ_ALOUD as INDUSTRY_READ_ALOUD
 from app.industry_bank import SHORT_ANSWERS as INDUSTRY_SHORT_ANSWERS
 from app.reading_bank import word_count as _word_count
 from app.provisioning import (create_tenant_schema, drop_tenant_schema,
-                             upgrade_tenant_schema)
+                              upgrade_tenant_schema)
 from app.security import hash_password
 
 DEMO_PASSWORD = "Password123!"

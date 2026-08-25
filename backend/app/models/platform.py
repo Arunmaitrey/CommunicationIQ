@@ -204,7 +204,7 @@ class ProviderConfig(Document):
 
     id: str = Field(default_factory=_uuid)
     capability: str = Indexed()
-    tenant_id: str | None = Indexed(default=None)
+    tenant_id: str | None = Field(default=None, index=True)
     primary_provider_id: str
     fallback_provider_id: str | None = None
     mode: str = "live"
@@ -239,7 +239,7 @@ class ProviderCall(Document):
     capability: str = Indexed()
     provider_id: str = Indexed()
     provider_version: str = ""
-    tenant_id: str | None = Indexed(default=None)
+    tenant_id: str | None = Field(default=None, index=True)
     latency_ms: int = 0
     ok: bool = True
     error: str = ""
@@ -259,7 +259,7 @@ class GamificationConfig(Document):
     """The game economy, tunable without a deploy (PLAT-17)."""
 
     id: str = Field(default_factory=_uuid)
-    tenant_id: str | None = Indexed(default=None, unique=True)
+    tenant_id: str | None = Field(default=None, index=True, unique=True)
     xp_table: dict = Field(default_factory=dict)
     difficulty_multipliers: dict = Field(default_factory=dict)
     weakness_multiplier: float = 1.5
@@ -277,7 +277,7 @@ class GamificationConfig(Document):
 class FeatureFlag(Document):
     id: str = Field(default_factory=_uuid)
     key: str = Indexed()
-    tenant_id: str | None = Indexed(default=None)
+    tenant_id: str | None = Field(default=None, index=True)
     enabled: bool = False
     description: str = ""
 
@@ -292,7 +292,7 @@ class AuditLog(Document):
     actor_type: str = "system"
     actor_id: str = ""
     actor_label: str = ""
-    tenant_id: str | None = Indexed(default=None)
+    tenant_id: str | None = Field(default=None, index=True)
     action: str = Indexed()
     entity: str = ""
     entity_id: str = ""

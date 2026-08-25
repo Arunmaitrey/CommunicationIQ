@@ -92,7 +92,7 @@ def _user_out(u: User) -> UserOut:
 
 
 async def _seat_usage(models: TenantModels, tenant_id: str) -> SeatUsage:
-    role_docs = await models.User.get_motor_collection().aggregate([
+    role_docs = await models.User.get_pymongo_collection().aggregate([
         {"$match": {"active": True}},
         {"$group": {"_id": "$role", "n": {"$sum": 1}}},
     ]).to_list(None)
@@ -436,7 +436,7 @@ async def assignments(models: TenantModels) -> list[AssignmentOut]:
     cohorts = {c.id: c for c in await models.Cohort.find_all().to_list()}
     profiles = {p.id: p for p in await models.SimulationProfile.find_all().to_list()}
 
-    member_counts = {doc["_id"]: doc["count"] async for doc in models.CohortMember.get_motor_collection().aggregate([
+    member_counts = {doc["_id"]: doc["count"] async for doc in models.CohortMember.get_pymongo_collection().aggregate([
         {"$group": {"_id": "$cohort_id", "count": {"$sum": 1}}},
     ])}
 
@@ -775,11 +775,11 @@ async def _sections_without_items(models: TenantModels,
     # selector had already been taught where each bank lives; the guard had
     # not, and two places encoding the same knowledge is how one of them ends
     # up stale.
-    task_counts = {doc["_id"]: doc["count"] async for doc in models.TaskItem.get_motor_collection().aggregate([
+    task_counts = {doc["_id"]: doc["count"] async for doc in models.TaskItem.get_pymongo_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$task_type", "count": {"$sum": 1}}},
     ])}
-    quiz_counts = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
+    quiz_counts = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_pymongo_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$category", "count": {"$sum": 1}}},
     ])}
@@ -787,7 +787,7 @@ async def _sections_without_items(models: TenantModels,
     # live in the same table and are not interchangeable, so counting them
     # together would pass a Passage Reconstruction section on the strength of
     # six email prompts the runner would never serve it.
-    prompt_counts = {doc["_id"]: doc["count"] async for doc in models.WritingPrompt.get_motor_collection().aggregate([
+    prompt_counts = {doc["_id"]: doc["count"] async for doc in models.WritingPrompt.get_pymongo_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$kind", "count": {"$sum": 1}}},
     ])}
@@ -835,7 +835,7 @@ async def _sections_without_items(models: TenantModels,
             if groups_by_passage(key):
                 # Comprehension comes a whole passage at a time, so the raw
                 # count is not what the section will get.
-                sizes = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
+                sizes = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_pymongo_collection().aggregate([
                     {"$match": {"category": key, "status": "published"}},
                     {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
                 ]) if doc["count"]}

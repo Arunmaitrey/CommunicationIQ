@@ -205,7 +205,7 @@ async def _write_reports(models: SimpleNamespace, zf: zipfile.ZipFile,
     """
     profiles: dict[str, str] = {
         doc["_id"]: doc["name"]
-        async for doc in models.SimulationProfile.get_motor_collection().find(
+        async for doc in models.SimulationProfile.get_pymongo_collection().find(
             {}, {"name": 1})}
 
     people: dict[str, tuple[str, str]] = {}
@@ -213,7 +213,7 @@ async def _write_reports(models: SimpleNamespace, zf: zipfile.ZipFile,
                 ["id", "email", "full_name", "role", "roll_number", "branch",
                  "year_of_study", "l1_language", "active", "last_login_at",
                  "created_at"]) as write:
-        cursor = models.User.get_motor_collection().find(
+        cursor = models.User.get_pymongo_collection().find(
             {"role": {"$in": list(ROSTER_ROLES)}},
             sort=[("email", 1)], batch_size=BATCH)
         async for u in cursor:
@@ -229,7 +229,7 @@ async def _write_reports(models: SimpleNamespace, zf: zipfile.ZipFile,
     # that if a double-finalise race ever leaves two rows, the newer one
     # wins deterministically instead of whichever the database felt like.
     overall: dict[str, tuple[float, str]] = {}
-    cursor = models.ScoreRecord.get_motor_collection().find(
+    cursor = models.ScoreRecord.get_pymongo_collection().find(
         {"response_id": None, "dimension": "overall", "is_shadow": False},
         sort=[("created_at", 1)], batch_size=BATCH)
     async for s in cursor:
@@ -242,7 +242,7 @@ async def _write_reports(models: SimpleNamespace, zf: zipfile.ZipFile,
                 ["id", "student_email", "student_name", "profile", "mode",
                  "is_baseline", "status", "overall_score", "band",
                  "started_at", "submitted_at", "scored_at"]) as write:
-        cursor = models.Attempt.get_motor_collection().find(
+        cursor = models.Attempt.get_pymongo_collection().find(
             {}, sort=[("created_at", 1)], batch_size=BATCH)
         async for a in cursor:
             attempt_owner[a["_id"]] = (a["user_id"], a["profile_id"])
@@ -262,7 +262,7 @@ async def _write_reports(models: SimpleNamespace, zf: zipfile.ZipFile,
                  "response_id", "dimension", "score", "scale_min",
                  "scale_max", "band", "confidence", "provider_key",
                  "provider_version", "created_at"]) as write:
-        cursor = models.ScoreRecord.get_motor_collection().find(
+        cursor = models.ScoreRecord.get_pymongo_collection().find(
             {"is_shadow": False},
             sort=[("attempt_id", 1), ("created_at", 1)], batch_size=BATCH)
         async for s in cursor:
@@ -282,7 +282,7 @@ async def _write_reports(models: SimpleNamespace, zf: zipfile.ZipFile,
     with _entry(zf, "skill_mastery.csv",
                 ["student_email", "skill", "mastery", "confidence",
                  "observations", "baseline", "updated_at"]) as write:
-        cursor = models.SkillMastery.get_motor_collection().find(
+        cursor = models.SkillMastery.get_pymongo_collection().find(
             {}, sort=[("user_id", 1), ("skill", 1)], batch_size=BATCH)
         async for m in cursor:
             who = people.get(m["user_id"])

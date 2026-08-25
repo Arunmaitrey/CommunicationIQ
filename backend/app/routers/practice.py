@@ -374,10 +374,10 @@ async def _why_for(models: TenantModels, user_id: str, skill: str) -> str:
     response; the join that enforced that becomes a ``$lookup`` here. The
     joined array is stripped before validation so the document parses clean.
     """
-    coll = models.FeatureRecord.get_motor_collection()
+    coll = models.FeatureRecord.get_pymongo_collection()
     docs = await coll.aggregate([
         {"$lookup": {
-            "from": models.Response.get_motor_collection().name,
+            "from": models.Response.get_pymongo_collection().name,
             "localField": "response_id",
             "foreignField": "_id",
             "as": "_response",

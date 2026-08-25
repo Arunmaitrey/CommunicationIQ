@@ -38,7 +38,7 @@ async def overview() -> PlatformOverview:
     tenants = await Tenant.find_all().to_list()
     plans = await Plan.find_all().count()
     providers = await ProviderRegistry.find_all().count()
-    configured_docs = await ProviderConfig.get_motor_collection().distinct(
+    configured_docs = await ProviderConfig.get_pymongo_collection().distinct(
         "capability")
     configured = len(configured_docs)
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
@@ -92,7 +92,7 @@ async def capabilities() -> list[CapabilityOut]:
         ProviderConfig.tenant_id == None).to_list()}  # noqa: E711
 
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
-    stat_docs = await ProviderCall.get_motor_collection().aggregate([
+    stat_docs = await ProviderCall.get_pymongo_collection().aggregate([
         {"$match": {"at": {"$gte": day_ago}}},
         {"$group": {
             "_id": "$provider_id",

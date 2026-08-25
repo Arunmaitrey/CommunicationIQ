@@ -14,8 +14,6 @@ from app.security import TokenPrincipal, decode_token
 
 _bearer = HTTPBearer(auto_error=False)
 
-Principal = Annotated[TokenPrincipal, Depends(lambda creds: _principal(creds))]
-
 
 async def _principal(
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
@@ -26,6 +24,9 @@ async def _principal(
     if principal is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session")
     return principal
+
+
+Principal = Annotated[TokenPrincipal, Depends(_principal)]
 
 
 async def tenant_models(principal: Principal) -> AsyncIterator[SimpleNamespace]:

@@ -47,8 +47,9 @@ async def drop_tenant_schema(slug: str, *, purge_media: bool = True) -> int:
 
     # Use the platform bundle to access the properly initialized Beanie models
     platform_bundle = await get_platform_bundle()
+    # Use string field name for query since Beanie field attributes may not be set up as class attrs
     await platform_bundle.TenantUserDirectory.find(
-        platform_bundle.TenantUserDirectory.tenant_slug == slug
+        {"tenant_slug": slug}
     ).delete()
 
     if not purge_media:
