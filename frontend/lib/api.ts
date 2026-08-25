@@ -44,6 +44,9 @@ export function sessionExpired(forToken?: string | null) {
   if (typeof window === "undefined") return;
   if (forToken !== undefined && forToken !== getToken()) return;
   if (expiring) return;
+  // Prevent infinite redirect loops: if we are already on the login page,
+  // do not redirect again.
+  if (window.location.pathname === "/login") return;
   expiring = true;
   setToken(null);
   const back = window.location.pathname + window.location.search;
@@ -70,8 +73,10 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   });
   if (res.status === 401) {
-    sessionExpired(token);
-    throw new ApiError(401, "Session expired");
+    if (!path.includes("/auth/login")) {
+      sessionExpired(token);
+    }
+    throw new ApiError(401, "Incorrect email or password");
   }
   if (!res.ok) {
     let detail = res.statusText;
@@ -97,8 +102,13 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (res.status === 401) {
-    sessionExpired(token);
-    throw new ApiError(401, "Session expired");
+    // Do NOT trigger session expiry redirect from the login endpoint —
+    // a failed login is not a session expiry, and redirecting from here
+    // causes an infinite redirect loop.
+    if (!path.includes("/auth/login")) {
+      sessionExpired(token);
+    }
+    throw new ApiError(401, "Incorrect email or password");
   }
   if (!res.ok) {
     let detail = res.statusText;
