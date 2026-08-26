@@ -1034,7 +1034,7 @@ export const attemptApi = {
   exportCsvUrl: (attemptId: string) =>
     `${API_BASE}${ATTEMPTS}/${attemptId}/export.csv`,
 
-  start: (profileId: string, mode: "practice" | "official" = "practice",
+  start: (profileId: string, mode: "practice" | "official" | "stress" = "practice",
           sourceAttemptId?: string) =>
     post<RunnerPayload>(ATTEMPTS, { profile_id: profileId, mode,
                                     source_attempt_id: sourceAttemptId ?? null }),

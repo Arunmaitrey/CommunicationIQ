@@ -252,7 +252,7 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
         profile_id=profile.id,
         attempt_number=int(prior) + 1,
         status="created",
-        mode=body.mode if body.mode in {"practice", "official"} else "practice",
+        mode=body.mode if body.mode in {"practice", "official", "stress"} else "practice",
         is_baseline=profile.is_baseline and int(prior) == 0,
     )
     session.add(attempt)

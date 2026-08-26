@@ -16,6 +16,7 @@
  */
 import * as pending from "./pending";
 import { deliver, type Outcome } from "./upload";
+import { trackUpload } from "./dataUsage";
 
 /** Sends one owed answer and returns the HTTP status. Throws on a network
  *  failure -- the distinction `deliver` needs, since a thrown error never
@@ -89,6 +90,7 @@ export async function deliverRecording(
 
   if (outcome.ok) {
     try { await pending.forget(responseId); } catch { /* already gone */ }
+    trackUpload(blob.size);
   } else {
     // Kept, and the reason recorded. Never `skip` — that would write "did not
     // answer" about somebody whose answer is sitting on their own disk.

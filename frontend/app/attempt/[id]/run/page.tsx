@@ -10,6 +10,7 @@ import { answerLine, taskLabel, whatToExpect } from "@/lib/tasks";
 import { usePresence } from "@/components/shell/usePresence";
 import { ApiError, attemptApi, type RunnerItem, type RunnerPayload } from "@/lib/api";
 import { deliverRecordingInBackground, drainPending, owedFor } from "@/lib/delivery";
+import { DataUsageIndicator } from "@/components/DataUsageIndicator";
 import { firstOpenIndex, nextStep } from "@/lib/sequence";
 import { sectionBudget, sectionMood, sectionRemaining } from "@/lib/timing";
 import { groupNumbering, remainingSeconds, sectionExpiry } from "@/lib/sectionClock";
@@ -1713,8 +1714,13 @@ function Runner() {
       </div>
 
       <footer className="px-4 py-2 border-t border-border shrink-0">
-        <div className="ds-track">
-          <div className="ds-fill" style={{ width: `${(index / total) * 100}%` }} />
+        <div className="flex items-center justify-between">
+          <div className="ds-track flex-1">
+            <div className="ds-fill" style={{ width: `${(index / total) * 100}%` }} />
+          </div>
+          <div className="ml-3 shrink-0">
+            <DataUsageIndicator itemCount={total} />
+          </div>
         </div>
       </footer>
     </div>

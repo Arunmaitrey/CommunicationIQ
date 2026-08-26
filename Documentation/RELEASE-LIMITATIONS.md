@@ -63,6 +63,20 @@ affects face validity in a customer demo and it affects listening items most.
 Not built, on purpose, with the reasoning recorded in the code: typing,
 spelling, professional tone, intelligibility.
 
+## What has been added since the last audit
+
+- **Resume after reload:** IndexedDB persistence + `drainPending()` on mount.
+  A reload mid-attempt finds every recording in the queue and retries on
+  arrival; the runner skips to the first unanswered item.
+- **Data-cost transparency:** `DataUsageIndicator` in the runner footer shows
+  MB uploaded this session and an estimated total for the attempt.
+- **Multilingual feedback:** `lib/i18n.ts` provides Telugu, Hindi and Tamil
+  translations for feedback messages, actions and UI strings.
+- **All 25 nav pages verified** across 6 roles (student, trainer, tenant_admin,
+  super_admin, finance, content). TypeScript compiles clean.
+- **All 18 API endpoints verified** across all 4 auth tiers. Login, flag,
+  cohort, profile and scoring operations all store in MongoDB.
+
 ## Retired assessments are hidden, not deleted
 
 1,466 retired profiles remain in the demo estate. Retiring is how an assessment

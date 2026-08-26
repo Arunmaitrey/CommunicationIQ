@@ -80,6 +80,7 @@ function Simulate() {
   const [startError, setStartError] = useState("");
   const [company, setCompany] = useState("");
   const [style, setStyle] = useState("");
+  const [stressMode, setStressMode] = useState(false);
 
   const profiles = useMemo(() => data ?? [], [data]);
 
@@ -107,7 +108,7 @@ function Simulate() {
     setStarting(profileId);
     setStartError("");
     try {
-      const attempt = await attemptApi.start(profileId, "practice");
+      const attempt = await attemptApi.start(profileId, stressMode ? "stress" : "practice");
       // Straight into the environment check — the runner is never entered
       // without one, because a dead microphone must not cost an attempt.
       router.push(`/attempt/${attempt.attempt_id}/check`);
@@ -137,6 +138,17 @@ function Simulate() {
       <PageHeader
         title="Simulations"
         sub="Format, timing and pressure matched to the real thing. Prompts play once, timers do not pause, and there is no going back a question — because none of that is available on the day either."
+        action={
+          <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={stressMode}
+              onChange={(e) => setStressMode(e.target.checked)}
+              className="rounded border-border"
+            />
+            <span className="text-muted">Stress mode</span>
+          </label>
+        }
       />
 
       {!home.loading && !consented && (

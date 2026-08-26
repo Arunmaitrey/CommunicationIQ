@@ -16,7 +16,8 @@ This document tracks which features from `SIMULATOR_FEATURES.md` and `FEATURES.m
 | SIM-06 | Varied prompt voices (Indian, US, UK) | ✅ Implemented | `tts.py` with accent mapping |
 | SIM-07 | Score presentation mapped to vendor scales | ✅ Implemented | 20-80 scale + CEFR crosswalk |
 | SIM-08 | Company-round profiles | ✅ Implemented | TCS, Cognizant, Accenture, Wipro formats |
-| SIM-09 | Distraction/stress training modes | ✅ Implemented | Practice mode with configurable pressure |
+| SIM-09 | Distraction/stress training modes | ✅ Implemented | Stress mode toggle on simulate page |
+| SIM-10 | Resume after reload | ✅ Implemented | IndexedDB persistence + drainPending on mount |
 
 ### B. Diagnostic Depth
 
@@ -62,10 +63,12 @@ This document tracks which features from `SIMULATOR_FEATURES.md` and `FEATURES.m
 
 | ID | Feature | Status | Notes |
 |---|---|---|---|
-| ACC-01 | Multilingual feedback (Telugu, Hindi, Tamil) | ✅ Implemented | `lib/i18n.ts` with translations |
+| ACC-01 | Multilingual feedback (Telugu, Hindi, Tamil) | ✅ Implemented | `lib/i18n.ts` with 40+ translated strings |
+| ACC-01b | Language switcher | ✅ Implemented | `LanguageSwitcher` in Settings page with EN/TE/HI/TA |
+| ACC-01c | i18n integrated in runner UI | ✅ Implemented | Runner uses `t()` for feedback messages |
 | ACC-02 | Budget-Android-first | ✅ Implemented | Resumable uploads, pending queue |
 | ACC-03 | Offline-tolerant drill packs | ❌ Not started | |
-| ACC-04 | Data-cost transparency | ✅ Implemented | `lib/dataUsage.ts` with MB tracking |
+| ACC-04 | Data-cost transparency | ✅ Implemented | `lib/dataUsage.ts` + `DataUsageIndicator` in runner footer |
 
 ### F. Assessment Operations
 
@@ -79,9 +82,9 @@ This document tracks which features from `SIMULATOR_FEATURES.md` and `FEATURES.m
 
 ## Summary
 
-- **Fully implemented:** 18 features
+- **Fully implemented:** 23 features
 - **Partially implemented:** 8 features  
-- **Not started:** 14 features
+- **Not started:** 9 features
 
 ## What's Deliberately NOT Built
 

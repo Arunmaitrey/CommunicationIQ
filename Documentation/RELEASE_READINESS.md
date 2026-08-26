@@ -1,10 +1,120 @@
-# SVAR-style Communication Assessment (4-section) — Release Readiness
+# Release Readiness
 
-**Branch:** `develop` (tip after this work; `main` untouched at `3e276a7`)
-**Status:** engineering-complete; awaiting real-mic UAT → staging → production RC.
+**Database:** MongoDB Atlas (shared cluster, `CommunicationIQ` control plane + `tenant_<slug>` per institution)
+**Status:** All services connect to Atlas. No local MongoDB required.
 
-This document is the handoff for taking the SVAR-style Communication Assessment (4-section) (plus the
-AI Feedback Narrator and the supporting fixes) from `develop` to production.
+---
+
+## Database Setup (Atlas Only)
+
+The application uses **MongoDB Atlas** exclusively. No local MongoDB installation is needed.
+
+### Connection String
+
+Set `MONGO_URI` in `backend/.env`:
+
+```
+MONGO_URI=mongodb+srv://<user>:<password>@<cluster>.mongodb.net/CommunicationIQ?retryWrites=true&w=majority
+```
+
+### Architecture
+
+- **Control plane** (`CommunicationIQ` DB): platform users, tenants, plans, providers, configs, audit logs
+- **Tenant DBs** (`tenant_<slug>`): users, profiles, sections, task items, attempts, scores, etc.
+- Each institution is fully isolated in its own database
+
+### What's in Atlas
+
+| Collection (Control Plane) | Count |
+|---|---|
+| platform_users | 3 (admin, finance, content) |
+| tenants | 2 (stmarys, vignan) |
+| plans | 3 |
+| providers | 12 |
+| configs | 9 |
+| audit_logs | 24 |
+| directory_entries | 48 |
+
+| Collection (per Tenant) | stmarys | vignan |
+|---|---|---|
+| users | 33 | 15 |
+| simulation_profiles | 21 | 21 |
+| profile_sections | 93 | 93 |
+| task_items | 162 | 162 |
+| quiz_items | 141 | 141 |
+| listening_passages | 14 | 14 |
+| reading_passages | 5 | 5 |
+| writing_prompts | 14 | 14 |
+| attempts | 20 | 8 |
+| score_records | 100 | 40 |
+| cohorts | 3 | 1 |
+
+---
+
+## Login Credentials
+
+All passwords: `Password123!`
+
+### Platform Staff
+
+| Email | Role | Redirect |
+|---|---|---|
+| admin@saashx.ai | super_admin | /platform |
+| finance@saashx.ai | finance | /platform |
+| content@saashx.ai | content | /platform |
+
+### St Mary's Institute (stmarys)
+
+| Email | Role | Redirect |
+|---|---|---|
+| admin@stmarys.edu | tenant_admin | /tenant |
+| trainer1@stmarys.edu | trainer | /coaching |
+| trainer2@stmarys.edu | trainer | /coaching |
+| aarav.reddy1@stmarys.edu | student | /home |
+
+### Vignan University (vignan)
+
+| Email | Role | Redirect |
+|---|---|---|
+| admin@vignan.edu | tenant_admin | /tenant |
+| trainer1@vignan.edu | trainer | /coaching |
+| trainer2@vignan.edu | trainer | /coaching |
+| aarav.reddy1@vignan.edu | student | /home |
+
+---
+
+## Running on Another System
+
+### Prerequisites
+- Python 3.12+
+- Node.js 20+
+- MongoDB Atlas connection (no local DB needed)
+
+### Backend
+```bash
+cd backend
+python -m venv .venv
+.venv/Scripts/activate  # Windows
+# source .venv/bin/activate  # Mac/Linux
+pip install -r requirements.txt
+# Set MONGO_URI in .env to your Atlas connection string
+uvicorn app.main:app --host 0.0.0.0 --port 8010 --reload
+```
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev  # Runs on port 3010
+```
+
+### Docker
+```bash
+docker-compose up  # Starts backend (8010), frontend (3010)
+```
+Note: Docker Compose uses a local MongoDB for development. For Atlas, set `MONGO_URI` in `backend/.env`.
+
+---
 
 ---
 

@@ -20,8 +20,8 @@ are underneath it.
 
 ## Prerequisites
 
-- PostgreSQL 18 on `localhost:5432` (user `postgres`, password `password`)
-- Python 3.12
+- MongoDB Atlas connection (no local DB needed)
+- Python 3.12+
 - Node 20+
 
 ## Run it
@@ -48,16 +48,35 @@ API docs: <http://localhost:8010/docs>
 
 Password for all: `Password123!`
 
+**Platform staff:**
+
 | Role | Email |
 |---|---|
-| Student | `aarav.reddy1@stmarys.edu` |
-| Trainer | `trainer1@stmarys.edu` |
+| Super admin | `admin@saashx.ai` |
+| Finance | `finance@saashx.ai` |
+| Content | `content@saashx.ai` |
+
+**St Mary's Institute:**
+
+| Role | Email |
+|---|---|
 | Institution admin | `admin@stmarys.edu` |
-| Platform | `admin@saashx.ai` |
-| Second institution | `admin@vignan.edu` |
+| Trainer | `trainer1@stmarys.edu` / `trainer2@stmarys.edu` |
+| Student | `aarav.reddy1@stmarys.edu` |
+
+**Vignan University:**
+
+| Role | Email |
+|---|---|
+| Institution admin | `admin@vignan.edu` |
+| Trainer | `trainer1@vignan.edu` / `trainer2@vignan.edu` |
+| Student | `aarav.reddy1@vignan.edu` |
 
 Two institutions exist on purpose. With one, cross-tenant isolation would
-pass no matter what the code did.
+pass no matter what the code did. Each tenant has its own database
+(`tenant_stmarys`, `tenant_vignan`) on the same Atlas cluster.
+
+**All 51 logins verified working** (password hash check against Atlas).
 
 ## What the engine measures — and what it does not
 
@@ -187,8 +206,8 @@ its recordings along with its schema.
 
 ```
 backend/app/
-  db.py            two declarative bases; tenant tables address a `tenant`
-                   placeholder that the session translates per request
+  db.py            Motor async client + Beanie ODM; database-per-tenant
+                   isolation via `tenant_<slug>` naming
   models/          platform.py (public) · tenant.py (per institution)
   routers/         auth · student · trainer · tenant_admin · platform_admin
   engine/

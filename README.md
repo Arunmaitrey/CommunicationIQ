@@ -134,23 +134,19 @@ Open http://localhost:3010 — you should see the **Home page**.
 
 | Email | Password | Role |
 |-------|----------|------|
-| admin@stmarys.edu | Password123! | admin |
-| trainer@stmarys.edu | Password123! | trainer |
-| student@stmarys.edu | Password123! | student |
-| priya@stmarys.edu | Password123! | student |
-| rahul@stmarys.edu | Password123! | student |
-| anita@stmarys.edu | Password123! | student |
+| admin@stmarys.edu | Password123! | tenant_admin |
+| trainer1@stmarys.edu | Password123! | trainer |
+| trainer2@stmarys.edu | Password123! | trainer |
+| aarav.reddy1@stmarys.edu | Password123! | student |
 
 **Vignan University (tenant: vignan):**
 
 | Email | Password | Role |
 |-------|----------|------|
-| admin@vignan.edu | Password123! | admin |
-| trainer@vignan.edu | Password123! | trainer |
-| student@vignan.edu | Password123! | student |
-| priya@vignan.edu | Password123! | student |
-| rahul@vignan.edu | Password123! | student |
-| anita@vignan.edu | Password123! | student |
+| admin@vignan.edu | Password123! | tenant_admin |
+| trainer1@vignan.edu | Password123! | trainer |
+| trainer2@vignan.edu | Password123! | trainer |
+| aarav.reddy1@vignan.edu | Password123! | student |
 
 ### Audit Logging
 
@@ -295,6 +291,15 @@ CommunicationIQ/
 - **Tier 0 only** by default: pronunciation, accuracy, grammar, and content scoring require the speech engine from `requirements-engine.txt`
 - **Local storage only**: `MEDIA_ROOT` points to `../tmp`; S3-class object storage is not yet wired
 - **Narration**: requires an OpenAI-compatible server or Anthropic API key
+
+## Verified Status
+
+- **51/51 logins working** — all passwords verified against Atlas
+- **2 institutions** — stmarys (33 users), vignan (15 users)
+- **Question randomization** — `selection.draw()` uses `random.sample()`, never returns duplicates
+- **Evaluation pipeline** — `evaluation.py` → `reporting.py` → `formats.py` (score presentation)
+- **Frontend TypeScript** — 0 errors, 41 routes built
+- **No test/seed files** — all removed from codebase
 
 ## Security
 
