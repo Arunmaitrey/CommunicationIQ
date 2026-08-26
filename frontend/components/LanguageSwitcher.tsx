@@ -39,8 +39,6 @@ export function LanguageSwitcher() {
     window.dispatchEvent(new CustomEvent("locale-changed", { detail: code }));
   }
 
-  const current = LANGUAGES.find((l) => l.code === locale) ?? LANGUAGES[0];
-
   return (
     <div className="flex items-center gap-2">
       <Globe size={14} className="text-muted" />

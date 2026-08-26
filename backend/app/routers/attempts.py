@@ -24,7 +24,7 @@ from app.config import settings
 from app.invitations import CANDIDATE_ROLE
 from app.db import ensure_tenant_models
 from app import formats
-from app.deps import Principal, TenantModels, require_roles
+from app.deps import Principal, TenantModels, TenantSession, require_roles
 from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
 from app import deadline as app_deadline
 from app import reconstruction as app_reconstruction

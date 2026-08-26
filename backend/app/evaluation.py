@@ -121,6 +121,8 @@ DIMENSIONS_BY_TASK: dict[str, frozenset[str]] = {
     # What was retained, and whether it came back as English. No lexical
     # range: the words are the author's.
     "passage_reconstruction": frozenset({"content", "grammar"}),
+    # Timed typing: copy a given text. Measures speed (WPM) and accuracy.
+    "typing": frozenset({"accuracy", "fluency"}),
 }
 
 

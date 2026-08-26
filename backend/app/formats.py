@@ -208,6 +208,8 @@ ANSWER_SECONDS: dict[str, int] = {
     # writing follows. One number covering both.
     "passage_reconstruction": 145,
     "email_writing": 600,
+    # Timed typing: copy a passage. ~2 minutes for a ~250 word passage.
+    "typing": 120,
 }
 
 

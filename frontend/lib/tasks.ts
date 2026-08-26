@@ -41,6 +41,7 @@ export const TASK_LABEL: Record<string, string> = {
   voice_change: "Change the Voice",
   email_writing: "Email Writing",
   passage_reconstruction: "Passage Reconstruction",
+  typing: "Timed Typing",
   // Older practice kinds, which are not assessment sections but do appear in
   // the simulation browser.
   mcq: "Grammar / Vocabulary",
@@ -120,6 +121,7 @@ export function answerLine(taskType: string): string {
     case "open_response": return "Speak about the topic.";
     case "sentence_build": return "Rearrange the words into a correct sentence and say it.";
     case "read_aloud": return "Read it out loud.";
+    case "typing": return "Type the passage exactly as shown. Speed and accuracy both count.";
     default: return "Give your answer now.";
   }
 }

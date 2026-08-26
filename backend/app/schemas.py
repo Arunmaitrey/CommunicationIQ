@@ -661,6 +661,8 @@ TASK_TYPES = {
     "voice_change",
     # Read a short passage, lose it, write it back.
     "passage_reconstruction", "email_writing",
+    # Timed typing: speed and accuracy on a given text.
+    "typing",
     # Kept for profiles authored before the names above existed.
     "mcq", "audio_comprehension",
 }

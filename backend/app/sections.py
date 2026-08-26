@@ -57,6 +57,8 @@ SKILL_OF_TASK: dict[str, str] = {
     "email_writing": "writing",
     "sentence_completion": "writing",
     "passage_reconstruction": "writing",
+    # Timed typing: speed and accuracy on a given text.
+    "typing": "writing",
     # Grammar transformation, read and chosen (not composed), so it sits
     # under reading for the four-skill rollup; its grammar signal is carried
     # by DIMENSIONS_BY_TASK, which feeds the Grammar sub-score.
@@ -84,6 +86,7 @@ RESPONSE_MODE: dict[str, str] = {
     "email_writing": "write",
     "sentence_completion": "write",
     "passage_reconstruction": "write",
+    "typing": "write",
     # A sentence and four rewrites, chosen — like vocabulary_in_context, no audio.
     "voice_change": "select",
 }
@@ -132,6 +135,8 @@ ITEM_SOURCE: dict[str, tuple[str, str]] = {
     # exactly the shape WritingPrompt already stores -- but its own kind,
     # because it is not a task to compose and must never be served as one.
     "passage_reconstruction": ("writing_prompt", "reconstruction"),
+    # Timed typing: copy a given text. Its own quiz category.
+    "typing": ("quiz", "typing"),
 }
 
 # WritingPrompt kinds that ask the candidate to compose something new.
