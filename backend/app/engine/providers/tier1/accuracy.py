@@ -34,7 +34,10 @@ SCRIPTED_TASKS = {"read_aloud", "repeat_sentence", "sentence_build",
                   # The heard prompt is flawed/gapped; the reference is
                   # the correct sentence, and "did it come out" is the
                   # grammar signal the section exists to measure.
-                  "spoken_completion", "spoken_correction"}
+                  "spoken_completion", "spoken_correction",
+                  # Story Retell: the reference is the story text; word accuracy
+                  # measures how much of the original story was reproduced.
+                  "story_retell"}
 
 # Sentence Build is scored differently from the other two, and the difference
 # is the point of the task.
@@ -308,4 +311,6 @@ def _construction(reference: list[str], heard: list[str],
         word_errors=errors,
         confidence=confidence,
         meta=meta,
+        coverage=round(coverage, 3),
+        order=round(order, 3),
     )

@@ -150,10 +150,15 @@ class AccuracyResult:
     matched: int = 0
     reference_words: int = 0
     accuracy: float = 0.0
-    # [{expected, heard, kind: substitution|deletion|insertion, start_ms}]
+    # [{expected, heard, kind: substitution|deletion|insertion|word_order, start_ms}]
     word_errors: list[dict] = field(default_factory=list)
     confidence: float = 0.0
     meta: ProviderMeta | None = None
+    # Sentence Build: coverage (what share of given words were used) and order
+    # (how much of the reference appears in sequence). Only present for
+    # construction tasks where the arrangement is the measurement.
+    coverage: float | None = None
+    order: float | None = None
 
 
 @dataclass

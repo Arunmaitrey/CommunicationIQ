@@ -112,25 +112,28 @@ def xp_into_level(total_xp: int) -> int:
 
 async def config_for(tenant_id: str | None) -> GamificationConfig:
     """The economy for this institution, falling back to the global default."""
-    if tenant_id:
-        row = await GamificationConfig.find_one(
-            GamificationConfig.tenant_id == tenant_id)
+    try:
+        if tenant_id:
+            row = await GamificationConfig.find_one(
+                GamificationConfig.tenant_id == tenant_id)
+            if row is not None:
+                return row
+        row = await GamificationConfig.find_one(GamificationConfig.tenant_id == None)
         if row is not None:
             return row
-    row = await GamificationConfig.find_one(GamificationConfig.tenant_id == None)
-    if row is None:
-        # A tenant with no economy configured still has to be able to practise.
-        return GamificationConfig(
-            xp_table={"attempt_completed": 120, "drill_completed": 60,
-                      "quiz_completed": 25, "quest_completed": 80,
-                      "streak_milestone": 150},
-            difficulty_multipliers={"below_ability": 0.6, "at_ability": 1.0,
-                                    "above_ability": 1.4},
-            weakness_multiplier=1.5, free_freezes_per_month=2,
-            quiz_xp_cap_percent=40, leagues_enabled=True,
-            max_engagement_notifications_per_day=1,
-        )
-    return row
+    except Exception:
+        pass
+    # A tenant with no economy configured still has to be able to practise.
+    return GamificationConfig(
+        xp_table={"attempt_completed": 120, "drill_completed": 60,
+                  "quiz_completed": 25, "quest_completed": 80,
+                  "streak_milestone": 150},
+        difficulty_multipliers={"below_ability": 0.6, "at_ability": 1.0,
+                                "above_ability": 1.4},
+        weakness_multiplier=1.5, free_freezes_per_month=2,
+        quiz_xp_cap_percent=40, leagues_enabled=True,
+        max_engagement_notifications_per_day=1,
+    )
 
 
 async def total_xp(models: SimpleNamespace, user_id: str) -> int:

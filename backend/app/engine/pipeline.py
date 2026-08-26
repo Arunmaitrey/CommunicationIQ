@@ -29,8 +29,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.engine import calibration, freeze
 from app.engine.contracts import AudioRef, Capability
 from app.engine.contracts.types import (AccuracyResult, DisfluencyResult,
-                                        FluencyResult, ProviderUnavailable,
-                                        TranscriptResult)
+                                         FluencyResult, ProviderUnavailable,
+                                         TranscriptResult)
+from app.engine.providers.tier1.accuracy import COVERAGE_SHARE, ORDER_SHARE
 from app.engine.psychometrics import bkt
 from app.engine.registry import Providers
 from app.models.tenant import (Attempt, FeatureRecord, ProfileSection,
@@ -323,6 +324,13 @@ async def score_response(tenant: AsyncSession, providers: Providers,
             )
             if accuracy.confidence > 0:
                 add("accuracy", accuracy.score, accuracy.confidence, accuracy_meta)
+                # Sentence Build: separate construction score from word accuracy.
+                # The construction score measures word-order arrangement, which
+                # is the specific thing this task type exists to assess.
+                if task_type == "sentence_build" and accuracy.coverage is not None and accuracy.order is not None:
+                    construction = COVERAGE_SHARE * accuracy.coverage + ORDER_SHARE * accuracy.order
+                    construction_score = SCALE_MIN + construction * (SCALE_MAX - SCALE_MIN)
+                    add("construction", round(construction_score, 1), accuracy.confidence, accuracy_meta)
         except ProviderUnavailable:
             unscored["accuracy"] = _no_provider("word-accuracy")
 
