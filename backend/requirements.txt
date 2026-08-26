@@ -1,9 +1,18 @@
 fastapi>=0.115.6
 uvicorn[standard]>=0.34.0
 # Beanie ODM for MongoDB — the only database layer. No SQL, no PostgreSQL.
-beanie>=1.28
-motor>=3.5
-pymongo[srv]>=4.10
+#
+# beanie pinned below 2.0: Beanie 2.x dropped Motor support and expects
+# pymongo's native async client instead, so init_beanie() calls
+# `database.client.append_metadata(...)`, a method that only exists on that
+# client — not on motor.motor_asyncio.AsyncIOMotorClient, which is what
+# app/db.py actually builds. With beanie>=2.0 this fails silently inside a
+# broad startup try/except, so every Document model is left unregistered and
+# every query against it (login included) 500s with AttributeError instead
+# of running. beanie==1.30.0 is the last release that still targets Motor.
+beanie==1.30.0
+motor>=3.5,<3.8
+pymongo[srv]>=4.10,<5
 # SQLAlchemy remains the in-process query-expression API consumed by
 # app.mongolayer; it does not install or connect to PostgreSQL.
 SQLAlchemy>=2.0,<2.1
