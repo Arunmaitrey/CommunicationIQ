@@ -1,9 +1,9 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  LogOut, Menu, PanelLeftClose, PanelLeftOpen, X,
+  LogOut, Mail, Menu, PanelLeftClose, PanelLeftOpen, ShieldCheck, X,
 } from "lucide-react";
 import { BrandMark, TenantLockup } from "@/components/brand/BrandMark";
 import { PoweredByFloat } from "@/components/brand/PoweredBy";
@@ -12,7 +12,7 @@ import { ThemePicker } from "@/components/shell/ThemePicker";
 import { useRailCollapsed } from "@/components/shell/useRailCollapsed";
 import { WordField } from "@/components/shell/WordField";
 import { Avatar } from "@/components/ui";
-import { assetUrl } from "@/lib/api";
+import { assetUrl, type SessionUser } from "@/lib/api";
 import { navFor } from "@/lib/nav";
 import { ROLE_LABEL } from "@/lib/roles";
 
@@ -99,18 +99,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <ThemePicker />
 
-          {user && (
-            <div className="flex items-center gap-2 pl-2 border-l border-border">
-              <Avatar name={user.full_name} size={26} />
-              <div className="hidden sm:block leading-tight">
-                <div className="text-xs font-semibold truncate max-w-[12rem]">{user.full_name}</div>
-                <div className="text-[10px] text-muted">{ROLE_LABEL[user.role] ?? user.role}</div>
-              </div>
-              <button onClick={signOut} className="btn btn-icon btn-ghost ds-focus" title="Sign out">
-                <LogOut size={15} />
-              </button>
-            </div>
-          )}
+          {user && <ProfileMenu user={user} onSignOut={signOut} />}
         </header>
 
         <main className="flex-1 p-4 md:p-6 max-w-[1400px] w-full animate-fade-up">
@@ -119,6 +108,83 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <PoweredByFloat />
+    </div>
+  );
+}
+
+/** Avatar + name in the header, made clickable: opens a small card with the
+ *  signed-in account's basic details and sign-out, rather than sign-out
+ *  living as its own icon with nothing behind the name it sits next to. */
+function ProfileMenu({ user, onSignOut }: { user: SessionUser; onSignOut: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative pl-2 border-l border-border" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 ds-focus rounded"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title="Profile"
+      >
+        <Avatar name={user.full_name} size={26} />
+        <div className="hidden sm:block leading-tight text-left">
+          <div className="text-xs font-semibold truncate max-w-[12rem]">{user.full_name}</div>
+          <div className="text-[10px] text-muted">{ROLE_LABEL[user.role] ?? user.role}</div>
+        </div>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 mt-2 w-64 ds-card p-3 z-50 animate-fade-in"
+        >
+          <div className="flex items-center gap-2.5 pb-3 mb-2 border-b border-border">
+            <Avatar name={user.full_name} size={34} />
+            <div className="leading-tight min-w-0">
+              <div className="text-sm font-semibold truncate">{user.full_name}</div>
+              <div className="text-[11px] text-muted truncate">{ROLE_LABEL[user.role] ?? user.role}</div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5 mb-3 text-xs">
+            <div className="flex items-center gap-2 text-muted">
+              <Mail size={13} className="shrink-0" />
+              <span className="truncate">{user.email}</span>
+            </div>
+            {user.tenant_name && (
+              <div className="flex items-center gap-2 text-muted">
+                <ShieldCheck size={13} className="shrink-0" />
+                <span className="truncate">{user.tenant_name}</span>
+              </div>
+            )}
+          </div>
+
+          <button
+            role="menuitem"
+            onClick={onSignOut}
+            className="btn btn-ghost btn-sm w-full justify-start ds-focus"
+          >
+            <LogOut size={14} />
+            Sign out
+          </button>
+        </div>
+      )}
     </div>
   );
 }
