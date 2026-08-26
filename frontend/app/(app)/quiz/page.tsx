@@ -5,7 +5,7 @@ import {
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
-  Badge, EmptyState, ErrorNote, PageHeader, Section, Skeleton,
+  Badge, EmptyState, ErrorNote, PageHeader, Section,
 } from "@/components/ui";
 import {
   ApiError, practiceApi, type QuizItem, type QuizResult,

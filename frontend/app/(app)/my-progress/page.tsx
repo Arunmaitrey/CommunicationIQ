@@ -41,7 +41,6 @@ function MyProgress() {
   const strongest = d.mastery?.length
     ? [...d.mastery].sort((a, b) => b.mastery - a.mastery)[0]
     : undefined;
-  const live = (skills.data?.modules ?? []).filter((m) => m.status === "live");
 
   return (
     <>

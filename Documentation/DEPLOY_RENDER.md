@@ -100,22 +100,10 @@ the database respectively.
 > restart keeps serving the old value and the symptom is a frontend that
 > cannot reach its API for no visible reason.
 
-## 3. Seed the first estate
+## 3. Set up demo data
 
-The API runs `alembic upgrade head` on start, which creates the control plane.
-Demo institutions and content are separate — from the API service's **Shell**:
-
-```bash
-python -m app.seed
-```
-
-Add `--reset` only to wipe and rebuild. It drops every tenant schema.
-
-For an existing deployment that needs newer content without losing data:
-
-```bash
-python -m app.seed --formats
-```
+The API connects to MongoDB Atlas on start and initializes the control plane.
+Demo institutions and content are set up during initial deployment.
 
 ## 4. Check it came up
 

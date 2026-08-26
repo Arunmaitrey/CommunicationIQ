@@ -13,6 +13,17 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from beanie.operators import In
 
 from app.deps import Principal, TenantModels, require_roles
+
+
+def _ensure_aware(dt: datetime) -> datetime:
+    """Make a datetime timezone-aware (UTC) if it is naive.
+
+    MongoDB aggregation returns naive datetimes; the API computes
+    ``now - last`` where ``now`` is always UTC-aware.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 from app.models.tenant import Cohort
 from app.readiness import (HIGH_RISK, NEEDS_TRAINING, NOT_STARTED, READY, band)
 from app.schemas import (AttemptOut, AttemptResult, CohortOut,
@@ -165,7 +176,7 @@ async def cohort_students(cohort_id: str, principal: Principal,
             last_attempt_at=last,
             overall_score=latest.get(u.id),
             readiness=band(latest.get(u.id)),
-            days_since_activity=(now - last).days if last else None,
+            days_since_activity=(now - _ensure_aware(last)).days if last else None,
             flagged=u.id in flagged,
         ))
     return summaries

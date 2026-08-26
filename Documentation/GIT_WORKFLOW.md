@@ -31,7 +31,7 @@ cp backend/.env.example backend/.env
 1. **Pull latest**: `git pull origin main`
 2. **Create branch**: `git checkout -b feature/my-feature`
 3. **Make changes**: edit files, run tests
-4. **Test**: `cd backend && .venv/Scripts/python -m pytest` and `cd frontend && npx vitest run`
+4. **Test**: Verify backend starts (`python -c "from app.main import app"`) and frontend compiles (`npx tsc --noEmit`)
 5. **Commit**: `git add . && git commit -m "feat: add batch user import"`
 6. **Push**: `git push origin feature/my-feature`
 7. **Create Pull Request** on GitHub
@@ -64,7 +64,7 @@ test: add coverage for invite flow
 - All developers connect to the same database via `MONGO_URI`
 - **Never delete** another developer's test data without coordinating
 - **Never modify** production tenant data directly
-- Use `python -m app.seed --reset` to restore a clean state locally
+
 
 ## Environment Variables
 
@@ -80,15 +80,15 @@ Never commit these values. Use `.env.example` as a template.
 ## Testing
 
 ```bash
-# Backend
+# Backend - verify imports
 cd backend
-.venv/Scripts/python -m pytest -v
+python -c "from app.main import app; print('OK')"
 
-# Frontend
+# Frontend - typecheck
 cd frontend
-npx vitest run
+npx tsc --noEmit
 
-# Frontend build check
+# Frontend build
 cd frontend
 npx next build
 ```

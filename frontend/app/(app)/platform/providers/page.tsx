@@ -5,7 +5,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import { Badge, ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
 import {
   ApiError, api, operatorApi,
-  type CapabilityRow, type NarrationSettings, type ProviderRow, type TenantRow,
+  type CapabilityRow, type NarrationSettings, type TenantRow,
 } from "@/lib/api";
 import { PLATFORM_ROLES } from "@/lib/roles";
 import { useData } from "@/lib/useData";

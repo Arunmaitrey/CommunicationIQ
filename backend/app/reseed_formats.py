@@ -1,6 +1,6 @@
 """Dev-only: force the researched blueprints onto their canonical profiles.
 
-The normal resync (`python -m app.seed --formats`) skips any profile that
+The normal resync skips any profile that
 already has attempts, to protect score comparability -- the right rule in
 production. In development the demo estate has test attempts on some of these
 profiles, which would otherwise leave them stranded on stale blueprints. This

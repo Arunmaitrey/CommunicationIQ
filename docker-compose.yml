@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8010:8010"
+    environment:
+      - MONGO_URI=mongodb://mongo:27017/CommunicationIQ
+      - JWT_SECRET=${JWT_SECRET:-commiq-dev-secret-do-not-use-in-prod}
+      - APP_URL=http://localhost:3010
+      - CORS_ORIGINS=["http://localhost:3010","http://127.0.0.1:3010"]
+    depends_on:
+      - mongo
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - NEXT_PUBLIC_API_URL=http://localhost:8010/api/v1
+    ports:
+      - "3010:3010"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8010/api/v1
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: unless-stopped
+
+volumes:
+  mongo_data:

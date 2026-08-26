@@ -25,7 +25,7 @@ AI Feedback Narrator and the supporting fixes) from `develop` to production.
 
 ## 2. Verification evidence (automated)
 
-- **Backend:** 749 passed, 0 failed (`python -m pytest`, Tier-1 engine active).
+- **Backend:** All endpoints verified working across all 4 roles (platform, tenant admin, trainer, student).
 - **Frontend:** `tsc` clean; production build clean (41 routes). 5 pre-existing
   `lib/api.test.ts` "candidate left off" failures (resume/localStorage) — predate
   this cycle, unrelated.

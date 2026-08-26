@@ -35,7 +35,6 @@ Student → Browser (Next.js) → FastAPI Backend → MongoDB Atlas
 | `db.py` | MongoDB connection, Beanie init, Session bridge |
 | `deps.py` | Auth dependencies (Principal, TenantModels, etc.) |
 | `security.py` | JWT encode/decode, password hashing |
-| `seed.py` | Database seeder (plans, tenants, users, item bank) |
 | `provisioning.py` | Tenant database creation/indexes |
 
 ### Routers

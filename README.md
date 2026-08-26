@@ -16,7 +16,7 @@ Frontend (Next.js)          Backend (FastAPI)           MongoDB Atlas
                             routers/                  |
                                 |                     |
                             services/                 |
-                            seed.py                   |
+                            security.py               |
                             gamification/             |
                                 |                     |
                           ┌─────┴─────┐               |
@@ -86,24 +86,32 @@ WHISPER_WARM_ON_STARTUP=true
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.12+
-- Node.js 18+
-- MongoDB Atlas cluster (or local MongoDB)
+### Option 1: Docker (Recommended)
 
-### Backend
+```bash
+docker-compose up --build
+```
 
+- Frontend: http://localhost:3010
+- Backend API: http://localhost:8010
+- API Docs: http://localhost:8010/docs
+- MongoDB: localhost:27017
+
+### Option 2: Manual Setup
+
+**Prerequisites:** Python 3.12+, Node.js 18+, MongoDB (local or Atlas)
+
+**Backend:**
 ```bash
 cd backend
 python -m venv .venv
 source .venv/bin/activate  # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
 cp .env.example .env       # edit MONGO_URI and JWT_SECRET
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
-### Frontend
-
+**Frontend:**
 ```bash
 cd frontend
 npm install
@@ -111,15 +119,6 @@ npm run dev
 ```
 
 Open http://localhost:3010 — you should see the **Home page**.
-
-### Seed Data
-
-The MongoDB Atlas cluster already contains seed data (plans, tenants, users, providers). To re-seed:
-
-```bash
-cd backend
-python -m app.seed --reset
-```
 
 ### Login Credentials
 
@@ -169,31 +168,95 @@ Every login and write operation (user create/update, cohort changes, profile mod
 | `/` | Home / landing | No |
 | `/login` | Sign in | No |
 | `/home` | Student dashboard | Student |
-| `/coaching` | AI coaching | Student |
+| `/coaching` | Trainer overview | Trainer |
+| `/cohorts` | Trainer cohorts | Trainer |
+| `/momentum` | Trainer momentum | Trainer |
+| `/flags` | At-risk flags | Trainer |
+| `/practise` | Practice drills | Student |
+| `/tests` | Take a test | Student |
+| `/my-progress` | My progress | Student |
 | `/quiz` | Quiz module | Student |
 | `/listening` | Listening module | Student |
 | `/reading` | Reading module | Student |
 | `/writing` | Writing module | Student |
-| `/practise` | Practice drills | Student |
 | `/skills` | Skills view | Student |
-| `/progress` | My progress | Student |
-| `/settings` | Settings | Student |
-| `/tenant/*` | Tenant admin | Tenant admin |
-| `/platform/*` | Platform admin | Platform staff |
+| `/settings` | Settings | All roles |
+| `/tenant` | Tenant overview | Tenant admin |
+| `/tenant/users` | People management | Tenant admin |
+| `/tenant/cohorts` | Cohort management | Tenant admin |
+| `/tenant/profiles` | Assessment profiles | Tenant admin |
+| `/tenant/invitations` | Invitations | Tenant admin |
+| `/tenant/season` | Placement season | Tenant admin |
+| `/tenant/readiness` | Readiness dashboard | Tenant admin |
+| `/tenant/import` | User import | Tenant admin |
+| `/platform` | Platform overview | Platform staff |
+| `/platform/tenants` | Institution management | Platform staff |
+| `/platform/plans` | Pricing plans | Platform staff |
+| `/platform/providers` | Engine capabilities | Platform staff |
+| `/platform/gamification` | Game economy | Platform staff |
+| `/platform/audit` | Audit log | Platform staff |
+| `/platform/billing` | Billing | Platform staff |
 
-## Testing
+## API Operations
 
-### Backend Tests
-```bash
-cd backend
-.venv/Scripts/python -m pytest -v
-```
+### Auth (all roles)
+- `POST /api/v1/auth/login` — Sign in with email/password → returns JWT + user
+- `GET /api/v1/auth/me` — Current session user
 
-### Frontend Tests
-```bash
-cd frontend
-npx vitest run
-```
+### Student
+- `GET /api/v1/student/home` — Dashboard (streak, XP, attempts, mastery)
+- `GET /api/v1/student/profiles` — Available simulation profiles
+- `GET /api/v1/student/attempts` — Past attempts
+- `POST /api/v1/student/attempts` — Start a new attempt
+- `POST /api/v1/student/attempts/{id}/submit` — Submit and score
+- `GET /api/v1/student/attempts/{id}/result` — View results
+- `GET /api/v1/student/attempts/{id}/export.csv` — Export results as CSV
+
+### Trainer
+- `GET /api/v1/trainer/cohorts` — List cohorts
+- `GET /api/v1/trainer/cohorts/{id}/students` — Cohort student summaries
+- `GET /api/v1/trainer/cohorts/{id}/readiness` — Cohort readiness
+- `GET /api/v1/trainer/flags` — List at-risk flags
+- `POST /api/v1/trainer/flags` — Raise flag (stored in DB)
+- `POST /api/v1/trainer/flags/{id}/resolve` — Resolve flag
+
+### Tenant Admin
+- `GET /api/v1/tenant/overview` — Tenant stats
+- `GET /api/v1/tenant/users` — List users (filterable by role)
+- `POST /api/v1/tenant/users` — Create user
+- `POST /api/v1/tenant/users/import` — Bulk import from CSV
+- `GET /api/v1/tenant/cohorts` — List cohorts
+- `POST /api/v1/tenant/cohorts` — Create cohort
+- `GET /api/v1/tenant/profiles` — List assessment profiles
+- `POST /api/v1/tenant/profiles` — Create profile
+- `POST /api/v1/tenant/profiles/{id}/clone` — Clone profile
+- `PUT /api/v1/tenant/profiles/{id}` — Update profile
+- `POST /api/v1/tenant/profiles/{id}/status` — Publish/retire profile
+- `GET /api/v1/tenant/invitations` — List invitations
+- `POST /api/v1/tenant/invitations` — Create invitation
+- `GET /api/v1/tenant/season` — Placement season data
+
+### Platform Admin
+- `GET /api/v1/platform/overview` — Platform stats
+- `GET /api/v1/platform/tenants` — List institutions
+- `POST /api/v1/platform/tenants` — Create institution
+- `GET /api/v1/platform/plans` — List pricing plans
+- `GET /api/v1/platform/capabilities` — Engine capabilities & providers
+- `GET /api/v1/platform/audit` — Audit log (all actions stored)
+- `GET /api/v1/platform/gamification` — Game economy config
+
+### Data Storage
+Every action is stored in MongoDB:
+- **audit_log** — Every login, user create/update, flag, profile change
+- **attempts** — Every test attempt with scores and status
+- **responses** — Individual item responses with transcripts
+- **score_records** — Per-dimension scores for each response
+- **xp_ledger** — XP awards for completed activities
+- **streak_states** — Daily streak tracking
+- **skill_mastery** — Per-skill mastery levels
+- **student_flags** — At-risk flags raised by trainers
+- **consent_records** — Student consent for recording
+- **cohort_members** — Student-cohort assignments
 
 ## Project Structure
 
@@ -215,7 +278,6 @@ CommunicationIQ/
       narration/           # AI feedback narrator
       storage/             # File storage abstraction
       validation/          # Assessment validation
-    tests/                 # Backend test suite
     requirements.txt
     .env.example
   frontend/

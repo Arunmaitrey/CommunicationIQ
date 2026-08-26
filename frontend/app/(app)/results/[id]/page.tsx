@@ -16,7 +16,7 @@ import {
   Badge, ErrorNote, PageHeader, Section, Skeleton,
 } from "@/components/ui";
 import {
-  ApiError, api, attemptApi, type AttemptResult, type PreviousAttempt,
+  ApiError, attemptApi, type PreviousAttempt,
   type PracticeOutcome, type PrimaryDiagnosis, type ResponseMetrics,
   type ResultPriority,
 } from "@/lib/api";

@@ -10,11 +10,13 @@ import { useRole } from "@/components/RoleProvider";
 import { ThemePicker } from "@/components/shell/ThemePicker";
 import { api, ApiError } from "@/lib/api";
 import { landingFor } from "@/lib/nav";
+import { useToast } from "@/components/Toast";
 
 function LoginForm() {
   const router = useRouter();
   const params = useSearchParams();
   const { signIn } = useRole();
+  const { toast } = useToast();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -30,6 +32,7 @@ function LoginForm() {
     try {
       const { token, user } = await api.login(email.trim(), password);
       signIn(user, token);
+      toast("success", `Welcome back, ${user.full_name}!`);
       router.replace(next && next !== "/login" ? next : landingFor(user.role));
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Could not reach the server");

@@ -31,9 +31,7 @@ are underneath it.
 cd backend
 python -m venv .venv
 .venv/Scripts/pip install -r requirements.txt   # Linux/macOS: .venv/bin/pip
-cp .env.example .env
-.venv/Scripts/python -m alembic upgrade head
-.venv/Scripts/python -m app.seed
+cp .env.example .env       # edit MONGO_URI and JWT_SECRET
 .venv/Scripts/python -m uvicorn app.main:app --port 8010 --reload
 ```
 
@@ -58,14 +56,8 @@ Password for all: `Password123!`
 | Platform | `admin@saashx.ai` |
 | Second institution | `admin@vignan.edu` |
 
-Two institutions are seeded on purpose. With one, the isolation tests would
+Two institutions exist on purpose. With one, cross-tenant isolation would
 pass no matter what the code did.
-
-### Reset the demo estate
-
-```bash
-cd backend && .venv/Scripts/python -m app.seed --reset
-```
 
 ## What the engine measures — and what it does not
 
@@ -188,16 +180,6 @@ Drop `--dry-run` to delete. The audio goes; the feature record — transcript,
 timings, pause structure — stays, so a student's diagnosis and progress history
 outlive their voice. Offboarding an institution (`drop_tenant_schema`) removes
 its recordings along with its schema.
-
-## Tests
-
-```bash
-cd backend && .venv/Scripts/python -m pytest -q
-```
-
-Cross-tenant isolation is tested from the first table rather than the first
-incident — see `tests/test_tenant_isolation.py`. CI runs the same suite against
-a real PostgreSQL service.
 
 ---
 

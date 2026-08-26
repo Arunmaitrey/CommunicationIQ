@@ -1,6 +1,6 @@
 """CommunicationIQ backend settings — loaded from environment / .env.
 
-MongoDB migration: the single shared PostgreSQL is replaced by MongoDB. The
+MongoDB: the control-plane database is
 control plane lives in one database (``CommunicationIQ`` by default, taken from
 the URI), and every institution gets its *own* database named ``tenant_<slug>``
 so tenant isolation is structural, not a filter (TEN-12).

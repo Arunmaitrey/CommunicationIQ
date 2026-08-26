@@ -14,7 +14,6 @@ import { firstOpenIndex, nextStep } from "@/lib/sequence";
 import { sectionBudget, sectionMood, sectionRemaining } from "@/lib/timing";
 import { groupNumbering, remainingSeconds, sectionExpiry } from "@/lib/sectionClock";
 import { FRESH, advanceReason, inspect, observe, shouldAdvance, speechFloorFor, windowFor, type TalkState } from "@/lib/speech";
-import { deliver, verdictFor } from "@/lib/upload";
 import {
   beep, levelToFraction, MicPermissionError, MicRecorder, MicUnavailableError,
   playAudioUrl, primeSpeech, speak, TARGET_SAMPLE_RATE,
@@ -321,7 +320,7 @@ function Runner() {
         setPhase("failed");
       }
     })();
-  }, [id, router]);
+  }, [id, router, finishResumed]);
 
   // -- the clock ----------------------------------------------------------
 
