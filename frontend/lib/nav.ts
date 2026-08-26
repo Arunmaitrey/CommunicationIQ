@@ -1,6 +1,6 @@
 import {
-  Activity, Award, BarChart3, Boxes, Building2, ClipboardList, CreditCard,
-  FileText, Flag, GraduationCap, Home, Layers, LineChart, ListChecks, Mic,
+  Activity, BarChart3, Boxes, Building2, ClipboardList, CreditCard,
+  FileText, Flag, GraduationCap, Home, Layers, LineChart, Mic,
   ScrollText, Send, Settings, ShieldCheck, Sparkles, Target, Upload, Users,
   Wallet,
 } from "lucide-react";

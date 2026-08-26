@@ -223,6 +223,39 @@ function Runner() {
 
   useEffect(() => () => recorder.current?.close(), []);
 
+  /** Send anything this browser is still holding for this attempt. */
+  const drainQueue = useCallback(async () => {
+    const { owed: left } = await drainPending(
+      id, (rid, blob, kind, endReason) => kind === "answer"
+        ? attemptApi.answerStatus(id, rid, blob)
+        : attemptApi.uploadAudioStatus(id, rid, blob, endReason));
+    setOwed(left);
+    return left;
+  }, [id]);
+
+  /** A reload found every item answered: drain what this browser still
+   *  holds and submit, rather than replaying a finished test. */
+  const finishResumed = useCallback(async () => {
+    const stillOwed = await drainQueue();
+    if (stillOwed > 0) {
+      setUploadNote(
+        `${stillOwed} of your answers ${stillOwed === 1 ? "has" : "have"} not `
+        + `reached us. They are saved on this device. Try again, or finish `
+        + `without them — they will not be scored if you do.`);
+      setPhase("owed");
+      return;
+    }
+    recorder.current?.close();
+    recorder.current = null;
+    try {
+      await attemptApi.submit(id);
+      router.replace(`/results/${id}`);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.detail : "Scoring failed.");
+      setPhase("failed");
+    }
+  }, [drainQueue, id, router]);
+
   // Count the passage down while it is on screen. Stops at zero rather than
   // going negative, and clears itself if the candidate leaves the phase.
   useEffect(() => {
@@ -504,16 +537,6 @@ function Runner() {
     setOwed(inFlight);
   }, [id]);
 
-  /** Send anything this browser is still holding for this attempt. */
-  const drainQueue = useCallback(async () => {
-    const { owed: left } = await drainPending(
-      id, (rid, blob, kind, endReason) => kind === "answer"
-        ? attemptApi.answerStatus(id, rid, blob)
-        : attemptApi.uploadAudioStatus(id, rid, blob, endReason));
-    setOwed(left);
-    return left;
-  }, [id]);
-
   // On arrival, and whenever the network comes back. A reload mid-attempt is
   // the case this exists for: the audio is in IndexedDB and the server has
   // never seen it.
@@ -752,7 +775,7 @@ function Runner() {
     }
 
     await store(current.response_id, wav, "audio", endReason.current);
-  }, [countdown, id, offerRetake, store, payload?.style, firstOfPassage]);
+  }, [countdown, id, offerRetake, store, payload?.style, firstOfPassage, passOverIfSectionOver, payload?.company]);
 
   // -- the sequence -------------------------------------------------------
 
@@ -819,29 +842,6 @@ function Runner() {
       return;
     }
 
-    recorder.current?.close();
-    recorder.current = null;
-    try {
-      await attemptApi.submit(id);
-      router.replace(`/results/${id}`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Scoring failed.");
-      setPhase("failed");
-    }
-  }
-
-  /** A reload found every item answered: drain what this browser still
-   *  holds and submit, rather than replaying a finished test. */
-  async function finishResumed() {
-    const stillOwed = await drainQueue();
-    if (stillOwed > 0) {
-      setUploadNote(
-        `${stillOwed} of your answers ${stillOwed === 1 ? "has" : "have"} not `
-        + `reached us. They are saved on this device. Try again, or finish `
-        + `without them — they will not be scored if you do.`);
-      setPhase("owed");
-      return;
-    }
     recorder.current?.close();
     recorder.current = null;
     try {

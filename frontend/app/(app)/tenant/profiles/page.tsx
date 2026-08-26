@@ -542,7 +542,7 @@ function Editor({ draft, onChange, onSave, onCancel, busy }: {
 
 /** Drop the filters only a Speaking bank can honour. */
 function dropClassification(sel: SectionSelection | undefined): SectionSelection {
-  const { topics, roles, industries, languages, ...rest } = sel ?? {};
+  const { topics: _t, roles: _r, industries: _i, languages: _l, ...rest } = sel ?? {};
   return rest;
 }
 

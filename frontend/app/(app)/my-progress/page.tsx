@@ -5,7 +5,7 @@ import { RequireAuth } from "@/components/RequireAuth";
 import {
   ErrorNote, GapMeter, PageHeader, Section, Skeleton, StatCard,
 } from "@/components/ui";
-import { api, practiceApi, type Mastery, type StudentHome } from "@/lib/api";
+import { api, type Mastery, type StudentHome } from "@/lib/api";
 import { skillLabel } from "@/lib/roles";
 import { useData } from "@/lib/useData";
 
@@ -30,7 +30,6 @@ export default function MyProgressPage() {
  */
 function MyProgress() {
   const home = useData(() => api.studentHome());
-  const skills = useData(() => practiceApi.skills());
 
   if (home.loading) return <Skeleton rows={6} />;
   if (home.error) return <ErrorNote message={home.error} />;

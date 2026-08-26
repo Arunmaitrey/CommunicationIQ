@@ -12,13 +12,13 @@ module.exports = {
   parserOptions: {
     ecmaVersion: "latest",
     sourceType: "module",
-    project: "./frontend/tsconfig.json",
+    project: "./tsconfig.json",
   },
   plugins: ["@typescript-eslint", "@next/next"],
   rules: {
     "@next/next/no-html-link-for-pages": "off",
     "@next/next/no-img-element": "off",
-    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }],
+    "@typescript-eslint/no-unused-vars": ["warn", { "varsIgnorePattern": "^_", "argsIgnorePattern": "^_" }],
     "react/no-unescaped-entities": "off",
   },
   settings: {

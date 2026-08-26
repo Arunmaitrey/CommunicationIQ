@@ -5,7 +5,7 @@ import { useState } from "react";
 import {
   LogOut, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from "lucide-react";
-import { BrandLockup, BrandMark, TenantLockup } from "@/components/brand/BrandMark";
+import { BrandMark, TenantLockup } from "@/components/brand/BrandMark";
 import { PoweredByFloat } from "@/components/brand/PoweredBy";
 import { useRole } from "@/components/RoleProvider";
 import { ThemePicker } from "@/components/shell/ThemePicker";
