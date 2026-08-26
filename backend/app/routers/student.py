@@ -5,6 +5,7 @@ nothing else. There is no student endpoint that takes another user's id.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 
@@ -90,6 +91,11 @@ def _profile_out(profile, sections) -> SimulationProfileOut:
     )
 
 
+async def _none():
+    """An awaitable ``None`` — for a gather() slot that has nothing to fetch."""
+    return None
+
+
 async def _sections_by_profile(models: SimpleNamespace,
                                profile_ids: list[str]) -> dict[str, list]:
     """Sections grouped by owning profile, each list ordered by position.
@@ -114,68 +120,78 @@ async def home(principal: Principal, models: TenantModels) -> StudentHome:
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found")
 
-    consent = await models.ConsentRecord.find(
-        models.ConsentRecord.user_id == user.id,
-        models.ConsentRecord.scope == "recording",
-    ).sort("-at").first_or_none()
+    # Everything below reads its own rows and none of it depends on any other
+    # query's result, so it is fetched as one batch rather than one `await`
+    # at a time. Sequentially, each round-trip pays the database's real
+    # latency in turn — invisible against a local database, and additive
+    # against a remote one, where this endpoint was measured taking the sum
+    # of about a dozen round-trips instead of the cost of one.
+    (
+        consent, attempts, baseline_done, profiles, mastery, xp_rows,
+        streak, quest, member,
+    ) = await asyncio.gather(
+        models.ConsentRecord.find(
+            models.ConsentRecord.user_id == user.id,
+            models.ConsentRecord.scope == "recording",
+        ).sort("-at").first_or_none(),
+        models.Attempt.find(
+            models.Attempt.user_id == user.id,
+        ).sort("-created_at").limit(10).to_list(),
+        # Asked as its own question rather than read off the display list
+        # above.
+        #
+        # This used to be `any(a.is_baseline and a.status == "scored" for a
+        # in attempts)` over that ten-row slice, so it really answered "is
+        # there a scored baseline among your ten most recent attempts". A
+        # student who took the baseline and then practised eleven more times
+        # was told they had never taken it -- on a screen that was
+        # simultaneously listing their scored baseline results underneath.
+        models.Attempt.find_one(
+            models.Attempt.user_id == user.id,
+            models.Attempt.is_baseline == True,
+            models.Attempt.status == "scored",
+        ),
+        # Sections are fetched up front, grouped per profile: serialisation
+        # needs the full shape, and there is no lazy load to fall back on
+        # mid-response.
+        models.SimulationProfile.find(
+            models.SimulationProfile.status == "published").sort(
+            "-is_baseline", "name").to_list(),
+        models.SkillMastery.find(
+            models.SkillMastery.user_id == user.id).sort(
+            models.SkillMastery.mastery).to_list(),
+        models.XPLedger.find(models.XPLedger.user_id == user.id).to_list(),
+        models.StreakState.find_one(models.StreakState.user_id == user.id),
+        models.Quest.find_one(
+            models.Quest.user_id == user.id, models.Quest.kind == "daily",
+            models.Quest.for_date == date.today()),
+        models.CohortMember.find_one(models.CohortMember.user_id == user.id),
+    )
+    baseline_done = baseline_done is not None
 
-    attempts = await models.Attempt.find(
-        models.Attempt.user_id == user.id,
-    ).sort("-created_at").limit(10).to_list()
-
-    # Asked as its own question rather than read off the display list above.
-    #
-    # This used to be `any(a.is_baseline and a.status == "scored" for a in
-    # attempts)` over that ten-row slice, so it really answered "is there a
-    # scored baseline among your ten most recent attempts". A student who took
-    # the baseline and then practised eleven more times was told they had
-    # never taken it -- on a screen that was simultaneously listing their
-    # scored baseline results underneath.
-    baseline_done = (await models.Attempt.find_one(
-        models.Attempt.user_id == user.id,
-        models.Attempt.is_baseline == True,
-        models.Attempt.status == "scored",
-    )) is not None
-
-    # Sections are fetched up front, grouped per profile: serialisation needs
-    # the full shape, and there is no lazy load to fall back on mid-response.
-    profiles = await models.SimulationProfile.find(
-        models.SimulationProfile.status == "published").sort(
-        "-is_baseline", "name").to_list()
-    sections_by_profile = await _sections_by_profile(
-        models, [p.id for p in profiles])
+    # This second batch depends on the first: sections need profile ids,
+    # overall scores need attempt ids, and the cohort needs the membership
+    # row — each one query, still parallel with the other two.
+    sections_by_profile, overall_rows, cohort = await asyncio.gather(
+        _sections_by_profile(models, [p.id for p in profiles]),
+        models.ScoreRecord.find(
+            models.ScoreRecord.dimension == "overall",
+            models.ScoreRecord.is_shadow == False,
+            In(models.ScoreRecord.attempt_id, [a.id for a in attempts] or [""]),
+        ).to_list(),
+        (models.Cohort.get(member.cohort_id) if member is not None
+         else _none()),
+    )
     profile_names = {p.id: p.name for p in profiles}
-
-    overall_rows = await models.ScoreRecord.find(
-        models.ScoreRecord.dimension == "overall",
-        models.ScoreRecord.is_shadow == False,
-        In(models.ScoreRecord.attempt_id, [a.id for a in attempts] or [""]),
-    ).to_list()
     overall = {r.attempt_id: r.score for r in overall_rows}
-
-    mastery = await models.SkillMastery.find(
-        models.SkillMastery.user_id == user.id).sort(
-        models.SkillMastery.mastery).to_list()
-
-    xp_rows = await models.XPLedger.find(
-        models.XPLedger.user_id == user.id).to_list()
     total_xp = int(sum(r.awarded_xp for r in xp_rows))
 
-    streak = await models.StreakState.find_one(
-        models.StreakState.user_id == user.id)
-
-    quest = await models.Quest.find_one(
-        models.Quest.user_id == user.id, models.Quest.kind == "daily",
-        models.Quest.for_date == date.today())
-
-    # Days to the real drive date, from the student's cohort. There is no other
-    # countdown in the product (GAM-25).
-    days_to_drive: int | None = None
-    member = await models.CohortMember.find_one(
-        models.CohortMember.user_id == user.id)
-    cohort = await models.Cohort.get(member.cohort_id) if member is not None else None
     if cohort is not None and not cohort.active:
         cohort = None
+
+    # Days to the real drive date, from the student's cohort. There is no
+    # other countdown in the product (GAM-25).
+    days_to_drive: int | None = None
     if cohort is not None and cohort.drive_start is not None:
         days_to_drive = (cohort.drive_start.date() - date.today()).days
 
