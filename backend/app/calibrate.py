@@ -15,10 +15,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from sqlalchemy import select
-
 from app import audit
-from app.db import platform_sessionmaker, tenant_sessionmaker
+from app.db import platform_sessionmaker, select, tenant_sessionmaker
 from app.engine.psychometrics import irt
 from app.engine.psychometrics.bkt import DEMONSTRATED_AT
 from app.models.platform import Tenant

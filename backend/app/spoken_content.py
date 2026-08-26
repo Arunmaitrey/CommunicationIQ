@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from app.db import select
 
 from app.engine.contracts.types import Capability, ProviderUnavailable
 from app.engine.pipeline import SCALE_MAX, SCALE_MIN, band_label

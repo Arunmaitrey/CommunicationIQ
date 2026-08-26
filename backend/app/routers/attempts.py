@@ -19,12 +19,11 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
                      Request, Response as HttpResponse, UploadFile, status)
-
 from app.config import settings
 from app.invitations import CANDIDATE_ROLE
-from app.db import ensure_tenant_models
+from app.db import ensure_tenant_models, func, select
 from app import formats
-from app.deps import Principal, TenantModels, require_roles
+from app.deps import Principal, PlatformSession, TenantSession, require_roles
 from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
 from app import deadline as app_deadline
 from app import reconstruction as app_reconstruction
@@ -208,10 +207,17 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
     profile = (await session.execute(
         select(SimulationProfile)
         .where(SimulationProfile.id == body.profile_id)
-        .options(selectinload(SimulationProfile.sections))
     )).scalars().first()
     if profile is None or profile.status != "published":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Simulation not available")
+
+    # SimulationProfile carries no relationship to its sections — they are a
+    # separate collection, addressed by profile_id, and were never anything
+    # SQLAlchemy's selectinload could actually eager-load once this became a
+    # Beanie document; fetched explicitly instead.
+    sections = (await session.execute(
+        select(ProfileSection).where(ProfileSection.profile_id == profile.id)
+    )).scalars().all()
 
     # A practice session may carry the assessment attempt that prescribed it.
     # Validated here so the loop can trust it later: it must be the caller's
@@ -282,8 +288,8 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
     # whether the microphone works at all. Scoring that measures the software's
     # unfamiliarity rather than their English. One item, from the first
     # section, marked so nothing it produces counts.
-    if getattr(profile, "practice_item", False) and profile.sections:
-        first = min(profile.sections, key=lambda s: s.position)
+    if getattr(profile, "practice_item", False) and sections:
+        first = min(sections, key=lambda s: s.position)
         kind, key = app_sections.source_of(first.task_type)
         if kind == "task":
             for item in await _pick_items(session, first, principal.user_id,
@@ -294,7 +300,7 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
                 position += 1
                 break
 
-    for section in sorted(profile.sections, key=lambda s: s.position):
+    for section in sorted(sections, key=lambda s: s.position):
         # Where the items come from is a property of the task type, not of
         # how it is answered -- Dictation is typed and draws on the spoken
         # sentence bank. The Response row is the same shape whichever bank it
@@ -610,7 +616,6 @@ async def runner(attempt_id: str, principal: Principal,
     attempt = await _own_attempt(session, principal, attempt_id)
     profile = (await session.execute(
         select(SimulationProfile).where(SimulationProfile.id == attempt.profile_id)
-        .options(selectinload(SimulationProfile.sections))
     )).scalars().first()
     if profile is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Simulation not found")
@@ -763,7 +768,10 @@ async def _runner_payload(session: TenantSession, attempt: Attempt,
         .order_by(Response.position)
     )).scalars().all())
 
-    sections = {s.id: s for s in profile.sections}
+    profile_sections = (await session.execute(
+        select(ProfileSection).where(ProfileSection.profile_id == profile.id)
+    )).scalars().all()
+    sections = {s.id: s for s in profile_sections}
     item_ids = [r.item_id for r in responses if r.item_id]
     items = {i.id: i for i in (await session.execute(
         select(TaskItem).where(TaskItem.id.in_(item_ids or [""]))

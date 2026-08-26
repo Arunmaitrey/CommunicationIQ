@@ -17,11 +17,9 @@ from __future__ import annotations
 
 import asyncio
 
-from sqlalchemy import select
-
 from app import sections as app_sections
 from app import tts
-from app.db import platform_sessionmaker, tenant_sessionmaker
+from app.db import platform_sessionmaker, select, tenant_sessionmaker
 from app.models.platform import Tenant
 from app.models.tenant import ListeningPassage, TaskItem
 

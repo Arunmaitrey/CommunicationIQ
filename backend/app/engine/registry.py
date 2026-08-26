@@ -22,10 +22,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, TypeVar
 
-from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.db import platform_sessionmaker
+from app.db import Session, or_, platform_sessionmaker, select
 from app.engine.contracts import CONTRACT_FOR, Capability, ProviderMeta
 from app.engine.contracts.types import ProviderUnavailable
 from app.models.platform import ProviderConfig, ProviderCall, ProviderRegistry
@@ -104,7 +101,7 @@ def _load(row: ProviderRegistry) -> Any:
 class Providers:
     """Capability resolution bound to one platform session."""
 
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: Session) -> None:
         self.session = session
 
     async def _registry_row(self, provider_id: str | None) -> ProviderRegistry | None:

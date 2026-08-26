@@ -54,6 +54,7 @@ async def init_mongo() -> None:
     from app.models.platform import CONTROL_DOCUMENTS
     await init_beanie(database=control_db(), document_models=CONTROL_DOCUMENTS)
     _client_inited = True
+    _stamp_platform_owners()
 
 
 # ---------------------------------------------------------------------------
@@ -114,6 +115,11 @@ async def ensure_tenant_models(slug: str) -> SimpleNamespace:
         db = tenant_db(slug)
         tenant_docs = _make_tenant_subclasses(slug, list(TENANT_DOCUMENTS))
         await init_beanie(database=db, document_models=tenant_docs)
+        # Beanie sets each field's ExpressionField on every class in the new
+        # subclass's MRO, the shared base included — so this only needs to
+        # run once, off the very first tenant, for every tenant's queries on
+        # the base classes to resolve their owner correctly from here on.
+        _stamp_tenant_owners()
         bundle = SimpleNamespace(**{cls.__name__: cls for cls in tenant_docs})
         _tenant_bundles[slug] = bundle
         return bundle
@@ -131,6 +137,179 @@ def get_tenant_models(slug: str) -> SimpleNamespace:
 async def ensure_platform_models() -> SimpleNamespace:
     from app.models.platform import CONTROL_DOCUMENTS
     return SimpleNamespace(**{cls.__name__: cls for cls in CONTROL_DOCUMENTS})
+
+
+# ---------------------------------------------------------------------------
+# Query-builder shim — select()/delete()/update()/func/or_/selectinload for
+# service modules that still write session.execute(select(Model)...).
+#
+# The previous version of this bridge built *real* sqlalchemy.Select/Delete
+# statements and translated them after the fact. That never worked:
+# sqlalchemy.select() rejects a Beanie Document at construction time (it is
+# not an ORM-mapped class), so every select(SomeDocument) in the app raised
+# ArgumentError before Session.execute ever ran — including inside
+# Providers.resolve(), which every scored dimension goes through. This shim
+# never touches SQLAlchemy; it builds Beanie queries directly.
+# ---------------------------------------------------------------------------
+
+from beanie.odm.fields import ExpressionField as _EF
+from beanie.operators import Eq as _Eq, NE as _NE, In as _In, NotIn as _NotIn, Or as _Or
+
+or_ = _Or
+
+
+def _ef_in_(self, values):
+    return _In(self, list(values))
+
+
+def _ef_not_in(self, values):
+    return _NotIn(self, list(values))
+
+
+def _ef_is_(self, value):
+    return _Eq(self, value)
+
+
+def _ef_is_not(self, value):
+    return _NE(self, value)
+
+
+def _ef_desc(self):
+    # Beanie's own -field / +field sort-direction operators (__neg__/__pos__)
+    # already exist; .desc()/.asc() just spell them the way this codebase's
+    # call sites do.
+    return self.__neg__()
+
+
+def _ef_asc(self):
+    return self.__pos__()
+
+
+_EF.in_ = _ef_in_
+_EF.not_in = _ef_not_in
+_EF.is_ = _ef_is_
+_EF.is_not = _ef_is_not
+_EF.desc = _ef_desc
+_EF.asc = _ef_asc
+
+
+_platform_owners_stamped = False
+_tenant_owners_stamped = False
+
+
+def _stamp_platform_owners() -> None:
+    """``Model.field`` is only ever the field's *name* (Beanie's
+    ExpressionField is a plain str subclass) — it carries no reference back
+    to ``Model``. A whole-row ``select(Model)`` doesn't need one, but a
+    partial ``select(Model.field)`` does, to know what to query.
+
+    Unlike the tenant side, Beanie only sets these class attributes once
+    ``init_beanie`` has actually run for a class — so this runs from
+    ``init_mongo``, after registration, not at import time.
+    """
+    global _platform_owners_stamped
+    if _platform_owners_stamped:
+        return
+    from app.models.platform import CONTROL_DOCUMENTS
+    for model in CONTROL_DOCUMENTS:
+        for name in model.model_fields:
+            field = getattr(model, name, None)
+            if isinstance(field, _EF):
+                field.owner_model = model
+    _platform_owners_stamped = True
+
+
+def _stamp_tenant_owners() -> None:
+    """Same idea as ``_stamp_platform_owners``, for the tenant side.
+
+    Beanie sets a field's ExpressionField on every class in a subclass's MRO
+    when it initialises that subclass — the shared base included — so
+    stamping once, after the very first tenant's ``init_beanie`` call, is
+    enough for every tenant's queries on the base classes to resolve.
+    """
+    global _tenant_owners_stamped
+    if _tenant_owners_stamped:
+        return
+    from app.models.tenant import TENANT_DOCUMENTS
+    for model in TENANT_DOCUMENTS:
+        for name in model.model_fields:
+            field = getattr(model, name, None)
+            if isinstance(field, _EF):
+                field.owner_model = model
+    _tenant_owners_stamped = True
+
+
+class _Count:
+    """Marker produced by func.count(); resolved via .select_from(Model)."""
+
+
+class _Func:
+    @staticmethod
+    def count(*_a) -> _Count:
+        return _Count()
+
+
+func = _Func()
+
+
+def selectinload(*_a, **_kw):
+    """Eager-load hint from the SQLAlchemy relationship world. Meaningless
+    for Beanie: embedded fields already ride along on the document, and
+    nothing here models a lazy-loaded relationship. .options() drops it."""
+    return None
+
+
+class _Stmt:
+    SELECT, DELETE, UPDATE = "select", "delete", "update"
+
+    def __init__(self, kind: str, entities: tuple):
+        self.kind = kind
+        self.entities = entities
+        self.conditions: list = []
+        self.order: list = []
+        self.limit_val: int | None = None
+        self.offset_val: int | None = None
+        self.values_: dict = {}
+        self.from_model = None
+
+    def where(self, *conditions) -> _Stmt:
+        self.conditions.extend(conditions)
+        return self
+
+    def order_by(self, *keys) -> _Stmt:
+        self.order.extend(keys)
+        return self
+
+    def limit(self, n) -> _Stmt:
+        self.limit_val = n
+        return self
+
+    def offset(self, n) -> _Stmt:
+        self.offset_val = n
+        return self
+
+    def values(self, **kwargs) -> _Stmt:
+        self.values_.update(kwargs)
+        return self
+
+    def select_from(self, model) -> _Stmt:
+        self.from_model = model
+        return self
+
+    def options(self, *_a, **_kw) -> _Stmt:
+        return self
+
+
+def select(*entities) -> _Stmt:
+    return _Stmt(_Stmt.SELECT, entities)
+
+
+def delete(entity) -> _Stmt:
+    return _Stmt(_Stmt.DELETE, (entity,))
+
+
+def update(entity) -> _Stmt:
+    return _Stmt(_Stmt.UPDATE, (entity,))
 
 
 # ---------------------------------------------------------------------------
@@ -172,194 +351,74 @@ class Session:
         self._new.clear()
 
     async def get(self, model: type, pk: Any):
-        return await model.get(pk)
+        return await self._resolve(model).get(pk)
 
-    async def execute(self, stmt):
-        from sqlalchemy.sql.selectable import Select
-        from sqlalchemy.sql.dml import Delete, Update
-        from sqlalchemy import func as sa_func
-
-        if isinstance(stmt, Delete):
+    async def execute(self, stmt: _Stmt):
+        if stmt.kind == _Stmt.DELETE:
             return await self._exec_delete(stmt)
-        if isinstance(stmt, Update):
+        if stmt.kind == _Stmt.UPDATE:
             return await self._exec_update(stmt)
-        if isinstance(stmt, Select):
-            return await self._exec_select(stmt)
-        raise TypeError(f"Unsupported statement type: {type(stmt)}")
+        return await self._exec_select(stmt)
 
-    async def _exec_delete(self, stmt) -> None:
-        table = stmt.table
-        model = self._resolve(table)
-        if model is None:
-            return
-        filter_args = self._extract_where(stmt.whereclause)
-        if filter_args:
-            await model.find(*filter_args).delete()
-        else:
-            await model.find_all().delete()
+    async def _exec_delete(self, stmt: _Stmt) -> None:
+        model = self._resolve(stmt.entities[0])
+        await model.find(*stmt.conditions).delete()
 
-    async def _exec_update(self, stmt) -> None:
-        table = stmt.table
-        model = self._resolve(table)
-        if model is None:
-            return
-        filter_args = self._extract_where(stmt.whereclause)
-        if filter_args:
-            docs = await model.find(*filter_args).to_list()
-            for doc in docs:
-                for k, v in (stmt.values or {}).items():
-                    col_name = k.name if hasattr(k, 'name') else str(k)
-                    setattr(doc, col_name, v)
-                await doc.save()
+    async def _exec_update(self, stmt: _Stmt) -> None:
+        model = self._resolve(stmt.entities[0])
+        docs = await model.find(*stmt.conditions).to_list()
+        for doc in docs:
+            for k, v in stmt.values_.items():
+                setattr(doc, k, v)
+            await doc.save()
 
-    async def _exec_select(self, stmt):
-        from sqlalchemy import func as sa_func
+    async def _exec_select(self, stmt: _Stmt):
+        entities = stmt.entities
 
-        select_cols = list(stmt.selected_columns)
-        if select_cols and isinstance(select_cols[0], sa_func.Function):
-            model = self._resolve_model_from_select(stmt)
-            if model:
-                count = await model.find().count()
-                return _ScalarResult(count)
+        if len(entities) == 1 and isinstance(entities[0], _Count):
+            model = self._resolve(stmt.from_model)
+            if model is None:
+                raise TypeError("func.count() needs .select_from(Model)")
+            n = await model.find(*stmt.conditions).count()
+            return _ScalarResult(n)
 
-        if select_cols:
-            first = select_cols[0]
-            if hasattr(first, 'class_'):
-                model = first.class_
-                result = await self._find_with_clauses(model, stmt)
-                return _Result(result)
-            if hasattr(first, 'table'):
-                model = self._resolve(first.table)
-                if model:
-                    result = await self._find_with_clauses(model, stmt)
-                    col_names = [c.name if hasattr(c, 'name') else c.key
-                                 for c in select_cols if hasattr(c, 'name') or hasattr(c, 'key')]
-                    if col_names:
-                        result = [type('_Row', (), dict(zip(col_names, row)))()
-                                  for row in
-                                  [[getattr(r, cn, None) for cn in col_names] for r in result]]
-                    return _Result(result)
+        first = entities[0]
+        if isinstance(first, type):
+            model = self._resolve(first)
+            docs = await self._run(model, stmt)
+            return _Result(docs)
 
-        model = self._resolve_model_from_select(stmt)
-        if model:
-            result = await self._find_with_clauses(model, stmt)
-            return _Result(result)
-        return _Result([])
+        owner = getattr(first, 'owner_model', None)
+        if owner is None:
+            raise TypeError(
+                f"select({first!r}) — its owning model was never stamped by "
+                "_stamp_owners(); is it a field on a model in CONTROL_DOCUMENTS "
+                "or TENANT_DOCUMENTS?")
+        model = self._resolve(owner)
+        docs = await self._run(model, stmt)
+        if len(entities) == 1:
+            return _Result([getattr(d, str(first)) for d in docs])
+        return _Result([tuple(getattr(d, str(f)) for f in entities) for d in docs])
 
-    def _resolve_model_from_select(self, stmt):
-        for desc in stmt.column_descriptions:
-            if 'entity' in desc and desc['entity'] is not None:
-                return desc['entity']
-        if hasattr(stmt, 'froms') and stmt.froms:
-            for fc in stmt.froms:
-                if hasattr(fc, 'name'):
-                    m = self._resolve(fc)
-                    if m:
-                        return m
-        if hasattr(stmt, 'from_table') and stmt.from_table:
-            return self._resolve(stmt.from_table)
-        return None
-
-    async def _find_with_clauses(self, model, stmt):
-        query = model.find()
-
-        if stmt.whereclause is not None:
-            filters = self._extract_where(stmt.whereclause)
-            if filters:
-                query = model.find(*filters)
-
-        if stmt.order_by_clause:
-            sort_list = []
-            for elem in stmt.order_by_clause:
-                col = elem.element if hasattr(elem, 'element') else elem
-                direction = 1 if not getattr(elem, 'descending', lambda: False)() else -1
-                col_name = getattr(col, 'name', None) or str(col)
-                sort_list.append((col_name, direction))
-            query = query.sort(sort_list)
-
-        if stmt._limit_clause is not None:
-            limit_val = stmt._limit_clause
-            if hasattr(limit_val, 'value'):
-                limit_val = limit_val.value
-            query = query.limit(int(limit_val))
-
-        if stmt._offset_clause is not None:
-            offset_val = stmt._offset_clause
-            if hasattr(offset_val, 'value'):
-                offset_val = offset_val.value
-            query = query.skip(int(offset_val))
-
+    async def _run(self, model, stmt: _Stmt) -> list:
+        query = model.find(*stmt.conditions)
+        if stmt.order:
+            query = query.sort(*stmt.order)
+        if stmt.limit_val is not None:
+            query = query.limit(stmt.limit_val)
+        if stmt.offset_val is not None:
+            query = query.skip(stmt.offset_val)
         return await query.to_list()
 
-    def _resolve(self, table_or_model):
-        if hasattr(table_or_model, 'name'):
-            table_name = table_or_model.name
-        elif hasattr(table_or_model, '__tablename__'):
-            table_name = table_or_model.__tablename__
-        elif isinstance(table_or_model, str):
-            table_name = table_or_model
-        else:
+    def _resolve(self, model):
+        """The class a caller imports (``from app.models.tenant import
+        Attempt``) is never itself bound to a database — each tenant gets its
+        own subclass, built and registered by ``ensure_tenant_models``. This
+        finds that bound subclass; for platform models, where the base class
+        *is* the bound one, it is its own answer."""
+        if model is None:
             return None
-
-        ns = self._models
-        for attr in dir(ns):
-            obj = getattr(ns, attr)
-            if hasattr(obj, 'Settings') and hasattr(obj.Settings, 'name'):
-                if obj.Settings.name == table_name:
-                    return obj
-        return None
-
-    def _extract_where(self, whereclause) -> list:
-        from sqlalchemy.sql.elements import BooleanClauseList
-        if whereclause is None:
-            return []
-        if isinstance(whereclause, BooleanClauseList):
-            return [f for elem in whereclause.clauses
-                    if (f := self._extract_one(elem)) is not None]
-        f = self._extract_one(whereclause)
-        return [f] if f is not None else []
-
-    def _extract_one(self, clause):
-        from sqlalchemy.sql.elements import BinaryExpression, UnaryExpression
-        from sqlalchemy import operators as sa_ops
-
-        if not isinstance(clause, (BinaryExpression, UnaryExpression)):
-            return None
-        if isinstance(clause, UnaryExpression):
-            if clause.operator == sa_ops.not_op:
-                inner = self._extract_one(clause.element)
-                if inner is not None:
-                    from beanie.operators import Not
-                    return Not(inner)
-            return None
-
-        left = clause.left
-        right = clause.right
-        op = clause.operator
-        col_name = getattr(left, 'name', None) or getattr(left, 'key', None)
-        if col_name is None:
-            return None
-        value = right.value if hasattr(right, 'value') else right
-
-        from sqlalchemy import operators as sa_ops
-        from beanie.operators import Eq, Ne, Gt, Gte, Lt, Lte, In, NotIn, RegEx
-
-        op_map = {sa_ops.eq: Eq, sa_ops.ne: Ne, sa_ops.gt: Gt, sa_ops.ge: Gte,
-                  sa_ops.lt: Lt, sa_ops.le: Lte}
-        if op in op_map:
-            return {col_name: op_map[op](value)}
-        if op == sa_ops.in_op:
-            return {col_name: In(value)}
-        if op == sa_ops.not_in_op:
-            return {col_name: NotIn(value)}
-        if op in (sa_ops.like_op, sa_ops.ilike_op):
-            pattern = value.replace('%', '.*').replace('_', '.')
-            return {col_name: RegEx(f"(?i){pattern}") if op == sa_ops.ilike_op else RegEx(pattern)}
-        if op == sa_ops.is_:
-            return {col_name: None} if value is None else {col_name: Eq(value)}
-        if op == sa_ops.is_not:
-            return {col_name: {"$ne": None}} if value is None else {col_name: {"$ne": value}}
-        return None
+        return getattr(self._models, model.__name__, model)
 
 
 class _Result:
@@ -381,6 +440,10 @@ class _Result:
         return self._data[0]
     def one_or_none(self):
         return None if not self._data else self.one()
+    def scalar_one(self):
+        return self.one()
+    def scalar_one_or_none(self):
+        return self.one_or_none()
     def __iter__(self):
         return iter(self._data)
     def __len__(self):
@@ -401,6 +464,10 @@ class _ScalarResult:
     def one(self):
         return self._value
     def scalar(self):
+        return self._value
+    def scalar_one(self):
+        return self._value
+    def scalar_one_or_none(self):
         return self._value
     def __iter__(self):
         return iter([self._value])

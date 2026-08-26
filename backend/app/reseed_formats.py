@@ -18,10 +18,8 @@ from __future__ import annotations
 import asyncio
 import os
 
-from sqlalchemy import delete, select, update
-
 from app import formats
-from app.db import platform_sessionmaker, tenant_sessionmaker
+from app.db import delete, platform_sessionmaker, select, tenant_sessionmaker, update
 from app.models.platform import Tenant
 from app.models.tenant import (AttemptNarration, FeatureRecord, Invitation,
                                ProfileSection, Response, ResponseAudio,

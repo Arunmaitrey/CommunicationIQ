@@ -18,9 +18,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 
-from sqlalchemy import select
-
-from app.db import platform_sessionmaker, tenant_sessionmaker
+from app.db import platform_sessionmaker, select, tenant_sessionmaker
 from app.models.platform import AuditLog, Tenant
 from app.models.tenant import ResponseAudio
 from app.storage import get_storage

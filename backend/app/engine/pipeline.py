@@ -23,8 +23,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.db import Session, delete, select
 
 from app.engine import calibration, freeze
 from app.engine.contracts import AudioRef, Capability
@@ -201,7 +200,7 @@ def _also_correct(item) -> tuple[str, ...]:
     return tuple(str(x) for x in written if str(x).strip())
 
 
-async def score_response(tenant: AsyncSession, providers: Providers,
+async def score_response(tenant: Session, providers: Providers,
                           tenant_id: str | None, response_id: str) -> ResponseOutcome:
     """Score one answer. Safe to call twice — the second call is a no-op.
 
@@ -535,7 +534,7 @@ def _unscored_for(outcomes: list[ResponseOutcome]) -> dict[str, str]:
 # The attempt
 # --------------------------------------------------------------------------
 
-async def pending_responses(tenant: AsyncSession, attempt_id: str) -> list[str]:
+async def pending_responses(tenant: Session, attempt_id: str) -> list[str]:
     """Responses with audio but no features yet — what submit is waiting on."""
     responses = (await tenant.execute(
         select(Response).where(Response.attempt_id == attempt_id,
@@ -556,7 +555,7 @@ async def pending_responses(tenant: AsyncSession, attempt_id: str) -> list[str]:
             if r.id in audible and r.id not in featured]
 
 
-async def finalise_attempt(tenant: AsyncSession, attempt_id: str) -> AttemptOutcome:
+async def finalise_attempt(tenant: Session, attempt_id: str) -> AttemptOutcome:
     """Compose the attempt-level scores from whatever the responses produced."""
     started = time.perf_counter()
 
@@ -636,7 +635,7 @@ async def finalise_attempt(tenant: AsyncSession, attempt_id: str) -> AttemptOutc
     )
 
 
-async def update_mastery(tenant: AsyncSession, user_id: str,
+async def update_mastery(tenant: Session, user_id: str,
                          dimensions: dict[str, float]) -> None:
     """Move mastery on evidence, using Bayesian Knowledge Tracing (ENG-13)."""
     for dimension, value in dimensions.items():
@@ -675,7 +674,7 @@ async def update_mastery(tenant: AsyncSession, user_id: str,
 class AttemptScorer:
     """Score every response, then compose. Used when nothing was scored on ingest."""
 
-    def __init__(self, tenant: AsyncSession, providers: Providers,
+    def __init__(self, tenant: Session, providers: Providers,
                  tenant_id: str | None) -> None:
         self.tenant = tenant
         self.providers = providers
