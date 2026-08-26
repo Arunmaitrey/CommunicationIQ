@@ -57,6 +57,15 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
+    // Try cached identity first for instant nav, then refresh in background
+    try {
+      const cached = localStorage.getItem(IDENTITY_KEY);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        setUser({ ...parsed, id: "", email: parsed.email, full_name: "", role: parsed.role, scope: "" } as SessionUser);
+        setLoading(false);
+      }
+    } catch { /* ignore */ }
     void refresh();
   }, [refresh]);
 

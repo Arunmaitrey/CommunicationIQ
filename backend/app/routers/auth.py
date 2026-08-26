@@ -20,6 +20,9 @@ from app.schemas import (ChangePasswordRequest, LoginRequest, LoginResponse,
 from app import audit
 from app.security import (TokenPrincipal, create_token, hash_password,
                           verify_password)
+from app.routers.login_rate_limit import (
+    is_blocked, record_failure, reset, LOGIN_RATE_LIMIT_MESSAGE,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -36,14 +39,25 @@ def _branding_fields(tenant) -> dict:
 
 
 @router.post("/login", response_model=LoginResponse)
-async def login(body: LoginRequest) -> LoginResponse:
+async def login(body: LoginRequest, request=None) -> LoginResponse:
     email = body.email.lower().strip()
+
+    # Rate limiting: block IP after too many failed attempts
+    client_ip = request.client.host if request else "unknown"
+    remaining = is_blocked(client_ip)
+    if remaining is not None:
+        raise HTTPException(
+            status.HTTP_429_TOO_MANY_REQUESTS,
+            LOGIN_RATE_LIMIT_MESSAGE,
+        )
 
     staff = await PlatformUser.find(PlatformUser.email == email).first_or_none()
 
     if staff is not None:
         if not staff.active or not verify_password(body.password, staff.password_hash):
+            record_failure(client_ip)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, _REJECT)
+        reset(client_ip)
         staff.last_login_at = datetime.now(timezone.utc)
         await staff.save()
         principal = TokenPrincipal(
@@ -72,7 +86,9 @@ async def login(body: LoginRequest) -> LoginResponse:
     tenant_models = await ensure_tenant_models(tenant.slug)
     user = await tenant_models.User.find(tenant_models.User.email == email).first_or_none()
     if user is None or not user.active or not verify_password(body.password, user.password_hash):
+        record_failure(client_ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _REJECT)
+    reset(client_ip)
     user.last_login_at = datetime.now(timezone.utc)
     await user.save()
 
