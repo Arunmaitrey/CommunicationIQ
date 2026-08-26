@@ -11,6 +11,7 @@ from a constant somebody has to remember to update.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 
@@ -79,23 +80,43 @@ async def _mastery(models: SimpleNamespace, user_id: str,
     return round(100 * sum(r.mastery for r in rows) / len(rows), 1)
 
 
-async def modules_for(models: SimpleNamespace, user_id: str) -> list[SkillModule]:
-    """The four skills, in the order they are usually taught and tested."""
-    speaking_items = await _count_tasks(models, SPEAKING_TASKS)
-    listening_items = await _count_quiz(models, LISTENING_CATEGORIES)
-    reading_items = await _count_quiz(models, READING_CATEGORIES)
-
-    writing_prompts = len(await models.WritingPrompt.find(
+async def _count_writing_prompts(models: SimpleNamespace) -> int:
+    return len(await models.WritingPrompt.find(
         models.WritingPrompt.status == "published"
     ).to_list())
 
-    return [
-        await _speaking(models, user_id, speaking_items),
-        await _listening(models, user_id, listening_items),
-        await _reading(models, user_id, reading_items),
-        (await _writing_live(models, user_id, writing_prompts)
-         if writing_prompts else _writing()),
-    ]
+
+async def modules_for(models: SimpleNamespace, user_id: str) -> list[SkillModule]:
+    """The four skills, in the order they are usually taught and tested.
+
+    Each count and each module below reads its own, unrelated rows, so
+    fetching them one `await` at a time only serialises round-trips a remote
+    database actually has to pay for — nothing here depends on anything
+    else's result.
+    """
+    speaking_items, listening_items, reading_items, writing_prompts = await asyncio.gather(
+        _count_tasks(models, SPEAKING_TASKS),
+        _count_quiz(models, LISTENING_CATEGORIES),
+        _count_quiz(models, READING_CATEGORIES),
+        _count_writing_prompts(models),
+    )
+
+    if writing_prompts:
+        speaking, listening, reading, writing = await asyncio.gather(
+            _speaking(models, user_id, speaking_items),
+            _listening(models, user_id, listening_items),
+            _reading(models, user_id, reading_items),
+            _writing_live(models, user_id, writing_prompts),
+        )
+    else:
+        # _writing() needs no query — nothing to gather it with.
+        speaking, listening, reading = await asyncio.gather(
+            _speaking(models, user_id, speaking_items),
+            _listening(models, user_id, listening_items),
+            _reading(models, user_id, reading_items),
+        )
+        writing = _writing()
+    return [speaking, listening, reading, writing]
 
 
 async def _speaking(models: SimpleNamespace, user_id: str, items: int) -> SkillModule:
