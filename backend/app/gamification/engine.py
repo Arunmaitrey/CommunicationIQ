@@ -361,8 +361,14 @@ async def ensure_badges(models: SimpleNamespace) -> dict[str, Badge]:
             badge = models.Badge(code=code, name=name, category=category,
                                  description=description, criteria={"code": code},
                                  criteria_version=1)
-            await badge.create()
-            existing[code] = badge
+            try:
+                await badge.create()
+                existing[code] = badge
+            except Exception:
+                # Duplicate or corrupt record — find by code and continue
+                found = await models.Badge.find_one(models.Badge.code == code)
+                if found:
+                    existing[code] = found
     return existing
 
 
@@ -426,7 +432,14 @@ async def season_for(models: SimpleNamespace, user_id: str) -> SeasonPlan:
             drive_date=drive, starts_on=starts, ends_on=ends,
             weekly_themes=themes, daily_minutes_target=25,
         )
-        await plan.create()
+        try:
+            await plan.create()
+        except Exception:
+            # Race condition or corrupt data — find existing
+            existing = await models.SeasonPlan.find_one(
+                models.SeasonPlan.user_id == user_id)
+            if existing:
+                return existing
         return plan
 
     if existing.ends_on != ends or existing.drive_date != drive:
