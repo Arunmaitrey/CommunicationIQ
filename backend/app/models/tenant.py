@@ -11,34 +11,9 @@ import uuid
 from datetime import date, datetime, timezone
 
 from beanie import Document, Indexed
-from pydantic import Field, model_validator, ConfigDict
+from pydantic import Field
 
 from app.models._common import StrId
-
-# Patch Beanie Document to coerce ObjectId _id to str.
-# MongoDB stores _id as ObjectId; Pydantic expects str on id: StrId fields.
-# This validator fires before any field-level validation.
-try:
-    from bson import ObjectId as _OID
-    _orig_validator = getattr(Document, '__pydantic_validators__', {})
-
-    @model_validator(mode='before')
-    @classmethod
-    def _coerce_oid(cls, values):
-        if isinstance(values, dict):
-            for k in ('_id', 'id'):
-                v = values.get(k)
-                if isinstance(v, _OID):
-                    values[k] = str(v)
-        return values
-
-    if not getattr(Document, '_oid_patched', False):
-        Document.model_config = ConfigDict(from_attributes=True)
-        # Inject the validator by setting it on the class
-        Document.__pydantic_decorators__ = getattr(Document, '__pydantic_decorators__', None)
-        Document._oid_patched = True
-except Exception:
-    pass
 
 
 def _uuid() -> str:
@@ -56,7 +31,7 @@ def _now() -> datetime:
 class User(Document):
     """An institution user: tenant admin, trainer, or student."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     email: str = Field(unique=True, index=True)
     full_name: str
     password_hash: str
@@ -81,7 +56,7 @@ class User(Document):
 class ConsentRecord(Document):
     """Verifiable consent, captured before the first recording (STU-02, DPDP)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     scope: str = Field(default="", index=True)
     granted: bool = True
@@ -98,7 +73,7 @@ class ConsentRecord(Document):
 class Cohort(Document):
     """A batch: branch/year/section, with the placement window that drives the season."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     name: str
     branch: str = ""
     year_of_study: int | None = None
@@ -114,7 +89,7 @@ class Cohort(Document):
 
 
 class CohortMember(Document):
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     cohort_id: str = Field(default="", index=True)
     user_id: str = Field(default="", index=True)
     joined_at: datetime = Field(default_factory=_now)
@@ -130,7 +105,7 @@ class CohortMember(Document):
 class Invitation(Document):
     """A link that lets one external person sit one assessment, once."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     token: str = Field(unique=True, index=True)
     profile_id: str = Field(default="", index=True)
     invited_name: str = ""
@@ -151,7 +126,7 @@ class Invitation(Document):
 class SimulationProfile(Document):
     """A configured test: which sections, in what order, with what timing (SIM-01)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     code: str = Field(default="", index=True)
     name: str
     style: str = "diagnostic"
@@ -179,7 +154,7 @@ class SimulationProfile(Document):
 class ProfileSection(Document):
     """One section of a profile — a task type plus its pacing rules."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     profile_id: str = Field(default="", index=True)
     position: int = 1
     title: str
@@ -202,7 +177,7 @@ class ProfileSection(Document):
 class TaskItem(Document):
     """One speaking item in the bank (CONTENT-01)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     task_type: str = Field(default="", index=True)
     prompt_text: str = ""
     company: str = ""
@@ -232,7 +207,7 @@ class TaskItem(Document):
 class QuizItem(Document):
     """MCQ / fill-in-the-blank / error-ID item (QUIZ-01)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     category: str = Field(default="", index=True)
     stem: str
     options: list = Field(default_factory=list)
@@ -256,7 +231,7 @@ class QuizItem(Document):
 class ListeningPassage(Document):
     """Something spoken, with comprehension questions written against it."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     title: str
     kind: str = "short_talk"
     transcript: str
@@ -276,7 +251,7 @@ class ListeningPassage(Document):
 class WritingPrompt(Document):
     """Something to write, and what a good answer has to contain."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     title: str
     kind: str = "email"
     prompt: str
@@ -296,7 +271,7 @@ class WritingPrompt(Document):
 class WritingSubmissionRow(Document):
     """One piece of writing and what it scored."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     prompt_id: str = Field(default="", index=True)
     text: str = ""
@@ -314,7 +289,7 @@ class WritingSubmissionRow(Document):
 class ReadingPassage(Document):
     """Something to read, with comprehension questions and a rate measure."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     title: str
     kind: str = "article"
     body: str
@@ -331,7 +306,7 @@ class ReadingPassage(Document):
 class ReadingAttempt(Document):
     """One student, one passage: how fast they read it and how much they took in."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     passage_id: str = Field(default="", index=True)
     read_ms: int = 0
@@ -349,7 +324,7 @@ class ReadingAttempt(Document):
 class ListeningAttempt(Document):
     """One student, one passage, one sitting."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     passage_id: str = Field(default="", index=True)
     plays_used: int = 0
@@ -366,7 +341,7 @@ class ListeningAttempt(Document):
 class Assignment(Document):
     """A profile assigned to a cohort with a deadline (TEN-06)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     cohort_id: str = Field(default="", index=True)
     profile_id: str = Field(default="", index=True)
     assigned_by: str | None = Field(default=None, index=True)
@@ -387,7 +362,7 @@ class Assignment(Document):
 class Attempt(Document):
     """One sitting of one profile by one student."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     profile_id: str = Field(default="", index=True)
     assignment_id: str | None = Field(default=None, index=True)
@@ -411,7 +386,7 @@ class Attempt(Document):
 class Response(Document):
     """One item's worth of a student's attempt."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     attempt_id: str = Field(default="", index=True)
     section_id: str | None = Field(default=None, index=True)
     item_id: str | None = Field(default=None, index=True)
@@ -436,7 +411,7 @@ class Response(Document):
 class ResponseAudio(Document):
     """The recording. Holds a storage *key*, never a filesystem path."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     response_id: str = Field(unique=True, index=True)
     storage_key: str
     mime_type: str = "audio/webm"
@@ -457,7 +432,7 @@ class ResponseAudio(Document):
 class FeatureRecord(Document):
     """Raw engine output for one response — transcript, timings, acoustics."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     response_id: str = Field(default="", index=True)
     transcript: str = ""
     word_timings: list = Field(default_factory=list)
@@ -476,7 +451,7 @@ class FeatureRecord(Document):
 class SectionResult(Document):
     """One section of one attempt, scored and stored."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     attempt_id: str = Field(default="", index=True)
     section_id: str = ""
     position: int = 0
@@ -500,7 +475,7 @@ class SectionResult(Document):
 class ScoreRecord(Document):
     """A score, and exactly what produced it."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     attempt_id: str = Field(default="", index=True)
     response_id: str | None = Field(default=None, index=True)
     dimension: str = Field(default="", index=True)
@@ -527,7 +502,7 @@ class ScoreRecord(Document):
 class SkillMastery(Document):
     """Per-student, per-sub-skill mastery — the honest half of the progress UI."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     skill: str = Field(default="", index=True)
     mastery: float = 0.0
@@ -545,7 +520,7 @@ class SkillMastery(Document):
 class Drill(Document):
     """One run through the fail → why → similar items → challenge → re-test loop."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     target_skill: str = Field(default="", index=True)
     source: str = "auto"
@@ -566,7 +541,7 @@ class Drill(Document):
 class MistakeBankEntry(Document):
     """A wrong answer on a spaced-repetition schedule (QUIZ-05)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     quiz_item_id: str | None = Field(default=None, index=True)
     task_item_id: str | None = Field(default=None, index=True)
@@ -589,7 +564,7 @@ class MistakeBankEntry(Document):
 class XPLedger(Document):
     """Append-only XP record (NFR-15)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     activity: str = Field(default="", index=True)
     ref_type: str = ""
@@ -609,7 +584,7 @@ class XPLedger(Document):
 class StreakState(Document):
     """Current streak and freeze inventory (GAM-04/05)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(unique=True, index=True)
     current_streak: int = 0
     best_streak: int = 0
@@ -627,7 +602,7 @@ class StreakState(Document):
 class Quest(Document):
     """A daily or weekly objective built from the student's own weakest skill."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     kind: str = "daily"
     for_date: date = Field(default_factory=lambda: datetime.now(timezone.utc).date(), index=True)
@@ -649,7 +624,7 @@ class Quest(Document):
 class SeasonPlan(Document):
     """The countdown to a real drive date, and the weekly plan derived from it."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     cohort_id: str | None = Field(default=None, index=True)
     drive_date: datetime | None = None
@@ -668,7 +643,7 @@ class SeasonPlan(Document):
 class Badge(Document):
     """Badge definition. Criteria are versioned so an earned badge stays meaningful."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     code: str = Field(unique=True, index=True)
     name: str
     description: str = ""
@@ -682,7 +657,7 @@ class Badge(Document):
 
 
 class EarnedBadge(Document):
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     badge_id: str = Field(default="", index=True)
     criteria_version: int = 1
@@ -695,7 +670,7 @@ class EarnedBadge(Document):
 class LeagueMembership(Document):
     """Weekly league placement (GAM-11) — opt-in, pseudonymous."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     week_start: date = Field(default_factory=lambda: datetime.now(timezone.utc).date(), index=True)
     group_key: str = Field(default="", index=True)
@@ -715,7 +690,7 @@ class LeagueMembership(Document):
 class EngagementEvent(Document):
     """Telemetry behind healthy-vs-hollow engagement analysis (PLAT-18)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     event: str = Field(default="", index=True)
     payload: dict = Field(default_factory=dict)
@@ -729,7 +704,7 @@ class EngagementEvent(Document):
 class NotificationLog(Document):
     """Sent notifications, with the cap accounting that NOTIF-05 requires."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     channel: str = "in_app"
     category: str = "engagement"
@@ -747,7 +722,7 @@ class NotificationLog(Document):
 class StudentFlag(Document):
     """Trainer's at-risk flag with a staff-visible note (TRN-03)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     user_id: str = Field(default="", index=True)
     raised_by: str = Field(default="", index=True)
     reason: str = "at_risk"
@@ -768,7 +743,7 @@ class StudentFlag(Document):
 class AttemptNarration(Document):
     """The AI explanation of one finished attempt — and its own durable job."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     attempt_id: str = Field(unique=True, index=True)
     status: str = "pending"
     attempt_count: int = 0

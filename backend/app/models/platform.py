@@ -51,7 +51,7 @@ TENANT_TYPE_KEYS = frozenset(key for key, _ in TENANT_TYPES)
 class Tenant(Document):
     """A customer. Routing record for its database (PLAT-01/02)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     name: str
     slug: str = Field(unique=True, index=True)
     domain: str = Field(default="", index=True)
@@ -81,7 +81,7 @@ class Tenant(Document):
 class PlatformUser(Document):
     """Internal staff account (PLAT-16)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     email: str = Field(unique=True, index=True)
     full_name: str
     password_hash: str
@@ -100,7 +100,7 @@ class PlatformUser(Document):
 class InvitationDirectory(Document):
     """Redemption lookup: token -> which institution to open a session against."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     token: str = Field(unique=True, index=True)
     tenant_id: str = Field(default="", index=True)
     tenant_slug: str = Field(default="", index=True)
@@ -113,7 +113,7 @@ class InvitationDirectory(Document):
 class TenantUserDirectory(Document):
     """Sign-in lookup: email -> which institution to open a session against."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     email: str = Field(unique=True, index=True)
     tenant_id: str = Field(default="", index=True)
     tenant_slug: str = Field(default="", index=True)
@@ -131,7 +131,7 @@ class TenantUserDirectory(Document):
 class ProviderRegistry(Document):
     """One registered implementation of one capability."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     capability: str = Field(default="", index=True)
     provider_key: str
     name: str
@@ -149,7 +149,7 @@ class ProviderRegistry(Document):
 class ProviderConfig(Document):
     """Which provider serves a capability, for whom, and what happens on failure."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     capability: str = Field(default="", index=True)
     tenant_id: str | None = Field(default=None, index=True)
     primary_provider_id: str
@@ -167,7 +167,7 @@ class ProviderConfig(Document):
 class ModelVersion(Document):
     """A promotable version of a model behind a provider."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     provider_id: str = Field(default="", index=True)
     version: str
     notes: str = ""
@@ -182,7 +182,7 @@ class ModelVersion(Document):
 class ProviderCall(Document):
     """Per-call telemetry feeding the provider performance dashboard (PLAT-13)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     capability: str = Field(default="", index=True)
     provider_id: str = Field(default="", index=True)
     provider_version: str = ""
@@ -205,7 +205,7 @@ class ProviderCall(Document):
 class GamificationConfig(Document):
     """The game economy, tunable without a deploy (PLAT-17)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     tenant_id: str | None = Field(default=None, index=True, unique=True)
     xp_table: dict = Field(default_factory=dict)
     difficulty_multipliers: dict = Field(default_factory=dict)
@@ -222,7 +222,7 @@ class GamificationConfig(Document):
 
 
 class FeatureFlag(Document):
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     key: str = Field(default="", index=True)
     tenant_id: str | None = Field(default=None, index=True)
     enabled: bool = False
@@ -235,7 +235,7 @@ class FeatureFlag(Document):
 class AuditLog(Document):
     """Append-only record of admin and score-affecting actions (PLAT-14, NFR-11)."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     actor_type: str = "system"
     actor_id: str = ""
     actor_label: str = ""
@@ -254,7 +254,7 @@ class AuditLog(Document):
 class PlatformSetting(Document):
     """Operator-editable configuration, one JSON document per key."""
 
-    id: StrId = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid, alias="_id")
     key: str = Field(unique=True, index=True)
     value: dict = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=_now)

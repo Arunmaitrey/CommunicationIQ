@@ -2,7 +2,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Clock, Mic, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Clock, Filter, Mic, ShieldCheck } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StepGuide } from "@/components/StepGuide";
 import {
@@ -40,6 +40,7 @@ function Tests() {
   const { data, loading, error } = useData(() => api.studentHome());
   const [starting, setStarting] = useState("");
   const [startError, setStartError] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
 
   const inProgressByProfile = new Map<string, string>();
   for (const a of data?.recent_attempts ?? []) {
@@ -161,16 +162,41 @@ function Tests() {
         <Section title="Company rounds">
           <p className="text-xs text-muted mb-3 leading-relaxed">
             Shaped like the communication round a particular employer runs.
+            Pick a company to see its rounds, or view all.
           </p>
-          <div className="grid md:grid-cols-2 gap-3">
-            {company.map((p) => (
-              <TestCard key={p.id} profile={p} consented={consented}
-                        starting={starting === p.id} anyStarting={starting !== ""}
-                        inProgressAttemptId={inProgressByProfile.get(p.id)}
-                        onStart={() => void start(p.id)}
-                        onResume={() => resume(inProgressByProfile.get(p.id)!)} />
-            ))}
-          </div>
+          {(() => {
+            const companyNames = Array.from(new Set(company.map((p) => p.company))).sort();
+            const filteredCompany = companyFilter
+              ? company.filter((p) => p.company === companyFilter)
+              : company;
+            return (
+              <>
+                {companyNames.length > 1 && (
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <Filter size={12} className="text-muted" />
+                    <select
+                      className="ds-input text-xs py-1 px-2"
+                      style={{ minWidth: 140 }}
+                      value={companyFilter}
+                      onChange={(e) => setCompanyFilter(e.target.value)}
+                    >
+                      <option value="">All Companies</option>
+                      {companyNames.map((cn) => <option key={cn} value={cn}>{cn}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className="grid md:grid-cols-2 gap-3">
+                  {filteredCompany.map((p) => (
+                    <TestCard key={p.id} profile={p} consented={consented}
+                              starting={starting === p.id} anyStarting={starting !== ""}
+                              inProgressAttemptId={inProgressByProfile.get(p.id)}
+                              onStart={() => void start(p.id)}
+                              onResume={() => resume(inProgressByProfile.get(p.id)!)} />
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </Section>
       )}
 

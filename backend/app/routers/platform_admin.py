@@ -337,7 +337,8 @@ async def list_question_items(tenant_id: str, category: str = "reading",
         passages = await models.ReadingPassage.find(
             models.ReadingPassage.status == "published").sort("title").skip(skip).limit(page_size).to_list()
         for p in passages:
-            items.append({"id": p.id, "title": p.title, "kind": p.kind,
+            items.append({"id": str(p.id), "title": p.title, "kind": p.kind,
+                          "company": getattr(p, "company", ""),
                           "word_count": p.word_count, "difficulty": p.difficulty})
     elif category == "writing":
         total = await models.WritingPrompt.find(
@@ -345,7 +346,8 @@ async def list_question_items(tenant_id: str, category: str = "reading",
         prompts = await models.WritingPrompt.find(
             models.WritingPrompt.status == "published").sort("title").skip(skip).limit(page_size).to_list()
         for p in prompts:
-            items.append({"id": p.id, "title": p.title, "kind": p.kind,
+            items.append({"id": str(p.id), "title": p.title, "kind": p.kind,
+                          "company": getattr(p, "company", ""),
                           "min_words": p.min_words, "prompt": p.prompt})
     elif category == "listening":
         total = await models.ListeningPassage.find(
@@ -353,7 +355,8 @@ async def list_question_items(tenant_id: str, category: str = "reading",
         passages = await models.ListeningPassage.find(
             models.ListeningPassage.status == "published").sort("title").skip(skip).limit(page_size).to_list()
         for p in passages:
-            items.append({"id": p.id, "title": p.title, "kind": p.kind,
+            items.append({"id": str(p.id), "title": p.title, "kind": p.kind,
+                          "company": getattr(p, "company", ""),
                           "approx_seconds": p.approx_seconds, "transcript": p.transcript})
     elif category == "speaking":
         total = await models.TaskItem.find(
@@ -361,7 +364,8 @@ async def list_question_items(tenant_id: str, category: str = "reading",
         tasks = await models.TaskItem.find(
             models.TaskItem.status == "published").sort("task_type").skip(skip).limit(page_size).to_list()
         for t in tasks:
-            items.append({"id": t.id, "task_type": t.task_type,
+            items.append({"id": str(t.id), "task_type": t.task_type,
+                          "company": getattr(t, "company", ""),
                           "prompt_text": t.prompt_text, "difficulty": t.difficulty})
     elif category == "grammar":
         total = await models.QuizItem.find(
@@ -371,7 +375,8 @@ async def list_question_items(tenant_id: str, category: str = "reading",
             models.QuizItem.category == "grammar",
             models.QuizItem.status == "published").sort("stem").skip(skip).limit(page_size).to_list()
         for q in qi:
-            items.append({"id": q.id, "stem": q.stem, "options": q.options,
+            items.append({"id": str(q.id), "stem": q.stem, "options": q.options,
+                          "company": getattr(q, "company", ""),
                           "correct_index": q.correct_index, "explanation": q.explanation})
     elif category == "vocabulary":
         total = await models.QuizItem.find(
@@ -381,7 +386,8 @@ async def list_question_items(tenant_id: str, category: str = "reading",
             models.QuizItem.category == "vocabulary",
             models.QuizItem.status == "published").sort("stem").skip(skip).limit(page_size).to_list()
         for q in qi:
-            items.append({"id": q.id, "stem": q.stem, "options": q.options,
+            items.append({"id": str(q.id), "stem": q.stem, "options": q.options,
+                          "company": getattr(q, "company", ""),
                           "correct_index": q.correct_index, "explanation": q.explanation})
 
     return {"items": items, "total": total, "page": page, "page_size": page_size,
