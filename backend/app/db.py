@@ -401,13 +401,24 @@ class Session:
         return _Result([tuple(getattr(d, str(f)) for f in entities) for d in docs])
 
     async def _run(self, model, stmt: _Stmt) -> list:
-        # Beanie's find() accepts comparison operators directly when
-        # called on a properly initialized Document subclass. Ensure
-        # we always use the resolved (tenant-bound) model.
         resolved = self._resolve(model)
         if resolved is not None:
             model = resolved
-        query = model.find(*stmt.conditions)
+        if stmt.conditions:
+            and_clauses = []
+            for c in stmt.conditions:
+                if isinstance(c, dict):
+                    and_clauses.append(c)
+                elif hasattr(c, 'query'):
+                    and_clauses.append(c.query)
+                else:
+                    and_clauses.append(c)
+            if len(and_clauses) == 1:
+                query = model.find(and_clauses[0])
+            else:
+                query = model.find({"$and": and_clauses})
+        else:
+            query = model.find()
         if stmt.order:
             query = query.sort(*stmt.order)
         if stmt.limit_val is not None:

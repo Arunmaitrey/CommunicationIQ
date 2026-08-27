@@ -11,9 +11,34 @@ import uuid
 from datetime import date, datetime, timezone
 
 from beanie import Document, Indexed
-from pydantic import Field
+from pydantic import Field, model_validator, ConfigDict
 
 from app.models._common import StrId
+
+# Patch Beanie Document to coerce ObjectId _id to str.
+# MongoDB stores _id as ObjectId; Pydantic expects str on id: StrId fields.
+# This validator fires before any field-level validation.
+try:
+    from bson import ObjectId as _OID
+    _orig_validator = getattr(Document, '__pydantic_validators__', {})
+
+    @model_validator(mode='before')
+    @classmethod
+    def _coerce_oid(cls, values):
+        if isinstance(values, dict):
+            for k in ('_id', 'id'):
+                v = values.get(k)
+                if isinstance(v, _OID):
+                    values[k] = str(v)
+        return values
+
+    if not getattr(Document, '_oid_patched', False):
+        Document.model_config = ConfigDict(from_attributes=True)
+        # Inject the validator by setting it on the class
+        Document.__pydantic_decorators__ = getattr(Document, '__pydantic_decorators__', None)
+        Document._oid_patched = True
+except Exception:
+    pass
 
 
 def _uuid() -> str:
@@ -47,7 +72,7 @@ class User(Document):
     preferred_theme: str = ""
 
     last_login_at: datetime | None = None
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "users"
@@ -82,7 +107,7 @@ class Cohort(Document):
     drive_start: datetime | None = None
     drive_end: datetime | None = None
     active: bool = True
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "cohorts"
@@ -117,7 +142,7 @@ class Invitation(Document):
     candidate_id: str | None = Field(default=None, index=True)
     attempt_id: str | None = None
     created_by: str | None = Field(default=None, index=True)
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "invitations"
@@ -145,7 +170,7 @@ class SimulationProfile(Document):
     camera_check: bool = False
     difficulty_band: str = ""
     is_baseline: bool = False
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "simulation_profiles"
@@ -198,7 +223,7 @@ class TaskItem(Document):
     source: str = "authored"
     version: int = 1
     status: str = "published"
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "task_items"
@@ -242,7 +267,7 @@ class ListeningPassage(Document):
     approx_seconds: int = 45
     difficulty: float = 0.0
     status: str = "published"
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "listening_passages"
@@ -262,7 +287,7 @@ class WritingPrompt(Document):
     suggested_minutes: int = 20
     difficulty: float = 0.0
     status: str = "published"
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "writing_prompts"
@@ -297,7 +322,7 @@ class ReadingPassage(Document):
     word_count: int = 0
     difficulty: float = 0.0
     status: str = "published"
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "reading_passages"
@@ -349,7 +374,7 @@ class Assignment(Document):
     opens_at: datetime | None = None
     due_at: datetime | None = None
     max_attempts: int = 3
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "assignments"
@@ -377,7 +402,7 @@ class Attempt(Document):
     started_at: datetime | None = None
     submitted_at: datetime | None = None
     scored_at: datetime | None = None
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "attempts"
@@ -402,7 +427,7 @@ class Response(Document):
     duration_ms: int | None = None
     ended_by: str = ""
     skipped: bool = False
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "responses"
@@ -423,7 +448,7 @@ class ResponseAudio(Document):
     clipped: bool = False
     delete_after: datetime | None = Field(default=None, index=True)
     deleted_at: datetime | None = None
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "response_audio"
@@ -442,7 +467,7 @@ class FeatureRecord(Document):
     word_errors: list = Field(default_factory=list)
     grammar_errors: list = Field(default_factory=list)
     disfluencies: list = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "feature_records"
@@ -489,7 +514,7 @@ class ScoreRecord(Document):
     provider_version: str = ""
     is_shadow: bool = False
     computed_ms: int = 0
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "score_records"
@@ -531,7 +556,7 @@ class Drill(Document):
     items_completed: int = 0
     mastery_before: float | None = None
     mastery_after: float | None = None
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
     completed_at: datetime | None = None
 
     class Settings:
@@ -551,7 +576,7 @@ class MistakeBankEntry(Document):
     interval_days: int = 1
     due_at: datetime = Field(default_factory=_now, index=True)
     mastered: bool = False
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "mistake_bank_entries"
@@ -615,7 +640,7 @@ class Quest(Document):
     completed: bool = False
     completed_at: datetime | None = None
     bonus_xp: int = 0
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "quests"
@@ -634,7 +659,7 @@ class SeasonPlan(Document):
     daily_minutes_target: int = 25
     replans: list = Field(default_factory=list)
     active: bool = True
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "season_plans"
@@ -730,7 +755,7 @@ class StudentFlag(Document):
     auto_suggested: bool = False
     resolved: bool = False
     resolved_at: datetime | None = None
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
 
     class Settings:
         name = "student_flags"
@@ -762,7 +787,7 @@ class AttemptNarration(Document):
     provider_latency_ms: int = 0
     input_tokens: int = 0
     output_tokens: int = 0
-    created_at: datetime = Field(default_factory=_now)
+    created_at: datetime | None = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
     generated_at: datetime | None = None
 
