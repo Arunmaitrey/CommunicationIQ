@@ -293,7 +293,8 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
         kind, key = app_sections.source_of(first.task_type)
         if kind == "task":
             for item in await _pick_items(session, first, principal.user_id,
-                                          task_type=key):
+                                          task_type=key,
+                                          company=getattr(profile, "company", "")):
                 session.add(Response(
                     attempt_id=attempt.id, section_id=first.id,
                     item_id=item.id, position=position, is_practice=True))
@@ -310,21 +311,26 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
 
         if kind == "task":
             for item in await _pick_items(session, section, principal.user_id,
-                                          task_type=key):
+                                          task_type=key,
+                                          company=getattr(profile, "company", "")):
                 session.add(Response(
                     attempt_id=attempt.id, section_id=section.id,
                     item_id=item.id, position=position,
                 ))
                 position += 1
         elif kind == "quiz":
-            for quiz in await _pick_quiz_items(session, section, key):
+            for quiz in await _pick_quiz_items(session, section, key,
+                                              company=getattr(profile, "company", ""),
+                                              user_id=principal.user_id):
                 session.add(Response(
                     attempt_id=attempt.id, section_id=section.id,
                     quiz_item_id=quiz.id, position=position,
                 ))
                 position += 1
         else:
-            for prompt in await _pick_writing_prompts(session, section, key):
+            for prompt in await _pick_writing_prompts(session, section, key,
+                                                    company=getattr(profile, "company", ""),
+                                                    user_id=principal.user_id):
                 session.add(Response(
                     attempt_id=attempt.id, section_id=section.id,
                     prompt_id=prompt.id, position=position,
@@ -359,9 +365,43 @@ def _pool_of(section: ProfileSection) -> "app_selection.PoolFilter":
         return app_selection.EMPTY
 
 
+async def _previously_used_ids(session: TenantSession, user_id: str,
+                               model, id_field: str) -> set[str]:
+    """Get question IDs already used by this user in previous attempts.
+
+    Avoids repeating the same questions across different exams of the same
+    type, providing better coverage of the question bank.
+    """
+    from app.models.tenant import Response, Attempt
+    try:
+        resp = await session.execute(
+            select(Response.item_id, Response.quiz_item_id, Response.prompt_id)
+            .join(Attempt, Attempt.id == Response.attempt_id)
+            .where(Attempt.user_id == user_id, Attempt.status == "scored")
+        )
+        rows = resp.all()
+        ids = set()
+        for row in rows:
+            val = getattr(row, id_field, None)
+            if val:
+                ids.add(val)
+        return ids
+    except Exception:
+        return set()
+
+
+def _deduplicate(pool: list, used: set[str], key: str = "id") -> list:
+    """Remove items already used by this user from the pool."""
+    if not used:
+        return pool
+    return [i for i in pool if getattr(i, key, None) not in used]
+
+
 async def _pick_writing_prompts(session: TenantSession,
                                 section: ProfileSection,
-                                kind: str = "") -> list:
+                                kind: str = "",
+                                company: str = "",
+                                user_id: str = "") -> list:
     """Choose writing tasks for a written section.
 
     Filtered by kind, which it was not: every published prompt was a
@@ -378,14 +418,27 @@ async def _pick_writing_prompts(session: TenantSession,
         select(WritingPrompt).where(WritingPrompt.status == "published",
                                     WritingPrompt.kind.in_(sorted(allowed)))
     )).scalars().all())
+
+    # Prefer company-tagged prompts, fall back to general pool.
+    if company:
+        company_pool = [i for i in pool if getattr(i, "company", "") == company]
+        general_pool = [i for i in pool if not getattr(i, "company", "")]
+        pool = company_pool + general_pool
     pool = app_selection.eligible(pool, _pool_of(section), "writing_prompt")
+
+    # Cross-exam deduplication: avoid prompts already used by this user.
+    if user_id:
+        used = await _previously_used_ids(session, user_id, WritingPrompt, "prompt_id")
+        pool = _deduplicate(pool, used, "id")
+
     if not pool:
         return []
     return app_selection.draw(pool, section.item_count, _pool_of(section)).items
 
 
 async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
-                           category: str = "") -> list:
+                           category: str = "", company: str = "",
+                           user_id: str = "") -> list:
     """Choose the questions for a listening or reading section.
 
     Comprehension is measured over a whole passage, so questions are drawn
@@ -411,6 +464,18 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
         select(QuizItem).where(QuizItem.category == category,
                                QuizItem.status == "published")
     )).scalars().all())
+
+    # Prefer company-tagged questions, fall back to general pool.
+    if company:
+        company_pool = [i for i in pool if getattr(i, "company", "") == company]
+        general_pool = [i for i in pool if not getattr(i, "company", "")]
+        pool = company_pool + general_pool
+
+    # Cross-exam deduplication: avoid questions already used by this user.
+    if user_id:
+        used = await _previously_used_ids(session, user_id, QuizItem, "quiz_item_id")
+        pool = _deduplicate(pool, used, "id")
+
     if not pool:
         return []
 
@@ -463,11 +528,12 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
 
 async def _pick_items(session: TenantSession, section: ProfileSection,
                       user_id: str = "",
-                      task_type: str | None = None) -> list[TaskItem]:
+                      task_type: str | None = None,
+                      company: str = "") -> list[TaskItem]:
     """Choose this section's items.
 
     Adaptive where the item bank has been calibrated, random where it has not
-    (ENG-14). The fallback is not a degraded mode to apologise for — until
+    (ENG-14). The fallback is not a degraded mode to apologise for -- until
     responses exist, "at the edge of your ability" is a claim with nothing
     behind it, and choosing among authored guesses would not make it true.
     """
@@ -479,10 +545,23 @@ async def _pick_items(session: TenantSession, section: ProfileSection,
                                TaskItem.status == "published")
     )).scalars().all())
 
+    # When a profile targets a company, prefer its questions and fall back
+    # to general pool so the section is never empty.
+    if company:
+        company_pool = [i for i in pool if getattr(i, "company", "") == company]
+        general_pool = [i for i in pool if not getattr(i, "company", "")]
+        pool = company_pool + general_pool
+
     # Narrow before choosing, never after. Choosing adaptively and then
     # filtering would discard exactly the items the ability estimate picked.
     pool_filter = _pool_of(section)
     pool = app_selection.eligible(pool, pool_filter, "task")
+
+    # Cross-exam deduplication: avoid questions already used by this user.
+    if user_id:
+        used = await _previously_used_ids(session, user_id, TaskItem, "item_id")
+        pool = _deduplicate(pool, used, "id")
+
     if not pool:
         return []
 

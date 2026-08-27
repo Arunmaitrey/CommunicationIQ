@@ -180,6 +180,7 @@ class TaskItem(Document):
     id: StrId = Field(default_factory=_uuid)
     task_type: str = Field(default="", index=True)
     prompt_text: str = ""
+    company: str = ""
     prompt_audio_key: str = ""
     prompt_accent: str = "indian"
     reference_text: str = ""
@@ -212,6 +213,7 @@ class QuizItem(Document):
     options: list = Field(default_factory=list)
     correct_index: int = 0
     explanation: str = ""
+    company: str = ""
     clip_audio_key: str = ""
     passage_id: str = ""
     seconds_allowed: int = 30
@@ -233,6 +235,7 @@ class ListeningPassage(Document):
     title: str
     kind: str = "short_talk"
     transcript: str
+    company: str = ""
     audio_key: str = ""
     accent: str = "indian"
     plays_allowed: int = 1
@@ -252,6 +255,7 @@ class WritingPrompt(Document):
     title: str
     kind: str = "email"
     prompt: str
+    company: str = ""
     scenario: str = ""
     key_points: list = Field(default_factory=list)
     min_words: int = 120
@@ -289,6 +293,7 @@ class ReadingPassage(Document):
     title: str
     kind: str = "article"
     body: str
+    company: str = ""
     word_count: int = 0
     difficulty: float = 0.0
     status: str = "published"

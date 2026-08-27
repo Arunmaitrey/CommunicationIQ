@@ -15,7 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import (attempts, auth, game, invitations, listening,
                          platform_admin, platform_export,
-                         reading, writing,
+                         reading, report, writing,
                          platform_writes, practice, student, tenant_admin,
                          tenant_writes, trainer, trainer_ops)
 
@@ -128,6 +128,7 @@ app.include_router(platform_admin.asset_router, prefix=API)
 app.include_router(platform_writes.router, prefix=API)
 app.include_router(platform_export.router, prefix=API)
 app.include_router(invitations.router, prefix=API)
+app.include_router(report.router, prefix=API)
 # Unauthenticated. A candidate arrives holding a token and nothing else, so
 # this is the one router with no session behind it -- see its module docstring
 # for the three rules that make that safe.

@@ -20,6 +20,7 @@ interface QuestionItem {
   prompt_text?: string;
   task_type?: string;
   kind?: string;
+  company?: string;
   options: string[];
   correct_index: number;
   explanation?: string;
@@ -239,6 +240,7 @@ try {
                     </span>
                     {item.kind && <Badge>{item.kind}</Badge>}
                     {item.task_type && <Badge>{item.task_type}</Badge>}
+                    {item.company && <Badge>{item.company}</Badge>}
                     <button
                       onClick={(e) => { e.stopPropagation(); setEditItem(item); setShowAdd(false); }}
                       className="p-1 hover:bg-primary/10 rounded text-primary"
@@ -349,6 +351,9 @@ function AddQuestionForm({ category, tenantId, editItem, onCreated, onCancelEdit
   const [taskType, setTaskType] = useState("open_response");
   const [promptText, setPromptText] = useState("");
   const [referenceText, setReferenceText] = useState("");
+  const [company, setCompany] = useState("");
+
+  const COMPANIES = ["", "TCS", "Infosys", "Wipro", "Accenture", "Cognizant", "General"];
 
   useEffect(() => {
     if (editItem) {
@@ -365,6 +370,7 @@ function AddQuestionForm({ category, tenantId, editItem, onCreated, onCancelEdit
       setTaskType(editItem.task_type || "open_response");
       setPromptText(editItem.prompt_text || "");
       setReferenceText(editItem.reference_text || "");
+      setCompany(editItem.company || "");
     }
   }, [editItem]);
 
@@ -385,27 +391,27 @@ function AddQuestionForm({ category, tenantId, editItem, onCreated, onCancelEdit
       switch (category) {
         case "reading":
           body = {
-            title, kind, body: bodyText,
+            title, kind, body: bodyText, company,
             questions: stem ? [{ stem, options, correct_index: correctIndex, explanation }] : [],
           };
           break;
         case "writing":
-          body = { title, kind, prompt, min_words: minWords };
+          body = { title, kind, prompt, min_words: minWords, company };
           break;
         case "listening":
           body = {
-            title, kind, transcript,
+            title, kind, transcript, company,
             questions: stem ? [{ stem, options, correct_index: correctIndex, explanation }] : [],
           };
           break;
         case "speaking":
-          body = { task_type: taskType, prompt_text: promptText, reference_text: referenceText };
+          body = { task_type: taskType, prompt_text: promptText, reference_text: referenceText, company };
           break;
         case "grammar":
-          body = { stem, options, correct_index: correctIndex, explanation };
+          body = { stem, options, correct_index: correctIndex, explanation, company };
           break;
         case "vocabulary":
-          body = { stem, options, correct_index: correctIndex, explanation };
+          body = { stem, options, correct_index: correctIndex, explanation, company };
           break;
       }
       if (editItem) {
@@ -432,6 +438,13 @@ function AddQuestionForm({ category, tenantId, editItem, onCreated, onCancelEdit
       {error && <div className="text-xs mb-3 px-2 py-1 rounded" style={{ background: "color-mix(in srgb, var(--rag-red) 10%, transparent)", color: "var(--rag-red)" }}>{error}</div>}
 
       <div className="grid md:grid-cols-2 gap-3">
+        <div>
+          <label className="ds-label">Company</label>
+          <select className="ds-input w-full" value={company} onChange={(e) => setCompany(e.target.value)}>
+            {COMPANIES.map(c => <option key={c} value={c}>{c || "All / General"}</option>)}
+          </select>
+        </div>
+
         {(category === "reading" || category === "writing" || category === "listening") && (
           <div>
             <label className="ds-label">Title</label>

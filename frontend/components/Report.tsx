@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { ChevronDown, Download, Loader2, Sparkles, ThumbsUp, TrendingUp } from "lucide-react";
+import { ChevronDown, Download, FileText, Loader2, Sparkles, ThumbsUp, TrendingUp } from "lucide-react";
 import { Section } from "@/components/ui";
 import { DIMENSION_LABEL } from "@/lib/dimensions";
 import type { AttemptResult, EvidenceRow, Highlight, Narration, SectionResult,
@@ -319,12 +319,17 @@ function EvidenceItem({ row }: { row: EvidenceRow }) {
  *  with this one — and the thing most people mean by "PDF" is the page they
  *  are looking at, which is exactly what printing produces.
  */
-export function Export({ csvUrl }: { csvUrl: string }) {
+export function Export({ csvUrl, reportUrl }: { csvUrl: string; reportUrl?: string }) {
   return (
     <div className="flex flex-wrap gap-2 mb-4 print:hidden">
       <a href={csvUrl} className="btn btn-ghost btn-sm ds-focus" download>
         <Download size={13} /> Download as a spreadsheet
       </a>
+      {reportUrl && (
+        <a href={reportUrl} target="_blank" rel="noopener noreferrer" className="btn btn-primary btn-sm ds-focus">
+          <FileText size={13} /> Download PDF Report
+        </a>
+      )}
       <button onClick={() => window.print()} className="btn btn-ghost btn-sm ds-focus">
         Print or save as PDF
       </button>

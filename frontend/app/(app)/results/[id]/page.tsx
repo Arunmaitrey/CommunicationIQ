@@ -15,6 +15,7 @@ import { DIMENSION_LABEL, DIMENSION_MEANING } from "@/lib/dimensions";
 import {
   Badge, ErrorNote, PageHeader, Section, Skeleton,
 } from "@/components/ui";
+import { useToast } from "@/components/Toast";
 import {
   ApiError, attemptApi, type PreviousAttempt,
   type PracticeOutcome, type PrimaryDiagnosis, type ResponseMetrics,
@@ -50,6 +51,14 @@ function Result() {
   const { user } = useRole();
   const { id } = useParams<{ id: string }>();
   const { data, loading, error, reload } = useData(() => attemptApi.result(id), [id]);
+  const { toast } = useToast();
+
+  // Show success toast once when results are first loaded
+  useEffect(() => {
+    if (data?.status === "scored" && data?.overall !== null && data?.overall !== undefined) {
+      toast("success", `Exam submitted! Your score: ${(data.overall as number).toFixed(1)}`);
+    }
+  }, [data?.status, data?.overall]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Most answers were scored while the student was still talking, so this
   // almost never fires. It exists for the case where the last item was a long
@@ -420,7 +429,7 @@ function Result() {
 
       <Evidence evidence={data.evidence} />
 
-      <Export csvUrl={attemptApi.exportCsvUrl(id)} />
+      <Export csvUrl={attemptApi.exportCsvUrl(id)} reportUrl={attemptApi.reportUrl(id)} />
 
       {user?.role === "student" && (
         <StudentReview attemptId={data.attempt_id} />
@@ -904,6 +913,7 @@ function StudentReview({ attemptId }: { attemptId: string }) {
   const [comment, setComment] = useState("");
   const [difficulty, setDifficulty] = useState("just_right");
   const [submitted, setSubmitted] = useState(false);
+  const { toast } = useToast();
 
   const reviewKey = `commiq.reviews.${attemptId}`;
   const [existingReview, setExistingReview] = useState<{
@@ -939,6 +949,7 @@ function StudentReview({ attemptId }: { attemptId: string }) {
     localStorage.setItem(reviewKey, JSON.stringify(review));
     setExistingReview(review);
     setSubmitted(true);
+    toast("success", "Review submitted! Thank you for your feedback.");
   }
 
   if (submitted || existingReview) {

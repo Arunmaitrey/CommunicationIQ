@@ -105,6 +105,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <main className="flex-1 p-4 md:p-6 max-w-[1400px] w-full animate-fade-up">
           {children}
         </main>
+
+        <footer className="border-t border-border bg-surface/50 px-4 py-3 flex items-center justify-between text-[11px] text-muted shrink-0">
+          <div className="flex items-center gap-2">
+            <span className="font-semibold text-foreground/70">CommunicationIQ</span>
+            <span>&copy; {new Date().getFullYear()} Fluenzee. All rights reserved.</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span>Powered by Graymatter Technologies</span>
+          </div>
+        </footer>
       </div>
 
       <PoweredByFloat />

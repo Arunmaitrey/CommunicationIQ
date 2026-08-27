@@ -1,10 +1,9 @@
 "use client";
-import Link from "next/link";
 import { useState } from "react";
-import { Download, ExternalLink, FileText } from "lucide-react";
+import { ChevronDown, Download, ExternalLink, FileText, Search, User } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Badge, EmptyState, ErrorNote, PageHeader, Section, Skeleton, Table, Tabs } from "@/components/ui";
-import { api, adminApi, type Attempt, type UserRow } from "@/lib/api";
+import { api, attemptApi, type Attempt, type UserRow, type AttemptResult } from "@/lib/api";
 import { useData } from "@/lib/useData";
 import { useToast } from "@/components/Toast";
 
@@ -18,128 +17,259 @@ export default function TenantResultsPage() {
 
 function Results() {
   const { toast } = useToast();
-  const [tab, setTab] = useState("all");
-  const [busy, setBusy] = useState(false);
+  const [selectedStudent, setSelectedStudent] = useState<string>("");
+  const [searchTerm, setSearchTerm] = useState("");
 
   // Get all users
-  const users = useData(() => api.tenantUsers(tab === "all" ? undefined : tab), [tab]);
-
-  // Get all cohorts to count attempts
+  const users = useData(() => api.tenantUsers());
   const cohorts = useData(() => api.tenantCohorts());
 
-  async function exportExcel() {
-    setBusy(true);
-    try {
-      // Use the platform export endpoint (super admin only) or generate client-side
-      toast("info", "Preparing Excel export…");
-      // For tenant admins, we'll export the users list as CSV
-      const userList = users.data ?? [];
-      const headers = ["Name", "Email", "Role", "Roll Number", "Branch", "Year", "Status"];
-      const rows = userList.map((u) => [
-        u.full_name, u.email, u.role, u.roll_number || "",
-        u.branch || "", u.year_of_study?.toString() || "", u.active ? "Active" : "Inactive",
-      ]);
-      const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "institution-users.csv";
-      a.click();
-      URL.revokeObjectURL(url);
-      toast("success", "Excel export downloaded");
-    } catch {
-      toast("error", "Export failed");
-    } finally {
-      setBusy(false);
-    }
-  }
+  const students = (users.data ?? []).filter((u) => u.role === "student");
+  const filteredStudents = searchTerm
+    ? students.filter((s) =>
+        s.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        s.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (s.roll_number || "").toLowerCase().includes(searchTerm.toLowerCase())
+      )
+    : students;
+
+  const selectedUserData = students.find((s) => s.id === selectedStudent);
+
+  // Summary stats
+  const totalStudents = students.length;
+  const activeStudents = students.filter((s) => s.active).length;
+  const totalCohorts = cohorts.data?.length ?? 0;
 
   return (
     <>
       <PageHeader
-        title="Exam results"
-        sub="All student exam results for your institution. View readiness, scores and cohort performance."
-        action={
-          <button onClick={() => void exportExcel()} disabled={busy} className="btn btn-ghost btn-sm ds-focus">
-            <Download size={13} /> {busy ? "Exporting…" : "Export to Excel"}
-          </button>
-        }
+        title="Exam Results"
+        sub="Select a student to view their exam history, scores, and downloadable reports."
       />
 
       {/* Summary stats */}
       <div className="grid sm:grid-cols-3 gap-3 mb-4">
         <div className="ds-card p-4">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total students</div>
-          <div className="text-2xl font-bold mt-2" style={{ color: "var(--primary)" }}>
-            {(users.data ?? []).filter((u) => u.role === "student").length}
-          </div>
-        </div>
-        <div className="ds-card p-4">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total cohorts</div>
-          <div className="text-2xl font-bold mt-2" style={{ color: "var(--secondary)" }}>
-            {cohorts.data?.length ?? 0}
-          </div>
+          <div className="text-2xl font-bold mt-2" style={{ color: "var(--primary)" }}>{totalStudents}</div>
         </div>
         <div className="ds-card p-4">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Active students</div>
-          <div className="text-2xl font-bold mt-2" style={{ color: "var(--rag-green)" }}>
-            {(users.data ?? []).filter((u) => u.role === "student" && u.active).length}
-          </div>
+          <div className="text-2xl font-bold mt-2" style={{ color: "var(--rag-green)" }}>{activeStudents}</div>
+        </div>
+        <div className="ds-card p-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Cohorts</div>
+          <div className="text-2xl font-bold mt-2" style={{ color: "var(--accent)" }}>{totalCohorts}</div>
         </div>
       </div>
 
-      <Tabs
-        active={tab}
-        onChange={setTab}
-        tabs={[
-          { id: "all", label: "All users" },
-          { id: "student", label: "Students only" },
-          { id: "tenant_admin", label: "Admins" },
-        ]}
-      />
+      {/* Student selector */}
+      <Section title="Select student" className="mb-4">
+        {users.loading ? <Skeleton rows={2} /> : users.error ? <ErrorNote message={users.error} /> : (
+          <div className="space-y-3">
+            {/* Search */}
+            <div className="relative">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+              <input
+                type="text"
+                placeholder="Search by name, email or roll number..."
+                value={searchTerm}
+                onChange={(e) => { setSearchTerm(e.target.value); setSelectedStudent(""); }}
+                className="w-full pl-9 pr-3 py-2 text-[13px] bg-surface border border-border rounded-lg ds-focus"
+              />
+            </div>
 
-      <Section title="Students &amp; staff">
-        {users.loading ? <Skeleton rows={6} /> : users.error ? <ErrorNote message={users.error} /> : (
-          <Table
-            columns={["Name", "Email", "Role", "Roll", "Branch", "L1", "Status"]}
-            rows={(users.data ?? []).map((u) => [
-              <span key="n" className="font-medium">{u.full_name}</span>,
-              <span key="e" className="text-muted">{u.email}</span>,
-              <Badge key="r" tone={
-                u.role === "student" ? "var(--primary)" :
-                u.role === "tenant_admin" ? "var(--accent)" : "var(--muted)"
-              }>{u.role}</Badge>,
-              u.roll_number || "—",
-              u.branch || "—",
-              u.l1_language || "—",
-              u.active
-                ? <Badge key="s" tone="var(--rag-green)">Active</Badge>
-                : <Badge key="s" tone="var(--muted)">Inactive</Badge>,
-            ])}
-          />
+            {/* Student dropdown */}
+            <div className="grid sm:grid-cols-2 md:grid-cols-3 gap-2">
+              {filteredStudents.slice(0, 50).map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => setSelectedStudent(s.id)}
+                  className={`flex items-center gap-2.5 p-2.5 rounded-lg text-left text-[12px] transition-colors ${
+                    selectedStudent === s.id
+                      ? "ring-2"
+                      : "hover:bg-surface"
+                  }`}
+                  style={selectedStudent === s.id
+                    ? { background: "color-mix(in srgb, var(--primary) 8%, transparent)", borderColor: "var(--primary)", borderWidth: 1 }
+                    : { background: "var(--surface)", border: "1px solid var(--border)" }
+                  }
+                >
+                  <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0"
+                       style={{ background: "color-mix(in srgb, var(--primary) 15%, transparent)", color: "var(--primary)" }}>
+                    {s.full_name.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-medium truncate">{s.full_name}</div>
+                    <div className="text-[10px] text-muted truncate">{s.roll_number || s.email}</div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            {filteredStudents.length > 50 && (
+              <p className="text-[10px] text-muted">Showing 50 of {filteredStudents.length} students. Use search to narrow.</p>
+            )}
+          </div>
         )}
       </Section>
 
-      <Section title="Cohort readiness" className="mt-4">
-        <p className="text-xs text-muted mb-3">
-          View detailed readiness scores per cohort at{" "}
-          <Link href="/tenant/readiness" className="underline">Readiness dashboard</Link>.
-        </p>
-        {cohorts.loading ? <Skeleton rows={3} /> : cohorts.error ? <ErrorNote message={cohorts.error} /> : (
-          <Table
-            columns={["Cohort", "Branch", "Students", "Drive window"]}
-            rows={(cohorts.data ?? []).map((c) => [
-              <span key="n" className="font-medium">{c.name}</span>,
-              c.branch || "—",
-              c.member_count,
-              c.drive_start
-                ? new Date(c.drive_start).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
-                : <span key="d" className="text-muted">not set</span>,
-            ])}
-          />
-        )}
-      </Section>
+      {/* Student attempt history */}
+      {selectedStudent && (
+        <StudentAttemptHistory
+          studentId={selectedStudent}
+          student={selectedUserData}
+        />
+      )}
+
+      {!selectedStudent && (
+        <EmptyState
+          icon={User}
+          title="Select a student"
+          desc="Choose a student above to view their exam history and download reports."
+        />
+      )}
     </>
+  );
+}
+
+function StudentAttemptHistory({ studentId, student }: { studentId: string; student?: UserRow }) {
+  const { toast } = useToast();
+  const [expandedAttempt, setExpandedAttempt] = useState<string | null>(null);
+
+  const attempts = useData(() => api.cohortStudentAttempts(studentId), [studentId]);
+
+  const scoredAttempts = (attempts.data ?? []).filter((a) => a.status === "scored");
+  const inProgressAttempts = (attempts.data ?? []).filter((a) =>
+    a.status === "in_progress" || a.status === "created" || a.status === "scoring"
+  );
+
+  // Calculate best scores
+  const bestOverall = scoredAttempts.length > 0
+    ? Math.max(...scoredAttempts.map((a) => a.overall_score ?? 0))
+    : null;
+
+  return (
+    <Section title={`Exam history — ${student?.full_name ?? "Student"}`} className="mb-4">
+      {attempts.loading ? <Skeleton rows={4} /> : attempts.error ? <ErrorNote message={attempts.error} /> : (
+        <>
+          {/* Quick stats for this student */}
+          <div className="grid sm:grid-cols-4 gap-3 mb-4">
+            <div className="p-3 rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="text-[10px] font-semibold uppercase text-muted">Total attempts</div>
+              <div className="text-lg font-bold mt-1" style={{ color: "var(--primary)" }}>
+                {attempts.data?.length ?? 0}
+              </div>
+            </div>
+            <div className="p-3 rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="text-[10px] font-semibold uppercase text-muted">Scored</div>
+              <div className="text-lg font-bold mt-1" style={{ color: "var(--rag-green)" }}>
+                {scoredAttempts.length}
+              </div>
+            </div>
+            <div className="p-3 rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="text-[10px] font-semibold uppercase text-muted">In progress</div>
+              <div className="text-lg font-bold mt-1" style={{ color: "var(--rag-amber)" }}>
+                {inProgressAttempts.length}
+              </div>
+            </div>
+            <div className="p-3 rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="text-[10px] font-semibold uppercase text-muted">Best score</div>
+              <div className="text-lg font-bold mt-1" style={{ color: "var(--accent)" }}>
+                {bestOverall !== null ? bestOverall.toFixed(1) : "—"}
+              </div>
+            </div>
+          </div>
+
+          {/* Student info */}
+          {student && (
+            <div className="flex items-center gap-4 mb-4 p-3 rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+              <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                   style={{ background: "color-mix(in srgb, var(--primary) 15%, transparent)", color: "var(--primary)" }}>
+                {student.full_name.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <div className="text-sm font-semibold">{student.full_name}</div>
+                <div className="text-[11px] text-muted">{student.email}</div>
+              </div>
+              {student.roll_number && (
+                <Badge tone="var(--secondary)">Roll: {student.roll_number}</Badge>
+              )}
+              {student.branch && (
+                <Badge tone="var(--accent)">{student.branch}</Badge>
+              )}
+              <Badge tone={student.active ? "var(--rag-green)" : "var(--muted)"}>
+                {student.active ? "Active" : "Inactive"}
+              </Badge>
+            </div>
+          )}
+
+          {/* Attempts list */}
+          <Table
+            columns={["Assessment", "Attempt", "Status", "Score", "Date", "Actions"]}
+            rows={(attempts.data ?? []).map((a) => {
+              const isOpen = expandedAttempt === a.id;
+              return [
+                <span key="name" className="font-medium text-[12px]">{a.profile_name}</span>,
+                <span key="num" className="text-[11px] text-muted">#{a.attempt_number}</span>,
+                <Badge key="status" tone={
+                  a.status === "scored" ? "var(--rag-green)" :
+                  a.status === "scoring" ? "var(--rag-amber)" :
+                  a.status === "in_progress" ? "var(--primary)" :
+                  "var(--muted)"
+                }>{a.status}</Badge>,
+                <span key="score" className="font-semibold" style={{
+                  color: a.overall_score != null
+                    ? (a.overall_score >= 60 ? "var(--rag-green)" : a.overall_score >= 40 ? "var(--rag-amber)" : "var(--rag-red)")
+                    : "var(--muted)"
+                }}>
+                  {a.overall_score != null ? (a.overall_score as number).toFixed(1) : "—"}
+                </span>,
+                <span key="date" className="text-[11px] text-muted">
+                  {a.started_at
+                    ? new Date(a.started_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                    : "—"
+                  }
+                </span>,
+                <div key="actions" className="flex items-center gap-1.5">
+                  {a.status === "scored" && (
+                    <>
+                      <button
+                        onClick={() => window.open(attemptApi.reportUrl(a.id), "_blank")}
+                        className="btn btn-ghost text-[10px] px-2 py-1 ds-focus"
+                        title="Open report (print or save as PDF)"
+                      >
+                        <FileText size={11} /> Report
+                      </button>
+                      <a
+                        href={`/results/${a.id}`}
+                        className="btn btn-ghost text-[10px] px-2 py-1 ds-focus"
+                      >
+                        <ExternalLink size={11} /> View
+                      </a>
+                    </>
+                  )}
+                  {(a.status === "in_progress" || a.status === "created") && (
+                    <a
+                      href={`/attempt/${a.id}/check`}
+                      className="btn btn-ghost text-[10px] px-2 py-1 ds-focus"
+                    >
+                      Resume
+                    </a>
+                  )}
+                </div>,
+              ];
+            })}
+          />
+
+          {attempts.data?.length === 0 && (
+            <EmptyState
+              icon={FileText}
+              title="No attempts yet"
+              desc="This student has not taken any exams."
+            />
+          )}
+        </>
+      )}
+    </Section>
   );
 }

@@ -1,6 +1,6 @@
 import {
   Activity, BarChart3, Building2, BookOpen,
-  Home, Layers, LineChart, Mic,
+  Home, Layers, LineChart, Mic, PenLine,
   ScrollText, Settings, ShieldCheck, Target, Trophy, Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -46,6 +46,7 @@ export const NAV: NavSection[] = [
       { href: "/practise", label: "Practise", icon: Target, roles: STUDENT, tint: TINT.teal },
       { href: "/tests", label: "Take a test", icon: Mic, roles: STUDENT, tint: TINT.violet },
       { href: "/my-progress", label: "My progress", icon: LineChart, roles: STUDENT, tint: TINT.sky },
+      { href: "/writing-reviews", label: "Writing reviews", icon: PenLine, roles: STUDENT, tint: TINT.orange },
     ],
   },
   {

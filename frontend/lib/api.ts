@@ -554,6 +554,8 @@ export const api = {
     post<{ id?: string; passage_id?: string; prompt_id?: string; questions?: number }>(
       `/platform/questions/${category}?tenant_id=${tenantId}`, body),
   platformTenantUsers: (tenantId: string) => get<UserRow[]>(`/platform/tenants/${tenantId}/users`),
+  platformStudentAttempts: (userId: string, tenantId: string) =>
+    get<Attempt[]>(`/platform/students/${userId}/attempts?tenant_id=${tenantId}`),
   tenantTypes: () => get<TenantType[]>("/platform/tenant-types"),
 
   platformCapabilities: () => get<CapabilityRow[]>("/platform/capabilities"),
@@ -1085,6 +1087,9 @@ export const attemptApi = {
   submit: (attemptId: string) => post<AttemptResult>(`${ATTEMPTS}/${attemptId}/submit`),
 
   result: (attemptId: string) => get<AttemptResult>(`${ATTEMPTS}/${attemptId}/result`),
+
+  /** URL for the HTML report — opens in a new tab where it can be printed as PDF. */
+  reportUrl: (attemptId: string) => `${API_BASE}/report/${attemptId}`,
 
   /** Fetch a recording as a blob URL.
    *

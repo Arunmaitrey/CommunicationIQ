@@ -280,6 +280,40 @@ async def tenant_users(tenant_id: str) -> list[dict]:
     ]
 
 
+@router.get("/students/{user_id}/attempts")
+async def student_attempts(user_id: str, tenant_id: str) -> list[dict]:
+    """List attempts for a specific student — super admin visibility."""
+    from app.db import ensure_tenant_models
+    from app.models.platform import Tenant
+
+    tenant = await Tenant.get(tenant_id)
+    if tenant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
+
+    models = await ensure_tenant_models(tenant.slug)
+    rows = await models.Attempt.find(
+        models.Attempt.user_id == user_id).sort(-models.Attempt.created_at).to_list()
+
+    profile_ids = list({r.profile_id for r in rows} or {""})
+    profiles = await models.SimulationProfile.find(
+        models.SimulationProfile.id.in_(profile_ids)).to_list()
+    names = {p.id: p.name for p in profiles}
+
+    def _iso(value):
+        if value is None:
+            return None
+        return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+    return [
+        {"id": str(r.id), "profile_id": r.profile_id,
+         "profile_name": names.get(r.profile_id, ""),
+         "attempt_number": r.attempt_number, "status": r.status, "mode": r.mode,
+         "is_baseline": r.is_baseline, "started_at": _iso(r.started_at),
+         "submitted_at": _iso(r.submitted_at), "scored_at": _iso(r.scored_at)}
+        for r in rows
+    ]
+
+
 @router.get("/questions/items")
 async def list_question_items(tenant_id: str, category: str = "reading",
                              page: int = 1, page_size: int = 10) -> dict:
@@ -415,6 +449,7 @@ async def _propagate_reading(tenant, body, passage_id, questions_created):
     passage = models.ReadingPassage(
         id=local_id, title=body.get("title", ""),
         kind=body.get("kind", "article"), body=body.get("body", ""),
+        company=body.get("company", ""),
         word_count=len(body.get("body", "").split()),
         difficulty=body.get("difficulty", 0.0), status="published",
     )
@@ -425,6 +460,7 @@ async def _propagate_reading(tenant, body, passage_id, questions_created):
             stem=q.get("stem", ""), options=q.get("options", []),
             correct_index=q.get("correct_index", 0),
             explanation=q.get("explanation", ""), passage_id=local_id,
+            company=body.get("company", ""),
             seconds_allowed=q.get("seconds_allowed", 30),
             difficulty=q.get("difficulty", 0.0), status="published",
         )
@@ -465,6 +501,7 @@ async def _propagate_writing(tenant, body):
     prompt = models.WritingPrompt(
         id=prompt_id, title=body.get("title", ""),
         kind=body.get("kind", "essay"), prompt=body.get("prompt", ""),
+        company=body.get("company", ""),
         scenario=body.get("scenario", ""),
         key_points=body.get("key_points", []),
         min_words=body.get("min_words", 150),
@@ -508,6 +545,7 @@ async def _propagate_listening(tenant, body):
         id=passage_id, title=body.get("title", ""),
         kind=body.get("kind", "short_talk"),
         transcript=body.get("transcript", ""),
+        company=body.get("company", ""),
         audio_key=body.get("audio_key", ""),
         accent=body.get("accent", "indian"),
         plays_allowed=body.get("plays_allowed", 1),
@@ -521,6 +559,7 @@ async def _propagate_listening(tenant, body):
             stem=q.get("stem", ""), options=q.get("options", []),
             correct_index=q.get("correct_index", 0),
             explanation=q.get("explanation", ""), passage_id=passage_id,
+            company=body.get("company", ""),
             seconds_allowed=q.get("seconds_allowed", 30),
             difficulty=q.get("difficulty", 0.0), status="published",
         )
@@ -593,7 +632,8 @@ async def _propagate_quiz(tenant, category, body):
     qi = models.QuizItem(
         id=item_id, category=category, stem=body.get("stem", ""),
         options=body.get("options", []), correct_index=body.get("correct_index", 0),
-        explanation=body.get("explanation", ""), difficulty=body.get("difficulty", 0.3),
+        explanation=body.get("explanation", ""), company=body.get("company", ""),
+        difficulty=body.get("difficulty", 0.3),
         seconds_allowed=30, status="published",
     )
     await qi.create()
@@ -608,6 +648,7 @@ async def _propagate_speaking(tenant, body):
     ti = models.TaskItem(
         id=item_id, task_type=body.get("task_type", "open_response"),
         prompt_text=body.get("prompt_text", ""),
+        company=body.get("company", ""),
         reference_text=body.get("reference_text", ""),
         difficulty=body.get("difficulty", 0.3), status="published",
     )
