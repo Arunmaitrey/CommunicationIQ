@@ -1,8 +1,9 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Award, TrendingUp, Users } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Badge, ErrorNote, PageHeader, Section, Skeleton, Table } from "@/components/ui";
-import { api, type CohortReadiness } from "@/lib/api";
+import { api, type CohortReadiness, type StudentSummary } from "@/lib/api";
 import { READINESS } from "@/lib/roles";
 import { useData } from "@/lib/useData";
 
@@ -17,19 +18,27 @@ export default function TenantReadinessPage() {
 function Readiness() {
   const cohorts = useData(() => api.tenantCohorts());
   const [rows, setRows] = useState<CohortReadiness[]>([]);
+  const [topStudents, setTopStudents] = useState<StudentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     if (!cohorts.data) return;
     let live = true;
-    // A tenant admin reads readiness through the same cohort-scoped endpoint a
-    // trainer uses — one definition of the bands, one query, no second path
-    // that could drift from it.
     Promise.all(cohorts.data.map((c) => api.cohortReadiness(c.id).catch(() => null)))
       .then((res) => { if (live) setRows(res.filter(Boolean) as CohortReadiness[]); })
       .catch(() => { if (live) setError("Could not load readiness"); })
       .finally(() => { if (live) setLoading(false); });
+
+    // Fetch top students across all cohorts for ranking
+    Promise.all(cohorts.data.map((c) => api.cohortStudents(c.id).catch(() => [])))
+      .then((res) => {
+        if (!live) return;
+        const all = res.flat().filter((s) => s.overall_score != null);
+        all.sort((a, b) => (b.overall_score ?? 0) - (a.overall_score ?? 0));
+        setTopStudents(all.slice(0, 10));
+      });
+
     return () => { live = false; };
   }, [cohorts.data]);
 
@@ -60,6 +69,40 @@ function Readiness() {
             <Tile label="High risk" value={totals.risk} total={totals.total} tone="var(--rag-red)" />
             <Tile label="Not started" value={totals.none} total={totals.total} tone="var(--muted)" />
           </div>
+
+          {/* Top performers leaderboard */}
+          {topStudents.length > 0 && (
+            <Section title="Top performers" className="mb-4">
+              <p className="text-[11px] text-muted mb-3">Students with the highest scores across all cohorts.</p>
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                {topStudents.map((s, i) => (
+                  <div key={s.user.id} className="flex items-center gap-3 p-3 rounded-lg"
+                       style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
+                         style={{
+                           background: i < 3 ? "color-mix(in srgb, var(--primary) 20%, transparent)" : "var(--surface)",
+                           color: i < 3 ? "var(--primary)" : "var(--muted)",
+                           border: i < 3 ? "2px solid var(--primary)" : "1px solid var(--border)"
+                         }}>
+                      {i + 1}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[12px] font-medium truncate">{s.user.full_name}</div>
+                      <div className="text-[10px] text-muted">{s.user.roll_number || s.user.branch || ""}</div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-bold" style={{
+                        color: (s.overall_score ?? 0) >= 60 ? "var(--rag-green)" : (s.overall_score ?? 0) >= 40 ? "var(--rag-amber)" : "var(--rag-red)"
+                      }}>
+                        {s.overall_score?.toFixed(1) ?? "—"}
+                      </div>
+                      <div className="text-[9px] text-muted">{s.attempts} attempts</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
 
           <Section title="By cohort">
             <Table

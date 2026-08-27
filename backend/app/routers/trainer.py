@@ -229,6 +229,7 @@ async def student_attempts(user_id: str, principal: Principal,
         is_baseline=r.is_baseline, overall_score=None,
         started_at=r.started_at, submitted_at=r.submitted_at,
         scored_at=r.scored_at,
+        ip_address=getattr(r, "ip_address", ""),
     ) for r in rows]
 
 

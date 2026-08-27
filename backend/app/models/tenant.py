@@ -373,6 +373,7 @@ class Attempt(Document):
     is_baseline: bool = False
     env_check: dict = Field(default_factory=dict)
     device_info: dict = Field(default_factory=dict)
+    ip_address: str = ""
     started_at: datetime | None = None
     submitted_at: datetime | None = None
     scored_at: datetime | None = None

@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { ChevronDown, Download, ExternalLink, FileText, Search, User } from "lucide-react";
+import { ChevronDown, Clock, Download, ExternalLink, FileText, Globe, Search, User } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Badge, EmptyState, ErrorNote, PageHeader, Section, Skeleton, Table, Tabs } from "@/components/ui";
 import { api, attemptApi, type Attempt, type UserRow, type AttemptResult } from "@/lib/api";
@@ -205,9 +205,12 @@ function StudentAttemptHistory({ studentId, student }: { studentId: string; stud
 
           {/* Attempts list */}
           <Table
-            columns={["Assessment", "Attempt", "Status", "Score", "Date", "Actions"]}
+            columns={["Assessment", "Attempt", "Status", "Score", "Started", "Duration", "IP", "Actions"]}
             rows={(attempts.data ?? []).map((a) => {
               const isOpen = expandedAttempt === a.id;
+              const duration = a.started_at && a.submitted_at
+                ? Math.round((new Date(a.submitted_at).getTime() - new Date(a.started_at).getTime()) / 60000)
+                : null;
               return [
                 <span key="name" className="font-medium text-[12px]">{a.profile_name}</span>,
                 <span key="num" className="text-[11px] text-muted">#{a.attempt_number}</span>,
@@ -224,11 +227,17 @@ function StudentAttemptHistory({ studentId, student }: { studentId: string; stud
                 }}>
                   {a.overall_score != null ? (a.overall_score as number).toFixed(1) : "—"}
                 </span>,
-                <span key="date" className="text-[11px] text-muted">
+                <span key="started" className="text-[11px] text-muted">
                   {a.started_at
-                    ? new Date(a.started_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+                    ? new Date(a.started_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
                     : "—"
                   }
+                </span>,
+                <span key="duration" className="text-[11px] text-muted">
+                  {duration !== null ? `${duration}m` : "—"}
+                </span>,
+                <span key="ip" className="text-[10px] text-muted font-mono">
+                  {a.ip_address || "—"}
                 </span>,
                 <div key="actions" className="flex items-center gap-1.5">
                   {a.status === "scored" && (

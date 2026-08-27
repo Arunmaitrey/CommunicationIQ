@@ -50,6 +50,14 @@ from app.schemas import (AnswerSubmission, AttemptResult, CandidateResume,
                          StartAttemptRequest, WordTimingOut)
 from app.storage import get_storage, recording_key
 
+
+def _client_ip(request: Request) -> str:
+    """Extract client IP from request, respecting X-Forwarded-For behind proxies."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
 # Students and invited candidates, and nobody else.
 #
 # A candidate is admitted here because this is the only thing they came to do
@@ -190,7 +198,8 @@ async def _recording_consent(session: TenantSession, user_id: str) -> ConsentRec
 @router.post("", response_model=RunnerPayload, status_code=status.HTTP_201_CREATED)
 async def start_attempt(body: StartAttemptRequest, principal: Principal,
                         session: TenantSession,
-                        background: BackgroundTasks) -> RunnerPayload:
+                        background: BackgroundTasks,
+                        request: Request) -> RunnerPayload:
     """Create an attempt and fix its items up front.
 
     The item list is decided here and stored, not generated per request: a
@@ -260,6 +269,7 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
         status="created",
         mode=body.mode if body.mode in {"practice", "official", "stress"} else "practice",
         is_baseline=profile.is_baseline and int(prior) == 0,
+        ip_address=_client_ip(request),
     )
     session.add(attempt)
     await session.flush()
@@ -2560,6 +2570,9 @@ async def _result(session: TenantSession, attempt: Attempt,
         retell=_retell_for(rows),
         sections=section_out,
         skills=skill_out,
+        ip_address=getattr(attempt, "ip_address", ""),
+        started_at=attempt.started_at,
+        submitted_at=attempt.submitted_at,
         calibrated=calibration.current().any_calibrated,
         calibration_note=(calibration.OVERALL_UNCALIBRATED_NOTE
                           if not calibration.current().any_calibrated else ""),

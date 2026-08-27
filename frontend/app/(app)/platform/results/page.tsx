@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Building2, Download, ExternalLink, FileText, Search, User } from "lucide-react";
+import { Building2, Clock, Download, ExternalLink, FileText, Globe, Search, User } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Badge, EmptyState, ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
 import { api, attemptApi, type Attempt, type TenantRow, type UserRow } from "@/lib/api";
@@ -228,15 +228,30 @@ function StudentAttemptHistory({ studentId, tenantId, student }: {
 
           {/* Attempts */}
           <div className="space-y-2">
-            {(attempts.data ?? []).map((a) => (
+            {(attempts.data ?? []).map((a) => {
+              const duration = a.started_at && a.submitted_at
+                ? Math.round((new Date(a.submitted_at).getTime() - new Date(a.started_at).getTime()) / 60000)
+                : null;
+              return (
               <div key={a.id} className="flex items-center justify-between p-3 rounded-lg"
                    style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
                 <div className="flex items-center gap-4">
                   <div className="min-w-0">
                     <div className="text-[12px] font-medium">{a.profile_name || "Unnamed assessment"}</div>
-                    <div className="text-[10px] text-muted">
-                      Attempt #{a.attempt_number} — {a.mode}
-                      {a.started_at ? ` • ${new Date(a.started_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}` : ""}
+                    <div className="text-[10px] text-muted flex items-center gap-2">
+                      <span>Attempt #{a.attempt_number} — {a.mode}</span>
+                      {a.started_at && (
+                        <span className="flex items-center gap-1">
+                          <Clock size={9} />
+                          {new Date(a.started_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      )}
+                      {duration !== null && <span>{duration}m</span>}
+                      {a.ip_address && (
+                        <span className="flex items-center gap-1 font-mono">
+                          <Globe size={9} />{a.ip_address}
+                        </span>
+                      )}
                     </div>
                   </div>
                   <Badge tone={
@@ -268,7 +283,8 @@ function StudentAttemptHistory({ studentId, tenantId, student }: {
                   )}
                 </div>
               </div>
-            ))}
+            );
+            })}
           </div>
 
           {attempts.data?.length === 0 && (

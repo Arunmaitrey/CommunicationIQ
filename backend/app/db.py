@@ -401,6 +401,12 @@ class Session:
         return _Result([tuple(getattr(d, str(f)) for f in entities) for d in docs])
 
     async def _run(self, model, stmt: _Stmt) -> list:
+        # Beanie's find() accepts comparison operators directly when
+        # called on a properly initialized Document subclass. Ensure
+        # we always use the resolved (tenant-bound) model.
+        resolved = self._resolve(model)
+        if resolved is not None:
+            model = resolved
         query = model.find(*stmt.conditions)
         if stmt.order:
             query = query.sort(*stmt.order)

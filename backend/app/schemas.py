@@ -163,6 +163,7 @@ class AttemptOut(BaseModel):
     started_at: datetime | None
     submitted_at: datetime | None
     scored_at: datetime | None
+    ip_address: str = ""
 
 
 class MasteryOut(BaseModel):
@@ -1052,6 +1053,9 @@ class AttemptResult(BaseModel):
     # Stored section results, and the four-skill rollup built from them.
     sections: list[SectionResultOut] = []
     skills: list[SkillScoreOut] = []
+    ip_address: str = ""
+    started_at: datetime | None = None
+    submitted_at: datetime | None = None
     # The frozen engine's weakest-composite-dimension figure. Retained as
     # engine output (SCORING_PATH); NOT a diagnosis surface -- the page does
     # not render it, and narration is not given it. See primary_diagnosis.

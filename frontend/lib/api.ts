@@ -319,6 +319,7 @@ export interface Attempt {
   id: string; profile_id: string; profile_name: string; attempt_number: number;
   status: string; mode: string; is_baseline: boolean; overall_score: number | null;
   started_at: string | null; submitted_at: string | null; scored_at: string | null;
+  ip_address: string;
 }
 
 export interface Mastery {
@@ -943,6 +944,9 @@ export interface AttemptResult {
   responses: ResponseMetrics[];
   scored_at: string | null;
   scoring_ms: number | null;
+  ip_address: string;
+  started_at: string | null;
+  submitted_at: string | null;
   narration: Narration | null;
   previous: PreviousAttempt | null;
   priorities: ResultPriority[];

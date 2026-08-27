@@ -309,7 +309,8 @@ async def student_attempts(user_id: str, tenant_id: str) -> list[dict]:
          "profile_name": names.get(r.profile_id, ""),
          "attempt_number": r.attempt_number, "status": r.status, "mode": r.mode,
          "is_baseline": r.is_baseline, "started_at": _iso(r.started_at),
-         "submitted_at": _iso(r.submitted_at), "scored_at": _iso(r.scored_at)}
+         "submitted_at": _iso(r.submitted_at), "scored_at": _iso(r.scored_at),
+         "ip_address": getattr(r, "ip_address", "")}
         for r in rows
     ]
 
