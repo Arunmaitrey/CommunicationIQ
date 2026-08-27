@@ -6,7 +6,11 @@ services:
     ports:
       - "8010:8010"
     environment:
-      - MONGO_URI=mongodb://mongo:27017/CommunicationIQ
+      # Defaults to the local `mongo` service below so a fresh checkout with
+      # no .env still comes up. Set MONGO_URI in a root .env (gitignored,
+      # same pattern as JWT_SECRET) to point every teammate's container at
+      # the same real Atlas data instead of an empty local database.
+      - MONGO_URI=${MONGO_URI:-mongodb://mongo:27017/CommunicationIQ}
       - JWT_SECRET=${JWT_SECRET:-commiq-dev-secret-do-not-use-in-prod}
       - APP_URL=http://localhost:3010
       - CORS_ORIGINS=["http://localhost:3010","http://127.0.0.1:3010"]
