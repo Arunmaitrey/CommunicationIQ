@@ -56,7 +56,7 @@ export function NarrationCard({ narration }: { narration: Narration | null }) {
         </span>
         {narration.status === "ready" && (
           <span className="text-[10px] text-muted ml-auto">
-            AI-generated · not yet calibrated
+            Generated · not yet calibrated
           </span>
         )}
       </div>

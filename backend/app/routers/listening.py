@@ -53,13 +53,13 @@ async def passages(principal: Principal,
         models.ListeningPassage.status == "published").sort(
         models.ListeningPassage.difficulty).to_list()
 
-    coll = models.QuizItem.get_pymongo_collection()
+    coll = models.QuizItem.get_motor_collection()
     counts = {doc["_id"]: doc["count"] for doc in await coll.aggregate([
         {"$match": {"category": "audio_comprehension", "status": "published"}},
         {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
     ]).to_list(None)}
 
-    coll = models.ListeningAttempt.get_pymongo_collection()
+    coll = models.ListeningAttempt.get_motor_collection()
     best = {doc["_id"]: doc["max"] for doc in await coll.aggregate([
         {"$match": {"user_id": principal.user_id, "score": {"$ne": None}}},
         {"$group": {"_id": "$passage_id", "max": {"$max": "$score"}}},

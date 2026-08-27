@@ -2,26 +2,19 @@ import type { Role } from "@/lib/api";
 
 export const ROLE_LABEL: Record<Role, string> = {
   student: "Student",
-  // Somebody outside the institution, invited to sit one assessment. Not a
-  // student: no practice, no history, no account after this.
-  candidate: "Candidate",
-  trainer: "Trainer",
-  tenant_admin: "Institution admin",
-  super_admin: "Platform super admin",
-  finance: "Finance",
-  content: "Content",
-  data_ml: "Data / ML",
-  support: "Support",
+  tenant_admin: "Institution Admin",
+  super_admin: "Super Admin",
 };
 
-export const PLATFORM_ROLES: Role[] = ["super_admin", "finance", "content", "data_ml", "support"];
+/** Only super_admin, tenant_admin, and student are real roles. */
+export const PLATFORM_ROLES: Role[] = ["super_admin"];
+export const TENANT_ROLES: Role[] = ["tenant_admin"];
+export const STUDENT_ROLES: Role[] = ["student"];
 
 export const isPlatformRole = (role: Role | undefined): boolean =>
   !!role && PLATFORM_ROLES.includes(role);
 
-/** Readiness bands, defined once on the server (app/readiness.py) and labelled
- *  once here. A student is never "placement ready" on one screen and "needs
- *  training" on another. */
+/** Readiness bands */
 export const READINESS: Record<string, { label: string; color: string }> = {
   placement_ready: { label: "Placement ready", color: "var(--rag-green)" },
   needs_training: { label: "Needs training", color: "var(--rag-amber)" },

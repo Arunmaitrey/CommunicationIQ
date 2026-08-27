@@ -1,4 +1,4 @@
-"""Institution console — the tenant admin's own view of their institution.
+"""Institution console â€” the tenant admin's own view of their institution.
 
 Every query runs against the caller's own institution database. There is no
 institution identifier in any signature here, because there is nowhere else
@@ -12,7 +12,7 @@ from beanie.operators import In, NE
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.deps import Principal, TenantModels, require_roles
-from app.models.platform import Plan, Tenant
+from app.models.platform import Tenant
 from app.schemas import (CohortOut, ProfileSectionOut, SimulationProfileOut,
                          TenantOverview, UserOut)
 
@@ -25,9 +25,8 @@ async def overview(principal: Principal, models: TenantModels) -> TenantOverview
     tenant = await Tenant.get(principal.tenant_id or "")
     if tenant is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Institution not found")
-    plan = await Plan.get(tenant.plan_id) if tenant.plan_id else None
 
-    role_docs = await models.User.get_pymongo_collection().aggregate([
+    role_docs = await models.User.get_motor_collection().aggregate([
         {"$match": {"active": True}},
         {"$group": {"_id": "$role", "n": {"$sum": 1}}},
     ]).to_list(None)
@@ -36,18 +35,16 @@ async def overview(principal: Principal, models: TenantModels) -> TenantOverview
     attempts = await models.Attempt.find_all().count()
 
     students = counts.get("student", 0)
-    consented_ids = await models.ConsentRecord.get_pymongo_collection().distinct(
+    consented_ids = await models.ConsentRecord.get_motor_collection().distinct(
         "user_id", {"scope": "recording", "granted": True})
     consented = len(consented_ids)
 
     return TenantOverview(
         tenant_name=tenant.name,
         tenant_slug=tenant.slug,
-        plan_name=plan.name if plan else "",
-        seats_used=students + counts.get("trainer", 0) + counts.get("tenant_admin", 0),
+        seats_used=students + counts.get("tenant_admin", 0),
         seat_limit=tenant.seat_limit,
         students=students,
-        trainers=counts.get("trainer", 0),
         cohorts=int(cohorts),
         attempts_total=int(attempts),
         consent_pending=max(students - int(consented), 0),
@@ -61,9 +58,12 @@ async def users(models: TenantModels, role: str | None = None) -> list[UserOut]:
     rows = await query.sort("role", "full_name").to_list()
     return [
         UserOut(
-            id=u.id, email=u.email, full_name=u.full_name, role=u.role, active=u.active,
-            roll_number=u.roll_number, branch=u.branch, year_of_study=u.year_of_study,
-            l1_language=u.l1_language, created_at=u.created_at,
+            id=getattr(u, 'id', ''), email=getattr(u, 'email', ''), full_name=getattr(u, 'full_name', ''),
+            role=getattr(u, 'role', 'student'), active=getattr(u, 'active', True),
+            roll_number=getattr(u, 'roll_number', ''), branch=getattr(u, 'branch', ''),
+            year_of_study=getattr(u, 'year_of_study', None),
+            l1_language=getattr(u, 'l1_language', ''),
+            created_at=getattr(u, 'created_at', None),
         )
         for u in rows
     ]
@@ -72,7 +72,7 @@ async def users(models: TenantModels, role: str | None = None) -> list[UserOut]:
 @router.get("/cohorts", response_model=list[CohortOut])
 async def cohorts(models: TenantModels) -> list[CohortOut]:
     rows = await models.Cohort.find_all().sort("name").to_list()
-    member_docs = await models.CohortMember.get_pymongo_collection().aggregate([
+    member_docs = await models.CohortMember.get_motor_collection().aggregate([
         {"$group": {"_id": "$cohort_id", "n": {"$sum": 1}}},
     ]).to_list(None)
     counts = {d["_id"]: int(d["n"]) for d in member_docs}

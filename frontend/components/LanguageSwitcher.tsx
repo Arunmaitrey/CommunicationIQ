@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Globe } from "lucide-react";
 import type { Locale } from "@/lib/i18n";
+import { API_BASE } from "@/lib/api";
 
 const LANGUAGES: { code: Locale; label: string; native: string }[] = [
   { code: "en", label: "English", native: "English" },
@@ -18,16 +19,22 @@ export function getStoredLocale(): Locale {
   return (localStorage.getItem(STORAGE_KEY) as Locale) || "en";
 }
 
-/** Store locale. */
+/** Store locale locally and sync to DB. */
 export function setStoredLocale(locale: Locale) {
   localStorage.setItem(STORAGE_KEY, locale);
+  // Sync to backend (fire-and-forget)
+  const token = localStorage.getItem("token");
+  if (token) {
+    fetch(`${API_BASE}/auth/preferences`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ ui_language: locale }),
+    }).catch(() => { /* silent */ });
+  }
 }
 
 /**
- * ACC-01: Language switcher.
- *
- * Allows students to switch feedback language between English, Telugu,
- * Hindi, and Tamil. Stored in localStorage and used by i18n.ts.
+ * Language switcher — saves to both localStorage and DB.
  */
 export function LanguageSwitcher() {
   const [locale, setLocale] = useState<Locale>(getStoredLocale);
@@ -35,7 +42,6 @@ export function LanguageSwitcher() {
   function handleChange(code: Locale) {
     setLocale(code);
     setStoredLocale(code);
-    // Force a re-render of i18n consumers
     window.dispatchEvent(new CustomEvent("locale-changed", { detail: code }));
   }
 

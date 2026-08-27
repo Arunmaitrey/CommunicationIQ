@@ -33,6 +33,7 @@ Student → Browser (Next.js) → FastAPI Backend → MongoDB Atlas
 | `main.py` | FastAPI app, lifespan, route registration |
 | `config.py` | Pydantic Settings from environment |
 | `db.py` | MongoDB connection, Beanie init, Session bridge |
+| `sqlbridge.py` | SQLAlchemy query expressions over Beanie |
 | `deps.py` | Auth dependencies (Principal, TenantModels, etc.) |
 | `security.py` | JWT encode/decode, password hashing |
 | `provisioning.py` | Tenant database creation/indexes |
@@ -41,25 +42,29 @@ Student → Browser (Next.js) → FastAPI Backend → MongoDB Atlas
 
 | Router | Prefix | Scope | Purpose |
 |--------|--------|-------|---------|
-| `auth` | `/auth` | Public | Login, token refresh |
-| `student` | `/student` | Tenant | Profile, home, skills |
-| `attempts` | `/student/attempts` | Tenant | Create attempt, answer, submit, score |
-| `listening` | `/student/listening` | Tenant | Listening comprehension |
-| `reading` | `/student/reading` | Tenant | Reading comprehension |
-| `writing` | `/student/writing` | Tenant | Writing prompts and submissions |
-| `game` | `/student/game` | Tenant | XP, badges, quests, streaks |
-| `practice` | `/student/quiz` | Tenant | Quiz and drills |
-| `trainer` | `/trainer` | Tenant (admin) | Cohort readiness, student mastery |
-| `tenant_admin` | `/tenant` | Tenant (admin) | Users, cohorts, profiles, invitations |
-| `platform_admin` | `/platform` | Platform | Overview, tenants, plans, providers |
+| `auth` | `/auth` | Public | Login, signup, token refresh, preferences |
+| `student` | `/student` | Student | Profile, home, skills, consent |
+| `attempts` | `/student/attempts` | Student | Create attempt, answer, submit, score, resume |
+| `listening` | `/student/listening` | Student | Listening comprehension |
+| `reading` | `/student/reading` | Student | Reading comprehension |
+| `writing` | `/student/writing` | Student | Writing prompts and submissions |
+| `game` | `/student/game` | Student | XP, badges, quests, streaks |
+| `practice` | `/student/quiz` | Student | Quiz and drills |
+| `trainer` | `/trainer` | Tenant Admin | Cohort readiness, student mastery, flags |
+| `trainer_ops` | `/trainer` | Tenant Admin | Drill creation, intervention flags |
+| `tenant_admin` | `/tenant` | Tenant Admin | Users, cohorts, profiles, invitations |
+| `tenant_writes` | `/tenant` | Tenant Admin | User creation, cohort management |
+| `platform_admin` | `/platform` | Platform | Overview, tenants, providers, question bank |
 | `platform_writes` | `/platform` | Platform | Create/update tenants, plans |
+| `platform_export` | `/platform` | Platform | DB export, tenant data export |
 | `invitations` | `/invite` | Public | Token-based invite flow |
 
 ### Database Layer
 
 - **Beanie ODM**: Document models in `app/models/platform.py` and `app/models/tenant.py`
-- **Session bridge**: `db.py` provides `Session` class that translates `select(Model).where(...)` to `Model.find(...).to_list()` so service modules work without rewriting
+- **Session bridge**: `db.py` provides `Session` class that translates `select(Model).where(...)` to `Model.find(...).to_list()`
 - **Database-per-tenant**: each institution gets `tenant_<slug>` database — no shared collections
+- **StrId type**: `app/models/_common.py` provides ObjectId→str coercion for robustness
 
 ### Engine Architecture
 
@@ -82,15 +87,28 @@ Audio Input → VAD → ASR (faster-whisper)
 
 ## Frontend Architecture
 
-- **Next.js 15** with App Router
+- **Next.js 14** with App Router
 - **Tailwind CSS** for styling
 - **Role-based routing**: home page loads first, login only for protected resources
 - **API client** in `lib/api.ts` with automatic JWT token injection
 - **Navigation** in `lib/nav.ts` with `landingFor(role)` for post-login redirect
+- **Anti-proctoring**: clipboard, keyboard shortcuts, right-click disabled during exams
+- **Exam resume**: in-progress attempt detection and recovery
+- **IndexedDB queue**: audio uploads survive browser restarts
 
 ## Security Model
 
 1. **JWT tokens** carry `scope` (platform/tenant), `role`, `tenant_slug`, `user_id`
 2. **Tenant isolation**: each institution has its own MongoDB database — cross-tenant queries are structurally impossible
 3. **Platform staff** cannot access student data — only business metrics
-4. **Candidates** access via token-only flow — no account required
+4. **Recording consent** required before any exam attempt
+5. **Audit logging** on all write operations
+6. **Anti-proctoring** measures during exam execution
+
+## Roles
+
+| Role | Scope | Access |
+|------|-------|--------|
+| `super_admin` | Platform-wide | All institutions, users, audit logs, question bank management |
+| `tenant_admin` | Single institution | Own institution's users, cohorts, profiles, results |
+| `student` | Own account | Take assessments, view own results and progress |

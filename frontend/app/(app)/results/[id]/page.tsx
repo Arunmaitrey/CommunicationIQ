@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertTriangle, ChevronDown, ChevronRight, Clock, Gauge, Loader2, Lock, Mic,
-  Volume2,
+  Star, Volume2,
 } from "lucide-react";
 import { ListenBack } from "@/components/ListenBack";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -113,8 +113,7 @@ function Result() {
         // second attempt, because an invitation is one sitting -- and
         // /simulate is a student page, so clicking this ejected them from
         // their own result to a login screen they have no account for.
-        action={user?.role === "candidate" ? undefined
-          : <Link href="/simulate" className="btn btn-ghost btn-sm ds-focus">Take another</Link>}
+        action={<Link href="/simulate" className="btn btn-ghost btn-sm ds-focus">Take another</Link>}
       />
 
       {/* A sentence before a chart. The Phase 0 rule: a student opening their
@@ -141,10 +140,10 @@ function Result() {
         <WhatToWorkOnFirst primary={data.primary_diagnosis}
                            priorities={data.priorities}
                            attemptId={data.attempt_id}
-                           canPractise={user?.role !== "candidate"} />
+                           canPractise={true} />
       )}
 
-      {!data.practice && user?.role !== "candidate"
+      {!data.practice
         && (data.priorities.length > 0 || data.primary_diagnosis) && (
         <PractiseNext priorities={data.priorities} primary={data.primary_diagnosis}
                       profileId={data.profile_id} attemptId={data.attempt_id} />
@@ -422,6 +421,10 @@ function Result() {
       <Evidence evidence={data.evidence} />
 
       <Export csvUrl={attemptApi.exportCsvUrl(id)} />
+
+      {user?.role === "student" && (
+        <StudentReview attemptId={data.attempt_id} />
+      )}
 
       {data.overall == null && measured.length > 0 && (
         <div className="ds-card p-4 mb-4 text-xs text-muted leading-relaxed">
@@ -892,5 +895,170 @@ function PracticeResult({ outcome, carried }: {
         </Link>
       </div>
     </Section>
+  );
+}
+
+function StudentReview({ attemptId }: { attemptId: string }) {
+  const [selectedRating, setSelectedRating] = useState<number | null>(null);
+  const [hoverRating, setHoverRating] = useState<number | null>(null);
+  const [comment, setComment] = useState("");
+  const [difficulty, setDifficulty] = useState("just_right");
+  const [submitted, setSubmitted] = useState(false);
+
+  const reviewKey = `commiq.reviews.${attemptId}`;
+  const [existingReview, setExistingReview] = useState<{
+    attempt_id: string;
+    rating: number;
+    comment: string;
+    difficulty: string;
+    submitted_at: string;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(reviewKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        setExistingReview(parsed);
+        setSubmitted(true);
+      }
+    } catch {
+      // ignore
+    }
+  }, [reviewKey]);
+
+  function handleSubmit() {
+    if (!selectedRating) return;
+    const review = {
+      attempt_id: attemptId,
+      rating: selectedRating,
+      comment,
+      difficulty,
+      submitted_at: new Date().toISOString(),
+    };
+    localStorage.setItem(reviewKey, JSON.stringify(review));
+    setExistingReview(review);
+    setSubmitted(true);
+  }
+
+  if (submitted || existingReview) {
+    const review = existingReview;
+    return (
+      <div className="ds-card p-4 mb-4" style={{ borderColor: "var(--rag-green)" }}>
+        <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">
+          Thank you for your feedback!
+        </div>
+        {review && (
+          <div className="mt-2">
+            <div className="flex items-center gap-1 mb-1.5">
+              {[1, 2, 3, 4, 5].map((s) => (
+                <Star
+                  key={s}
+                  size={16}
+                  className={s <= review.rating ? "fill-[var(--primary)]" : ""}
+                  style={{ color: s <= review.rating ? "var(--primary)" : "var(--muted)" }}
+                />
+              ))}
+              <span className="text-xs text-muted ml-1.5">{review.rating}/5</span>
+            </div>
+            {review.difficulty && (
+              <p className="text-xs text-muted mb-1">
+                Difficulty: {review.difficulty === "easy" ? "Easy" : review.difficulty === "hard" ? "Hard" : "Just Right"}
+              </p>
+            )}
+            {review.comment && (
+              <p className="text-xs leading-relaxed mt-1.5">{review.comment}</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="ds-card p-4 mb-4">
+      <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-3">
+        How was this exam?
+      </div>
+
+      <div className="mb-3">
+        <label className="text-xs text-muted block mb-1.5">How would you rate this exam?</label>
+        <div className="flex items-center gap-1">
+          {[1, 2, 3, 4, 5].map((s) => (
+            <button
+              key={s}
+              type="button"
+              onMouseEnter={() => setHoverRating(s)}
+              onMouseLeave={() => setHoverRating(null)}
+              onClick={() => setSelectedRating(s)}
+              className="ds-focus p-0.5"
+              aria-label={`${s} star${s > 1 ? "s" : ""}`}
+            >
+              <Star
+                size={20}
+                className={
+                  s <= (hoverRating ?? selectedRating ?? 0)
+                    ? "fill-[var(--primary)]"
+                    : ""
+                }
+                style={{
+                  color:
+                    s <= (hoverRating ?? selectedRating ?? 0)
+                      ? "var(--primary)"
+                      : "var(--muted)",
+                }}
+              />
+            </button>
+          ))}
+          {selectedRating != null && (
+            <span className="text-xs text-muted ml-2">{selectedRating}/5</span>
+          )}
+        </div>
+      </div>
+
+      <div className="mb-3">
+        <label className="text-xs text-muted block mb-1.5">
+          Any comments about the exam experience?
+        </label>
+        <textarea
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          rows={3}
+          className="w-full text-xs p-2 rounded border bg-transparent ds-focus"
+          style={{ borderColor: "var(--border)" }}
+          placeholder="Optional..."
+        />
+      </div>
+
+      <div className="mb-4">
+        <label className="text-xs text-muted block mb-1.5">Difficulty</label>
+        <div className="flex gap-2">
+          {[
+            { value: "easy", label: "Easy" },
+            { value: "just_right", label: "Just Right" },
+            { value: "hard", label: "Hard" },
+          ].map((opt) => (
+            <button
+              key={opt.value}
+              type="button"
+              onClick={() => setDifficulty(opt.value)}
+              className={`btn btn-sm ds-focus ${
+                difficulty === opt.value ? "btn-primary" : "btn-ghost"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <button
+        onClick={handleSubmit}
+        disabled={selectedRating == null}
+        className="btn btn-primary btn-sm ds-focus"
+      >
+        Submit Review
+      </button>
+    </div>
   );
 }

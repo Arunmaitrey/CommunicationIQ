@@ -20,6 +20,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str = Field(min_length=1, max_length=120)
+
+
 class SessionUser(BaseModel):
     id: str
     email: str
@@ -65,7 +71,7 @@ class UserOut(BaseModel):
     branch: str = ""
     year_of_study: int | None = None
     l1_language: str = ""
-    created_at: datetime
+    created_at: datetime | None = None
 
 
 class CohortOut(BaseModel):
@@ -243,11 +249,9 @@ class StudentSummary(BaseModel):
 class TenantOverview(BaseModel):
     tenant_name: str
     tenant_slug: str
-    plan_name: str = ""
     seats_used: int
     seat_limit: int
     students: int
-    trainers: int
     cohorts: int
     attempts_total: int
     consent_pending: int
@@ -256,18 +260,6 @@ class TenantOverview(BaseModel):
 # --------------------------------------------------------------------------
 # Platform
 # --------------------------------------------------------------------------
-
-class PlanOut(BaseModel):
-    id: str
-    code: str
-    name: str
-    version: int
-    billing_model: str
-    currency: str
-    price_per_seat: float
-    price_flat: float
-    attempt_allowance: int
-    active: bool
 
 
 class TenantBranding(BaseModel):
@@ -335,21 +327,18 @@ class TenantOut(BaseModel):
     id: str
     name: str
     slug: str
+    domain: str = ""
     tenant_type: str = "engineering_college"
     tenant_type_label: str = ""
     status: str
-    plan_id: str | None = None
-    plan_name: str = ""
     seat_limit: int
     seats_used: int = 0
     region: str
     branding: TenantBranding = TenantBranding()
     profile: TenantProfile = TenantProfile()
-    subscription_status: str = ""
-    trial_ends_at: datetime | None = None
-    season_start: datetime | None
-    season_end: datetime | None
     created_at: datetime
+    temp_password: str = ""
+    admin_email: str = ""
 
 
 class ProviderOut(BaseModel):
@@ -407,7 +396,6 @@ class PlatformOverview(BaseModel):
     tenants_total: int
     tenants_active: int
     seats_sold: int
-    plans: int
     providers_registered: int
     capabilities_configured: int
     capabilities_total: int
@@ -663,6 +651,8 @@ TASK_TYPES = {
     "passage_reconstruction", "email_writing",
     # Timed typing: speed and accuracy on a given text.
     "typing",
+    # Read word lists aloud (Cognizant Q11-15): isolated words, word-clarity scoring.
+    "read_words",
     # Kept for profiles authored before the names above existed.
     "mcq", "audio_comprehension",
 }
@@ -1865,8 +1855,8 @@ class CapabilityConfigRequest(BaseModel):
 class TenantCreateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     slug: str
+    domain: str = ""
     tenant_type: str = "engineering_college"
-    plan_id: str | None = None
     seat_limit: int = Field(default=100, ge=1, le=1_000_000)
     status: str = "trial"
     admin_email: EmailStr
@@ -1888,7 +1878,6 @@ class TenantUpdateRequest(BaseModel):
     tenant_type: str | None = None
     status: str | None = None
     seat_limit: int | None = Field(default=None, ge=1, le=1_000_000)
-    plan_id: str | None = None
     region: str | None = None
     branding: TenantBranding | None = None
     profile: TenantProfile | None = None
@@ -1906,63 +1895,8 @@ class TenantTypeOut(BaseModel):
 BILLING_MODELS = frozenset({"per_seat", "flat", "usage", "pilot"})
 
 
-class PlanRequest(BaseModel):
-    code: str
-    name: str
-    billing_model: str = "per_seat"
-    currency: str = "INR"
-    price_per_seat: float = Field(default=0, ge=0)
-    price_flat: float = Field(default=0, ge=0)
-    attempt_allowance: int = Field(default=3, ge=0)
-    features: dict | None = None
-
-    @field_validator("billing_model")
-    @classmethod
-    def known_billing_model(cls, v: str) -> str:
-        # Must match the model's own list and the console's labels. An earlier
-        # version of this validator allowed "hybrid" -- which nothing renders
-        # -- and rejected "usage" and "pilot", which both do.
-        if v not in BILLING_MODELS:
-            raise ValueError(
-                f"unknown billing model {v!r}; expected one of "
-                f"{', '.join(sorted(BILLING_MODELS))}")
-        return v
-
-
-class PlanUpdateRequest(BaseModel):
-    """Edit a plan template in place.
-
-    Price and billing model are deliberately absent. A live subscription
-    copies its terms from the template at assignment, so editing them here
-    would not re-price anybody -- it would just make the template disagree
-    with every customer already on it. Re-pricing is a new version.
-    """
-
-    name: str | None = Field(default=None, min_length=1, max_length=120)
-    attempt_allowance: int | None = Field(default=None, ge=0)
-    features: dict | None = None
-    active: bool | None = None
-
-
 class LogoByUrlRequest(BaseModel):
     url: str = Field(min_length=1, max_length=500)
-
-
-class InvoiceOut(BaseModel):
-    id: str
-    tenant_id: str
-    tenant_name: str
-    number: str
-    period_start: datetime
-    period_end: datetime
-    seats: int
-    subtotal: float
-    gst_rate: float
-    gst_amount: float
-    total: float
-    currency: str
-    status: str
-    issued_at: datetime | None
 
 
 class GamificationConfigRequest(BaseModel):

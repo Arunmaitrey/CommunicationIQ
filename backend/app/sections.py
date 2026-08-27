@@ -59,6 +59,8 @@ SKILL_OF_TASK: dict[str, str] = {
     "passage_reconstruction": "writing",
     # Timed typing: speed and accuracy on a given text.
     "typing": "writing",
+    # Read word lists aloud (Cognizant Q11-15): isolated words, word-clarity scoring.
+    "read_words": "speaking",
     # Grammar transformation, read and chosen (not composed), so it sits
     # under reading for the four-skill rollup; its grammar signal is carried
     # by DIMENSIONS_BY_TASK, which feeds the Grammar sub-score.
@@ -89,6 +91,11 @@ RESPONSE_MODE: dict[str, str] = {
     "typing": "write",
     # A sentence and four rewrites, chosen — like vocabulary_in_context, no audio.
     "voice_change": "select",
+    # Hear a gapped/flawed sentence, say the whole correct one aloud.
+    "spoken_completion": "speak",
+    "spoken_correction": "speak",
+    # Read word lists aloud (Cognizant Q11-15): records audio like read_aloud.
+    "read_words": "speak",
 }
 
 
@@ -130,6 +137,10 @@ ITEM_SOURCE: dict[str, tuple[str, str]] = {
     # Change a sentence between active and passive, choosing the correct
     # rewrite. Its own category: a grammar transformation, not a reply choice.
     "voice_change": ("quiz", "voice_change"),
+    # Hear a gapped/flawed sentence, say the whole correct one aloud.
+    # Uses the task bank (same as repeat_sentence for audio source).
+    "spoken_completion": ("task", "spoken_completion"),
+    "spoken_correction": ("task", "spoken_correction"),
     # Read a short passage, lose it, write it back. Same table as the other
     # writing tasks -- a passage with the ideas it contains written down is
     # exactly the shape WritingPrompt already stores -- but its own kind,
@@ -137,6 +148,8 @@ ITEM_SOURCE: dict[str, tuple[str, str]] = {
     "passage_reconstruction": ("writing_prompt", "reconstruction"),
     # Timed typing: copy a given text. Its own quiz category.
     "typing": ("quiz", "typing"),
+    # Read word lists aloud (Cognizant Q11-15): uses the task bank like read_aloud.
+    "read_words": ("task", "read_words"),
 }
 
 # WritingPrompt kinds that ask the candidate to compose something new.

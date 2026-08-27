@@ -80,7 +80,7 @@ function Practise() {
       const profiles = await api.studentProfiles();
       const pick = pickSpeakingProfile(profiles.filter((x) => x.style !== "drill"), home.data?.baseline_done ?? false);
       if (!pick) {
-        setStartError("No speaking session is published yet. Ask your trainer.");
+        setStartError("No speaking session is published yet. Ask your institution admin.");
         setStarting(false);
         return;
       }

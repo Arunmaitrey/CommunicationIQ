@@ -1,7 +1,8 @@
 "use client";
 import { Suspense, useState } from "react";
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { LogIn } from "lucide-react";
+import { LogIn, AlertCircle, X, Eye, EyeOff } from "lucide-react";
 import { BrandLockup } from "@/components/brand/BrandMark";
 import { HeroMic } from "@/components/brand/HeroMic";
 import { PoweredByFloat } from "@/components/brand/PoweredBy";
@@ -21,6 +22,7 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const expired = params.get("expired") === "1";
   const next = params.get("next");
@@ -79,8 +81,8 @@ function LoginForm() {
 
           <h2 className="text-lg font-bold mb-1">Sign in</h2>
           <p className="text-xs text-muted mb-5">
-            Students, trainers and institution staff use the same door — your
-            account decides what opens.
+            Students and institution staff use the same door — your
+            email domain decides which institution you belong to.
           </p>
 
           {expired && (
@@ -100,13 +102,29 @@ function LoginForm() {
             </div>
             <div>
               <label className="ds-label" htmlFor="password">Password</label>
-              <input id="password" type="password" required autoComplete="current-password"
-                     className="ds-input ds-focus" value={password}
-                     onChange={(e) => setPassword(e.target.value)} />
+              <div className="relative">
+                <input id="password" type={showPassword ? "text" : "password"} required autoComplete="current-password"
+                       className="ds-input ds-focus pr-10" value={password}
+                       onChange={(e) => setPassword(e.target.value)} />
+                <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-text"
+                        onClick={() => setShowPassword(!showPassword)} tabIndex={-1}>
+                  {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
             </div>
 
             {error && (
-              <div className="text-xs font-medium" style={{ color: "var(--rag-red)" }}>{error}</div>
+              <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg text-xs font-medium" style={{
+                background: "color-mix(in srgb, var(--rag-red) 10%, var(--surface))",
+                border: "1px solid color-mix(in srgb, var(--rag-red) 25%, transparent)",
+                color: "var(--rag-red)"
+              }}>
+                <AlertCircle size={14} className="shrink-0 mt-0.5" />
+                <span className="flex-1">{error}</span>
+                <button onClick={() => setError("")} className="shrink-0 opacity-60 hover:opacity-100">
+                  <X size={12} />
+                </button>
+              </div>
             )}
 
             <button type="submit" disabled={busy} className="btn btn-primary w-full ds-focus">
@@ -115,8 +133,12 @@ function LoginForm() {
             </button>
           </form>
 
-          </div>
+          <p className="text-xs text-muted mt-4 text-center">
+            Don&apos;t have an account?{' '}
+            <Link href="/signup" className="underline ds-focus">Sign up</Link>
+          </p>
         </div>
+      </div>
       </div>
   );
 }

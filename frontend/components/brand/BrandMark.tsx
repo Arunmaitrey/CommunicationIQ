@@ -26,7 +26,7 @@ export function BrandLockup({ compact = false }: { compact?: boolean }) {
           Technologies" mark is the correct and only attribution. */}
       {!compact && (
         <span className="leading-tight">
-          <span className="block text-[13px] font-bold">Fluenzee AI</span>
+          <span className="block text-[13px] font-bold">Fluenzee</span>
         </span>
       )}
     </span>
@@ -69,7 +69,7 @@ export function TenantLockup({ logoUrl, displayName, fallbackName }: {
       )}
       <span className="leading-tight min-w-0">
         <span className="block text-[13px] font-bold truncate">{name}</span>
-        <span className="block text-[10px] opacity-70">Fluenzee AI</span>
+        <span className="block text-[10px] opacity-70">Fluenzee</span>
       </span>
     </span>
   );

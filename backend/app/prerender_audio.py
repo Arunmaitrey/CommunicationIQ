@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 
-from sqlalchemy import select
+from app.sqlbridge import select
 
 from app import sections as app_sections
 from app import tts

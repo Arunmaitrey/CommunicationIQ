@@ -293,7 +293,7 @@ async def claim(token: str, body: RedeemRequest,
             "Sign in instead, or use a different address.")
 
     now = datetime.now(timezone.utc)
-    claimed = await models.Invitation.get_pymongo_collection().find_one_and_update(
+    claimed = await models.Invitation.get_motor_collection().find_one_and_update(
         {"token": token,
          "status": {"$ne": "withdrawn"},
          "redeemed_at": None,

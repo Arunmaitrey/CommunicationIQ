@@ -1,10 +1,13 @@
 "use client";
-import { Check } from "lucide-react";
+import { useState } from "react";
+import { Check, Lock, Eye, EyeOff } from "lucide-react";
 import { useRole } from "@/components/RoleProvider";
 import { THEMES, THEME_GROUPS, useTheme, type ThemeId } from "@/components/ThemeProvider";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { PageHeader, Section } from "@/components/ui";
 import { ROLE_LABEL } from "@/lib/roles";
+import { api, API_BASE, ApiError, getToken } from "@/lib/api"
+import { useToast } from "@/components/Toast"
 
 export default function SettingsPage() {
   const { user } = useRole();
@@ -32,6 +35,20 @@ export default function SettingsPage() {
           <Field label="Role" value={user ? ROLE_LABEL[user.role] ?? user.role : "—"} />
           <Field label="Institution" value={user?.tenant_name ?? "Platform console"} />
         </dl>
+      </Section>
+
+      <Section title="Change Password" className="mb-4">
+        <ChangePasswordForm />
+      </Section>
+
+      {user?.role === "student" && (
+        <Section title="Profile" className="mb-4">
+          <StudentProfileForm />
+        </Section>
+      )}
+
+      <Section title="Notification Preferences" className="mb-4">
+        <NotificationPrefs />
       </Section>
 
       <Section title={`Theme — ${THEMES.length} available`}>
@@ -72,6 +89,171 @@ export default function SettingsPage() {
         ))}
       </Section>
     </>
+  );
+}
+
+function ChangePasswordForm() {
+  const [form, setForm] = useState({ current: "", newPass: "", confirm: "" });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState(false);
+  const [showCurrent, setShowCurrent] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (form.newPass !== form.confirm) {
+      setError("New passwords do not match");
+      return;
+    }
+    if (form.newPass.length < 8) {
+      setError("Password must be at least 8 characters");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    setOk(false);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/auth/change-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          current_password: form.current,
+          new_password: form.newPass,
+        }),
+      });
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { detail = (await res.json())?.detail ?? detail; } catch { /* */ }
+        throw new ApiError(res.status, detail);
+      }
+      setOk(true);
+      setForm({ current: "", newPass: "", confirm: "" });
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not change password");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="space-y-3 max-w-sm">
+      <div>
+        <label className="ds-label" htmlFor="cur_pw">Current password</label>
+        <div className="relative">
+          <input id="cur_pw" type={showCurrent ? "text" : "password"} required className="ds-input w-full ds-focus pr-10"
+                 value={form.current}
+                 onChange={(e) => setForm({ ...form, current: e.target.value })} />
+          <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-text"
+                  onClick={() => setShowCurrent(!showCurrent)} tabIndex={-1}>
+            {showCurrent ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        </div>
+      </div>
+      <div>
+        <label className="ds-label" htmlFor="new_pw">New password</label>
+        <div className="relative">
+          <input id="new_pw" type={showNew ? "text" : "password"} required minLength={8} className="ds-input w-full ds-focus pr-10"
+                 value={form.newPass}
+                 onChange={(e) => setForm({ ...form, newPass: e.target.value })} />
+          <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-text"
+                  onClick={() => setShowNew(!showNew)} tabIndex={-1}>
+            {showNew ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        </div>
+      </div>
+      <div>
+        <label className="ds-label" htmlFor="confirm_pw">Confirm new password</label>
+        <div className="relative">
+          <input id="confirm_pw" type={showConfirm ? "text" : "password"} required minLength={8} className="ds-input w-full ds-focus pr-10"
+                 value={form.confirm}
+                 onChange={(e) => setForm({ ...form, confirm: e.target.value })} />
+          <button type="button" className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-text"
+                  onClick={() => setShowConfirm(!showConfirm)} tabIndex={-1}>
+            {showConfirm ? <EyeOff size={14} /> : <Eye size={14} />}
+          </button>
+        </div>
+      </div>
+      {error && <div className="text-xs" style={{ color: "var(--rag-red)" }}>{error}</div>}
+      {ok && <div className="text-xs" style={{ color: "var(--rag-green)" }}>Password changed successfully.</div>}
+      <button type="submit" disabled={busy} className="btn btn-primary btn-sm ds-focus">
+        <Lock size={13} /> {busy ? "Changing…" : "Change password"}
+      </button>
+    </form>
+  );
+}
+
+function StudentProfileForm() {
+  const { user } = useRole();
+  const { toast } = useToast();
+  const [fullName, setFullName] = useState(user?.full_name ?? "");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    try {
+      await api.savePreferences({ full_name: fullName });
+      toast("success", "Profile updated");
+    } catch (err) {
+      toast("error", err instanceof ApiError ? err.message : "Could not save profile");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-3 max-w-sm">
+      <div>
+        <label className="ds-label" htmlFor="pf_name">Full Name</label>
+        <input id="pf_name" className="ds-input w-full ds-focus" value={fullName}
+               onChange={(e) => setFullName(e.target.value)} />
+      </div>
+      <dl className="grid sm:grid-cols-2 gap-3 text-xs">
+        <Field label="Roll Number" value={user?.roll_number || "Not set"} />
+        <Field label="Branch" value={user?.branch || "Not set"} />
+        <Field label="Year of Study" value={user?.year_of_study ? String(user.year_of_study) : "Not set"} />
+        <Field label="L1 Language" value={user?.l1_language || "Not set"} />
+      </dl>
+      <button type="button" disabled={busy} onClick={save} className="btn btn-primary btn-sm ds-focus">
+        {busy ? "Saving…" : "Save Profile"}
+      </button>
+    </div>
+  );
+}
+
+function NotificationPrefs() {
+  const [practiceReminders, setPracticeReminders] = useState(() => {
+    try { return localStorage.getItem("commiq.prefs.practiceReminders") !== "false"; } catch { return true; }
+  });
+  const [examAlerts, setExamAlerts] = useState(() => {
+    try { return localStorage.getItem("commiq.prefs.examAlerts") !== "false"; } catch { return true; }
+  });
+
+  function toggle(key: string, value: boolean, setter: (v: boolean) => void) {
+    setter(value);
+    try { localStorage.setItem(`commiq.prefs.${key}`, String(value)); } catch { /* */ }
+  }
+
+  return (
+    <div className="space-y-3 max-w-sm">
+      <label className="flex items-center gap-3 cursor-pointer">
+        <input type="checkbox" checked={practiceReminders}
+               onChange={(e) => toggle("practiceReminders", e.target.checked, setPracticeReminders)}
+               className="ds-focus" />
+        <span className="text-xs">Practice reminders</span>
+      </label>
+      <label className="flex items-center gap-3 cursor-pointer">
+        <input type="checkbox" checked={examAlerts}
+               onChange={(e) => toggle("examAlerts", e.target.checked, setExamAlerts)}
+               className="ds-focus" />
+        <span className="text-xs">Exam deadline alerts</span>
+      </label>
+    </div>
   );
 }
 

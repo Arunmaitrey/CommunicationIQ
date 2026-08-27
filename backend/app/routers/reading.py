@@ -16,6 +16,7 @@ measure meaningless because nobody would need to finish reading.
 from __future__ import annotations
 
 import logging
+import random
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -65,7 +66,7 @@ def _rate_note(wpm: int | None, correct: int, total: int) -> str:
         return (f"{wpm} words per minute with {correct} of {total} correct is "
                 f"genuinely fast reading, not skimming.")
     if wpm < SLOW_WPM and share >= 0.8:
-        return (f"{wpm} words per minute is slow, but you took it in — "
+        return (f"{wpm} words per minute is slow, but you took it in â€” "
                 f"{correct} of {total}. In a timed paper the speed is what "
                 f"would cost you, not the understanding.")
     if wpm < SLOW_WPM:
@@ -82,13 +83,13 @@ async def passages(principal: Principal,
         models.ReadingPassage.status == "published").sort(
         models.ReadingPassage.difficulty).to_list()
 
-    coll = models.QuizItem.get_pymongo_collection()
+    coll = models.QuizItem.get_motor_collection()
     counts = {doc["_id"]: doc["count"] for doc in await coll.aggregate([
         {"$match": {"category": "reading_comprehension", "status": "published"}},
         {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
     ]).to_list(None)}
 
-    coll = models.ReadingAttempt.get_pymongo_collection()
+    coll = models.ReadingAttempt.get_motor_collection()
     best = {doc["_id"]: doc["max"] for doc in await coll.aggregate([
         {"$match": {"user_id": principal.user_id, "score": {"$ne": None}}},
         {"$group": {"_id": "$passage_id", "max": {"$max": "$score"}}},
@@ -156,6 +157,7 @@ async def questions(attempt_id: str, principal: Principal,
         models.QuizItem.category == "reading_comprehension",
         models.QuizItem.status == "published"
     ).sort(models.QuizItem.id).to_list()
+    random.shuffle(rows)
     return [ReadingQuestionOut(id=q.id, stem=q.stem, options=list(q.options))
             for q in rows]
 

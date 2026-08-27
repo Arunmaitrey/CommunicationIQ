@@ -166,21 +166,35 @@ def recommend(verdicts: list[Verdict], tolerance: float = 0.02) -> Verdict | Non
 
 async def gather(slug: str) -> list[Recording]:
     """Every scored recording in one institution, as this analysis needs it."""
-    from sqlalchemy import select
+    from app.sqlbridge import select
 
     from app.db import tenant_sessionmaker
     from app.models.tenant import (FeatureRecord, ProfileSection, Response,
-                                   ResponseAudio)
+                                    ResponseAudio)
 
     async with tenant_sessionmaker(slug)() as session:
-        rows = (await session.execute(
-            select(FeatureRecord, ResponseAudio.duration_ms,
-                   ProfileSection.task_type)
-            .join(Response, Response.id == FeatureRecord.response_id)
-            .join(ResponseAudio, ResponseAudio.response_id == Response.id)
-            .outerjoin(ProfileSection,
-                       ProfileSection.id == Response.section_id)
-        )).all()
+        # The SQL join (features -> responses -> audio, sections outer-joined)
+        # becomes three maps and a walk. Same rows in, same shape out:
+        # a feature with no response or no audio is dropped exactly as the
+        # inner joins dropped it; a missing section reads as None.
+        responses = {r.id: r for r in (await session.execute(
+            select(Response))).scalars().all()}
+        durations = {a.response_id: a.duration_ms for a in (await session.execute(
+            select(ResponseAudio))).scalars().all()}
+        task_types = {s.id: s.task_type for s in (await session.execute(
+            select(ProfileSection))).scalars().all()}
+
+        rows = []
+        for feature in (await session.execute(
+            select(FeatureRecord))).scalars().all():
+            response = responses.get(feature.response_id)
+            if response is None:
+                continue
+            duration = durations.get(response.id)
+            if duration is None:
+                continue
+            rows.append((feature, duration,
+                         task_types.get(response.section_id)))
 
     return [Recording(response_id=feature.response_id,
                       task_type=task_type or "",
@@ -213,7 +227,7 @@ def looks_synthetic(recordings: list[Recording]) -> tuple[bool, str]:
 
 async def report() -> str:
     """The whole thing, over every institution, as text."""
-    from sqlalchemy import select
+    from app.sqlbridge import select
 
     from app.db import platform_sessionmaker
     from app.models.platform import Tenant

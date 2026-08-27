@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import delete, func, select
+from app.sqlbridge import delete, func, select
 
 from app.db import platform_sessionmaker, tenant_sessionmaker
 from app.models.platform import Tenant

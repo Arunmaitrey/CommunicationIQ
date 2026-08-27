@@ -1,10 +1,10 @@
-"""Institution console — the write half.
+"""Institution console â€” the write half.
 
 Everything here runs against the caller's own schema and is audit-logged.
 Three rules the endpoints enforce rather than trust the UI for:
 
 * **Seats are a hard limit.** An import that would exceed the plan is refused
-  in full rather than truncated — a half-imported cohort is worse than a
+  in full rather than truncated â€” a half-imported cohort is worse than a
   clear "you need twelve more seats".
 * **Nothing is silently overwritten.** An import row for an existing email
   updates profile fields and never a password, a role, or a history.
@@ -49,7 +49,7 @@ async def link_to_directory(emails: list[str], tenant_id: str, slug: str) -> Non
 
     Inserting blind looked fine until an email survived in the directory after
     its account was removed: the next import wrote every user, committed, then
-    hit a unique-key violation here — a partial import, which is the one thing
+    hit a unique-key violation here â€” a partial import, which is the one thing
     the endpoint promises cannot happen. So it inserts only what is missing,
     and repoints a row that names a different institution.
     """
@@ -85,14 +85,16 @@ def temporary_password() -> str:
 
 def _user_out(u: User) -> UserOut:
     return UserOut(
-        id=u.id, email=u.email, full_name=u.full_name, role=u.role, active=u.active,
-        roll_number=u.roll_number, branch=u.branch, year_of_study=u.year_of_study,
-        l1_language=u.l1_language, created_at=u.created_at,
+        id=getattr(u, 'id', ''), email=getattr(u, 'email', ''), full_name=getattr(u, 'full_name', ''),
+        role=getattr(u, 'role', 'student'), active=getattr(u, 'active', True),
+        roll_number=getattr(u, 'roll_number', ''), branch=getattr(u, 'branch', ''),
+        year_of_study=getattr(u, 'year_of_study', None),
+        l1_language=getattr(u, 'l1_language', ''), created_at=getattr(u, 'created_at', None),
     )
 
 
 async def _seat_usage(models: TenantModels, tenant_id: str) -> SeatUsage:
-    role_docs = await models.User.get_pymongo_collection().aggregate([
+    role_docs = await models.User.get_motor_collection().aggregate([
         {"$match": {"active": True}},
         {"$group": {"_id": "$role", "n": {"$sum": 1}}},
     ]).to_list(None)
@@ -133,7 +135,7 @@ async def preview_import(body: ImportRequest, principal: Principal,
                          models: TenantModels) -> ImportPreview:
     """Say exactly what would happen, before anything happens.
 
-    Every problem at once, not the first one — an admin fixing a spreadsheet
+    Every problem at once, not the first one â€” an admin fixing a spreadsheet
     one error per upload will give up before row twenty.
     """
     plan = await _plan_for(models, body.csv_text)
@@ -165,7 +167,7 @@ async def commit_import(body: ImportRequest, principal: Principal,
     if not plan.ok:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            f"{len(plan.problems)} problem(s) in the file — run the preview to see them")
+            f"{len(plan.problems)} problem(s) in the file â€” run the preview to see them")
 
     usage = await _seat_usage(models, principal.tenant_id or "")
     if usage.used + plan.creating > usage.limit:
@@ -292,7 +294,7 @@ async def update_user(user_id: str, body: UpdateUserRequest, principal: Principa
     if body.l1_language is not None:
         user.l1_language = body.l1_language
     if body.role is not None:
-        if body.role not in {"student", "trainer", "tenant_admin"}:
+        if body.role not in {"student", "tenant_admin"}:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unknown role")
         if user.id == principal.user_id and body.role != "tenant_admin":
             raise HTTPException(status.HTTP_400_BAD_REQUEST,
@@ -352,7 +354,7 @@ async def create_cohort(body: CohortRequest, principal: Principal,
 @router.patch("/cohorts/{cohort_id}", response_model=CohortOut)
 async def update_cohort(cohort_id: str, body: CohortRequest, principal: Principal,
                         models: TenantModels) -> CohortOut:
-    """Change a cohort — including the drive date every countdown derives from.
+    """Change a cohort â€” including the drive date every countdown derives from.
 
     Moving the date re-plans the season, so it is audit-logged with both
     values: "why did my plan change last Tuesday" needs an answer.
@@ -436,7 +438,7 @@ async def assignments(models: TenantModels) -> list[AssignmentOut]:
     cohorts = {c.id: c for c in await models.Cohort.find_all().to_list()}
     profiles = {p.id: p for p in await models.SimulationProfile.find_all().to_list()}
 
-    member_counts = {doc["_id"]: doc["count"] async for doc in models.CohortMember.get_pymongo_collection().aggregate([
+    member_counts = {doc["_id"]: doc["count"] async for doc in models.CohortMember.get_motor_collection().aggregate([
         {"$group": {"_id": "$cohort_id", "count": {"$sum": 1}}},
     ])}
 
@@ -775,11 +777,11 @@ async def _sections_without_items(models: TenantModels,
     # selector had already been taught where each bank lives; the guard had
     # not, and two places encoding the same knowledge is how one of them ends
     # up stale.
-    task_counts = {doc["_id"]: doc["count"] async for doc in models.TaskItem.get_pymongo_collection().aggregate([
+    task_counts = {doc["_id"]: doc["count"] async for doc in models.TaskItem.get_motor_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$task_type", "count": {"$sum": 1}}},
     ])}
-    quiz_counts = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_pymongo_collection().aggregate([
+    quiz_counts = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$category", "count": {"$sum": 1}}},
     ])}
@@ -787,7 +789,7 @@ async def _sections_without_items(models: TenantModels,
     # live in the same table and are not interchangeable, so counting them
     # together would pass a Passage Reconstruction section on the strength of
     # six email prompts the runner would never serve it.
-    prompt_counts = {doc["_id"]: doc["count"] async for doc in models.WritingPrompt.get_pymongo_collection().aggregate([
+    prompt_counts = {doc["_id"]: doc["count"] async for doc in models.WritingPrompt.get_motor_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$kind", "count": {"$sum": 1}}},
     ])}
@@ -835,7 +837,7 @@ async def _sections_without_items(models: TenantModels,
             if groups_by_passage(key):
                 # Comprehension comes a whole passage at a time, so the raw
                 # count is not what the section will get.
-                sizes = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_pymongo_collection().aggregate([
+                sizes = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
                     {"$match": {"category": key, "status": "published"}},
                     {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
                 ]) if doc["count"]}

@@ -23,19 +23,9 @@ router = APIRouter(prefix="/student", tags=["student"],
                    dependencies=[Depends(require_roles("student"))])
 
 # Consent, on its own router.
-#
-# Everything else under /student is a student's: their practice, their
-# history, their progress. Consent is not -- it is the thing that must happen
-# before anything is recorded, and an invited candidate has to be asked in
-# exactly the same way. Leaving it on the student-only router meant a
-# candidate could be admitted, handed an assessment, and then blocked at the
-# first item by a permission they had no way to give.
-#
-# Its own router rather than widening the whole of /student, so the exception
-# is one endpoint wide and visible in one line.
 consent_router = APIRouter(
     prefix="/student", tags=["student"],
-    dependencies=[Depends(require_roles("student", "candidate"))])
+    dependencies=[Depends(require_roles("student"))])
 
 # Level thresholds. Deliberately generous and monotonic: Level is effort
 # recognition and always moves up (GAM-03). Honesty lives in the Gap Meter.
@@ -48,21 +38,25 @@ def _level_for(xp: int) -> int:
 
 def _to_user_out(user) -> UserOut:
     return UserOut(
-        id=user.id, email=user.email, full_name=user.full_name, role=user.role,
-        active=user.active, roll_number=user.roll_number, branch=user.branch,
-        year_of_study=user.year_of_study, l1_language=user.l1_language,
-        created_at=user.created_at,
+        id=getattr(user, 'id', ''), email=getattr(user, 'email', ''),
+        full_name=getattr(user, 'full_name', ''), role=getattr(user, 'role', 'student'),
+        active=getattr(user, 'active', True),
+        roll_number=getattr(user, 'roll_number', ''), branch=getattr(user, 'branch', ''),
+        year_of_study=getattr(user, 'year_of_study', None),
+        l1_language=getattr(user, 'l1_language', ''),
+        created_at=getattr(user, 'created_at', None),
     )
 
 
 def _profile_out(profile, sections) -> SimulationProfileOut:
-    blueprint = formats.BY_CODE.get(profile.code)
-    budgets = formats.section_budgets(profile.code)
+    blueprint = formats.BY_CODE.get(getattr(profile, 'code', ''))
+    budgets = formats.section_budgets(getattr(profile, 'code', ''))
     return SimulationProfileOut(
-        id=profile.id, code=profile.code, name=profile.name, style=profile.style,
-        company=profile.company,
-        description=profile.description, status=profile.status,
-        estimated_minutes=profile.estimated_minutes, is_baseline=profile.is_baseline,
+        id=getattr(profile, 'id', ''), code=getattr(profile, 'code', ''),
+        name=getattr(profile, 'name', ''), style=getattr(profile, 'style', ''),
+        company=getattr(profile, 'company', ''),
+        description=getattr(profile, 'description', ''), status=getattr(profile, 'status', ''),
+        estimated_minutes=getattr(profile, 'estimated_minutes', 0), is_baseline=getattr(profile, 'is_baseline', False),
         typical_minutes=(formats.typical_minutes(blueprint) if blueprint
                          else profile.estimated_minutes),
         sitting_limit_minutes=app_deadline.allowance_minutes(profile.estimated_minutes),

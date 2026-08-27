@@ -121,7 +121,7 @@ export default function InvitePage() {
       const claimed = await inviteApi.claim(token, name.trim(), email.trim());
       signIn({
         id: claimed.candidate_id, email: email.trim(),
-        full_name: claimed.full_name, role: "candidate", scope: "tenant",
+        full_name: claimed.full_name, role: "student", scope: "tenant",
         tenant_name: claimed.tenant_name,
       } as never, claimed.token);
       setSession({ token: claimed.token, profile_id: claimed.profile_id });

@@ -28,7 +28,7 @@ function Overview() {
 
   return (
     <>
-      <PageHeader title={data.tenant_name} sub={`Plan: ${data.plan_name || "—"}`} />
+      <PageHeader title={data.tenant_name} sub={data.tenant_slug} />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
         <StatCard icon={Users} label="Students" value={data.students} />
@@ -46,7 +46,7 @@ function Overview() {
       <Section title="Seat usage" className="mb-4">
         <Progress value={seatPct} />
         <div className="text-[11px] text-muted mt-2">
-          {data.seats_used} of {data.seat_limit} seats — students, trainers and admins all
+          {data.seats_used} of {data.seat_limit} seats — students and admins
           count against the limit.
         </div>
       </Section>
@@ -72,19 +72,8 @@ function tenantSteps(data: TenantOverview, profileCount: number): Step[] {
     {
       title: "Add your people",
       detail: "One at a time, or a spreadsheet of the whole year group.",
-      href: "/tenant/import",
+      href: "/tenant/users",
       done: data.students > 0,
-    },
-    {
-      title: "Group them into cohorts",
-      detail: "Branch, year and section. A cohort is what a trainer coaches.",
-      href: "/tenant/cohorts",
-      done: data.cohorts > 0,
-    },
-    {
-      title: "Set the placement season",
-      detail: "The drive date is what turns a score into “how long you have left”.",
-      href: "/tenant/season",
     },
     {
       title: "Collect recording consent",

@@ -17,7 +17,7 @@ import { ToastProvider } from "@/components/Toast";
  *  while a face loads. Only the weights actually used are requested.
  */
 export const metadata: Metadata = {
-  title: "Fluenzee AI",
+  title: "Fluenzee",
   description:
     "Placement-readiness assessment and training — simulate the real test, diagnose the real gap.",
 };

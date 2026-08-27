@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Headphones, Loader2, Mic, Square } from "lucide-react";
+import { Headphones, Loader2, Maximize2, Minimize2, Mic, Square } from "lucide-react";
 import { AiNarrator } from "@/components/brand/AiNarrator";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useRole } from "@/components/RoleProvider";
@@ -170,6 +170,7 @@ function Runner() {
   // Recordings this browser is still holding. Submitting with a non-zero
   // count would throw away an answer the candidate gave.
   const [owed, setOwed] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [okayText, setOkayText] = useState("");
   const [uploadNote, setUploadNote] = useState("");
   // Seconds left in the whole sitting, or null before it has started. Counted
@@ -210,6 +211,20 @@ function Runner() {
   const item: RunnerItem | undefined = payload?.items[index];
   const total = payload?.items.length ?? 0;
 
+  // Fullscreen mode for exam focus
+  const toggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
+    } else {
+      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    }
+  }, []);
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
   // Leaving mid-attempt loses the attempt. Say so, rather than letting a
   // stray back-swipe on a phone throw away twenty minutes.
   useEffect(() => {
@@ -220,6 +235,44 @@ function Runner() {
     };
     window.addEventListener("beforeunload", warn);
     return () => window.removeEventListener("beforeunload", warn);
+  }, [phase]);
+
+  // Anti-proctoring: disable right-click during the test
+  useEffect(() => {
+    if (phase === "loading" || phase === "saving" || phase === "submitting" || phase === "failed") return;
+    const prevent = (e: Event) => e.preventDefault();
+    document.addEventListener("contextmenu", prevent);
+    return () => document.removeEventListener("contextmenu", prevent);
+  }, [phase]);
+
+  // Anti-proctoring: disable copy/paste/cut during the test
+  useEffect(() => {
+    if (phase === "loading" || phase === "saving" || phase === "submitting" || phase === "failed") return;
+    const prevent = (e: Event) => { e.preventDefault(); };
+    document.addEventListener("copy", prevent);
+    document.addEventListener("cut", prevent);
+    document.addEventListener("paste", prevent);
+    return () => {
+      document.removeEventListener("copy", prevent);
+      document.removeEventListener("cut", prevent);
+      document.removeEventListener("paste", prevent);
+    };
+  }, [phase]);
+
+  // Anti-proctoring: block screenshot/print shortcuts during the test
+  useEffect(() => {
+    if (phase === "loading" || phase === "saving" || phase === "submitting" || phase === "failed") return;
+    const block = (e: KeyboardEvent) => {
+      if (e.key === "PrintScreen" ||
+          (e.ctrlKey && e.key === "p") ||
+          (e.ctrlKey && e.key === "s") ||
+          (e.ctrlKey && e.key === "u") ||
+          e.key === "F12") {
+        e.preventDefault();
+      }
+    };
+    document.addEventListener("keydown", block);
+    return () => document.removeEventListener("keydown", block);
   }, [phase]);
 
   useEffect(() => () => recorder.current?.close(), []);
@@ -883,22 +936,19 @@ function Runner() {
     // would eject them to a login screen they have no account for. What they
     // need is the environment check for *this* attempt -- it resumes the same
     // one, and everything already recorded is already uploaded.
-    const candidate = user?.role === "candidate";
     return (
       <Centered>
         <div className="max-w-sm text-center">
           <div className="text-sm font-bold mb-2">This attempt stopped</div>
           <p className="text-xs text-muted mb-4">{error}</p>
-          {candidate && (
-            <p className="text-[11px] text-muted mb-4 leading-relaxed">
-              Nothing you have already answered is lost. Check your microphone
-              and carry on from where you stopped.
-            </p>
-          )}
+          <p className="text-[11px] text-muted mb-4 leading-relaxed">
+            Nothing you have already answered is lost. Check your microphone
+            and carry on from where you stopped.
+          </p>
           <button
-            onClick={() => router.push(candidate ? `/attempt/${id}/check` : "/simulate")}
+            onClick={() => router.push(`/attempt/${id}/check`)}
             className="btn btn-primary ds-focus">
-            {candidate ? "Check the microphone and carry on" : "Back to simulations"}
+            Check the microphone and carry on
           </button>
         </div>
       </Centered>
@@ -970,6 +1020,9 @@ function Runner() {
 
   return (
     <div className={`runner${skin ? ` ${skin.theme}` : ""}`}>
+      <div className="text-center text-[10px] font-bold uppercase tracking-wider py-1 bg-amber-50 text-amber-800 border-b border-amber-200" style={{ background: "color-mix(in srgb, var(--rag-amber) 12%, transparent)", color: "var(--rag-amber)" }}>
+        This exam is monitored. Copying, screenshots, and tab switching are recorded.
+      </div>
       {isSvar ? (
         // The reference header is minimal: a continuous whole-test count and
         // the sitting timer. The blue section banner below carries the "which
@@ -989,6 +1042,9 @@ function Runner() {
             </span>
           )}
           <div className="flex-1" />
+          <button onClick={toggleFullscreen} className="btn btn-icon btn-ghost ds-focus" style={{ color: "var(--svar-navy)" }} title={isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"}>
+            {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          </button>
           {owed > 0 && (
             <span className="svar-owed"
                   title="Answers saved on this device that have not reached us yet. They are retried automatically.">
@@ -1025,6 +1081,9 @@ function Runner() {
           {itemNoInSection}/{itemsInSection.length}
         </span>
         <div className="flex-1" />
+        <button onClick={toggleFullscreen} className="btn btn-icon btn-ghost ds-focus" title={isFullscreen ? "Exit fullscreen (Esc)" : "Enter fullscreen"}>
+          {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+        </button>
         {/* Two clocks, both advisory here. The section one warns and never
             interrupts -- the item timer already bounds every recording, and a
             second authority over the same recording is how answers get cut in
@@ -1170,7 +1229,7 @@ function Runner() {
         </div>
       )}
 
-      <div className="runner-body">
+      <div className="runner-body select-none">
         {isSvar && !showSectionCard && phase !== "submitting" && phase !== "owed" && (
           <div className="svar-section-banner w-full self-stretch -mt-2 mb-4">
             <h1>{format.sectionWord.toUpperCase()} {svarBanner.letter}: {svarBanner.name}</h1>

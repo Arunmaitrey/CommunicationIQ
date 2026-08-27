@@ -23,8 +23,11 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.sqlbridge import delete, select
+# The session object threaded through the scoring path is the Beanie-backed
+# bridge session from app.db; the historical annotation name is kept so the
+# call signatures stay readable.
+from app.db import Session as AsyncSession
 
 from app.engine import calibration, freeze
 from app.engine.contracts import AudioRef, Capability

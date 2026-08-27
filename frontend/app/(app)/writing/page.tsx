@@ -192,8 +192,8 @@ function Writing() {
                   </span>
                 </div>
                 {m.confidence > 0 && <GapMeter percent={((m.score - 20) / 60) * 100} />}
-                {/* Every number says what it counted, so a trainer can
-                    disagree with it and see exactly why it came out this way. */}
+                {/* Every number says what it counted, so an admin can
+                    review it and see exactly why it came out this way. */}
                 <p className="text-[11px] text-muted mt-1.5 leading-relaxed">{m.basis}</p>
               </div>
             ))}

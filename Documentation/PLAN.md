@@ -95,8 +95,9 @@ fallback on failure/timeout · every `ScoreRecord` stamps provider id + version.
 
 ## 4. Data model (first cut)
 
-**public** — `Tenant, Plan, Subscription, Invoice, PlatformUser, ProviderRegistry,
+**public** — `Tenant, PlatformUser, ProviderRegistry,
 ProviderConfig, ModelVersion, AuditLog, FeatureFlag, GamificationConfig`
+> *Note: Plan, Subscription, and Invoice models were removed from the implementation. The system uses a simplified 3-role model (super_admin, tenant_admin, student) with domain-based student registration.*
 
 **tenant_&lt;slug&gt;** — `User, Cohort, CohortMember, ConsentRecord, SimulationProfile,
 ProfileSection, TaskItem, QuizItem, Assignment, Attempt, Response, ResponseAudio,

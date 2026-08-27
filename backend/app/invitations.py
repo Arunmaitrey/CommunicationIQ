@@ -44,10 +44,8 @@ TOKEN_BYTES = 24
 DEFAULT_VALID_DAYS = 7
 MAX_VALID_DAYS = 90
 
-# What a redeemed session may do. Deliberately not "student": a student can
-# reach practice, drills, progress and every past result, and none of that
-# belongs to somebody sitting one test for an employer.
-CANDIDATE_ROLE = "candidate"
+# Invited users become students with limited session scope.
+CANDIDATE_ROLE = "student"
 
 
 def new_token() -> str:

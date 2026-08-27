@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from app.sqlbridge import delete, select, update
 
 from app.models.tenant import (Attempt, Drill, FeatureRecord, Response,
                                ResponseAudio, ScoreRecord)
@@ -58,7 +58,7 @@ async def erase_attempts(session, attempt_ids: list[str], *,
         # Practice a student started stays; only its pointer at the recording
         # goes, because the recording is about to.
         await session.execute(
-            Drill.__table__.update()
+            update(Drill)
             .where(Drill.origin_response_id.in_(response_ids))
             .values(origin_response_id=None))
         await session.execute(

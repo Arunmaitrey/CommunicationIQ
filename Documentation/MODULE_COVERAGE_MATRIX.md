@@ -18,8 +18,8 @@ ASR).
 | Read Aloud | ✅ 24 | ✅ | ✅ | ✅ ASR+align | ✅ | ✅ 5 dims | ✅ | ✅ | **Working** |
 | Repeat | ✅ 28 | ✅ audio-only | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | **Working** |
 | Short Answer | ✅ 18 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | **Working** |
-| Sentence Build | ✅ 16 | ✅ | ✅ | ✅ | ⚠️ generic | ⚠️ no word-order dim | ✅ | ✅ | **Partial** |
-| Story Retell | ✅ 6 | ✅ | ✅ | ✅ | ❗ merged | ❗ one axis | ✅ | ✅ | **Incorrect** |
+| Sentence Build | ✅ 16 | ✅ | ✅ | ✅ | ✅ construction | ✅ 6 dims | ✅ | ✅ | **Working** |
+| Story Retell | ✅ 6 | ✅ | ✅ | ✅ | ✅ accuracy | ✅ 7 dims | ✅ | ✅ | **Working** |
 | Open / Extempore | ✅ 8 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | **Working** |
 | Conversation Questions | ✅ 4 | ✅ audio-only | ✅ | ✅ | ✅ | ✅ 5 dims | ✅ | ✅ | **Working** |
 | Passage Questions (spoken) | ✅ 4 | ✅ audio-only | ✅ | ✅ | ✅ | ✅ 5 dims | ✅ | ✅ | **Working** |
@@ -29,8 +29,8 @@ ASR).
 | Module | Question | Interaction | Capture | Processing | Evaluation | Scoring | Persist | Report | Verdict |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
 | Listening Comprehension | ✅ 17 | ✅ play-once | ✅ MCQ | — | ✅ | ✅ | ✅ | ✅ | **Working** |
-| Passage Comprehension | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ⚠️ | **Working (unassessed)** |
-| Conversation Comprehension | ⚠️ 1 passage | ✅ | ✅ | — | ⚠️ shared | ⚠️ shared | ✅ | ⚠️ | **Partial** |
+| Passage Comprehension | ✅ 12+ | ✅ play-once | ✅ MCQ | — | ✅ | ✅ | ✅ | ✅ | **Working** |
+| Conversation Comprehension | ✅ 4+ | ✅ play-once | ✅ MCQ | — | ✅ | ✅ | ✅ | ✅ | **Working** |
 | Dictation | ✅ 28 shared | ✅ play-once | ✅ typed | — | ✅ | ✅ accuracy | ✅ | ✅ | **Working** |
 | Response Selection | ✅ 8 | ✅ play-once | ✅ MCQ | — | ✅ | ✅ appropriacy | ✅ | ✅ | **Working** |
 
@@ -39,7 +39,7 @@ ASR).
 | Module | Question | Interaction | Capture | Processing | Evaluation | Scoring | Persist | Report | Verdict |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
 | Reading Comprehension | ✅ 17 | ✅ passage withdrawn | ✅ MCQ | — | ✅ | ✅ | ✅ | ✅ | **Working** |
-| Reading Rate | ✅ | ✅ client-timed | ✅ | — | ✅ | ✅ separate | ✅ | ⚠️ | **Working (unassessed)** |
+| Reading Rate | ✅ 6+ | ✅ client-timed | ✅ | — | ✅ | ✅ separate | ✅ | ✅ | **Working** |
 | Vocabulary in Context | ✅ 12 | ✅ | ✅ MCQ | — | ✅ | ✅ vocabulary | ✅ | ✅ | **Working** |
 
 ## Writing
@@ -47,12 +47,12 @@ ASR).
 | Module | Question | Interaction | Capture | Processing | Evaluation | Scoring | Persist | Report | Verdict |
 |---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|---|
 | Email Writing | ✅ 4 | ✅ editor, draft saved | ✅ | — | ✅ 5 measures | ✅ | ✅ full text | ✅ | **Working** |
-| Short Written Response | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ⚠️ | **Working (unassessed)** |
-| Summary / Opinion | ✅ 1 | ✅ | ✅ | — | ✅ | ✅ | ✅ | ⚠️ | **Working (unassessed)** |
+| Short Written Response | ✅ 2+ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | **Working** |
+| Summary / Opinion | ✅ 2+ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | **Working** |
 | Sentence Completion | ✅ 18 | ✅ typed | ✅ | — | ✅ | ✅ grammar | ✅ | ✅ | **Working** |
 | Dictation (written) | ✅ | ✅ | ✅ | — | ✅ | ✅ | ✅ | ✅ | **Working** (the Listening row above) |
 | Passage Reconstruction | ✅ 8 | ✅ shown then withdrawn | ✅ typed | — | ✅ recall + form | ✅ 2 dims | ✅ full text | ✅ | **Working** |
-| Typing | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | **Missing** |
+| Typing | ✅ 5 | ✅ timed copy | ✅ typed | — | ✅ accuracy + fluency | ✅ | ✅ | ✅ | **Working** |
 
 ---
 
@@ -89,6 +89,7 @@ invisible for the same reason — nothing had ever run the path:
 |---|---|:--:|---|
 | pronunciation | wav2vec2 GOP | ✅ | Per-phoneme evidence stored. SNR-penalised. |
 | accuracy | reference alignment | ✅ | |
+| construction | LCS order + coverage | ✅ | Sentence Build: word-order arrangement score. |
 | fluency | VAD metrics | ✅ | |
 | latency | VAD onset | ✅ | |
 | disfluency | transcript | ✅ | Fillers. |
@@ -119,7 +120,7 @@ invisible for the same reason — nothing had ever run the path:
 
 | Template | Exists | Duration | Sections | Skills covered | Verdict |
 |---|:--:|---|---|---|---|
-| SVAR-style Spoken English | ✅ | 18 min (target 15) | 7 | Speaking, Listening, Reading | **Working** — all six sub-scores reportable. Over target; see below |
+| SVAR-style Spoken English | ✅ | 54 min (target 15) | 7 | Speaking, Listening, Reading | **Working** — all six sub-scores reportable. Over target; see below |
 | Versant-style Speaking & Listening | ✅ | 19 min (target 17–20) | 6 | Speaking | **Working** — Conversation and Passage Questions included, no Read Aloud |
 | Versant-style 4 Skills | ✅ | 31 min (target 30) | 7 | All four | **Working** — reports one score per skill |
 | Professional English | ✅ | 61 min (target 60) | 10 | All four | **Working** |

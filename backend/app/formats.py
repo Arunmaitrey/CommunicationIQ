@@ -181,6 +181,7 @@ PLAY_SECONDS: dict[str, int] = {
     "passage_question": 30,
     "response_selection": 8,
     "open_response": 4,
+    "read_words": 5,
 }
 
 # Played or read once per passage, before that passage's questions. Grouped
@@ -210,6 +211,8 @@ ANSWER_SECONDS: dict[str, int] = {
     "email_writing": 600,
     # Timed typing: copy a passage. ~2 minutes for a ~250 word passage.
     "typing": 120,
+    # Read word lists: similar to read_aloud but faster (isolated words).
+    "read_words": 15,
 }
 
 
@@ -664,8 +667,7 @@ BLUEPRINTS: tuple[FormatBlueprint, ...] = (
     # research deck -- Reading & Listening, Speaking, Grammar, Passages. Shaped
     # like SVAR, so the runner gives it the navy skin (a company-based skin
     # override; its style stays company_round so results present as a round
-    # verdict, not a vendor scale); the isolated word-list items
-    # (real Q11–15) fold into Reading until the read_words task exists (Phase 3).
+    # verdict, not a vendor scale).
     FormatBlueprint(
         code="company_round_cognizant",
         name="Cognizant-style Communication Assessment",
@@ -683,7 +685,7 @@ BLUEPRINTS: tuple[FormatBlueprint, ...] = (
                 continuous_numbering=True, show_instruction=True,
             ),
             SectionBlueprint(
-                title="Section A - Word Lists", task_type="read_aloud",
+                title="Section A - Word Lists", task_type="read_words",
                 item_count=3, prep_seconds=0, response_seconds=15,
                 # The reserved word-list difficulty band (1.2): only these
                 # items sit in it, so only this section draws them.
@@ -1216,6 +1218,20 @@ TEMPLATE_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
                 instructions=("You will hear a question about a familiar "
                               "situation. Speak for up to forty seconds."),
             ),
+            SectionBlueprint(
+                title="Part G - Conversation Questions", task_type="conversation_question",
+                item_count=4, prep_seconds=0, response_seconds=30,
+                prompt_plays_allowed=1,
+                instructions=("You will hear a conversation between two people, "
+                              "then a question. Answer out loud."),
+            ),
+            SectionBlueprint(
+                title="Part H - Passage Questions", task_type="passage_question",
+                item_count=4, prep_seconds=0, response_seconds=40,
+                prompt_plays_allowed=1,
+                instructions=("You will hear an announcement or a short talk "
+                              "once, then a question about it."),
+            ),
         ),
         what_to_expect=(
             "Six parts, from reading on cue to open questions.",
@@ -1384,6 +1400,126 @@ TEMPLATE_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
         scale=ScaleBlueprint(20, 80, _VENDOR_BANDS, anchored=True),
         subscores=(),
         not_included=_FOUR_SKILL_NOTE,
+    ),
+    # SpeechX (Mercer | Mettl) — 4 sections, section picker, dark-navy + gold ring
+    FormatBlueprint(
+        code="speechx_style_full",
+        name="SpeechX-style Communication Assessment (Mercer | Mettl)",
+        style="speechx_style", company="", estimated_minutes=50,
+        description=("A simulation of the four-section SpeechX (Mercer | "
+                     "Mettl) communication assessment — reading & listening, "
+                     "speaking, grammar and comprehension."),
+        provenance=("Based on screenshots of one SpeechX (Mercer | Mettl) "
+                    "assessment sitting supplied to us. Not official Mercer "
+                    "or employer material; some details are our own "
+                    "configuration."),
+        sections=(
+            # Section A: Reading & Listening (read&record)
+            SectionBlueprint(
+                title="Section A1 - Read & Record (Sentence)",
+                task_type="read_aloud", item_count=10,
+                prep_seconds=0, response_seconds=15, budget_seconds=600, continuous_numbering=True,
+                selection={"difficulty_max": 1.0},
+                instructions=("In this section you will be presented with 18 "
+                              "statements/audio clips. You will have to read "
+                              "and record the statements/content of the audio "
+                              "clips. Total time to complete the recordings is "
+                              "10 min. All questions are mandatory."),
+            ),
+            SectionBlueprint(
+                title="Section A2 - Listen & Record",
+                task_type="repeat_sentence", item_count=8,
+                prep_seconds=0, response_seconds=15, prompt_plays_allowed=1,
+                budget_seconds=600, continuous_numbering=True,
+                instructions=("Listen to the audio clip once and record the "
+                              "sentence you heard. Maximum recording time 15 "
+                              "seconds."),
+            ),
+            # Section B: Speaking (3 topics, 30s think -> 1 min)
+            SectionBlueprint(
+                title="Section B - Speak on the Topic",
+                task_type="open_response", item_count=3,
+                prep_seconds=30, response_seconds=60, prompt_plays_allowed=0,
+                budget_seconds=600, skip_prep=True, continuous_numbering=True,
+                instructions=("In this section you will be given 3 topics on "
+                              "which you need to speak for 1 minute each. For "
+                              "each topic you will get 30 seconds to think, "
+                              "after which your response will start getting "
+                              "recorded. If you prefer not to use the thinking "
+                              "time, you can skip and start recording your "
+                              "response. All questions are mandatory."),
+            ),
+            # Section C: Grammar (34 questions)
+            SectionBlueprint(
+                title="Section C1 - Verb Forms",
+                task_type="sentence_completion", item_count=8,
+                prep_seconds=0, response_seconds=0, budget_seconds=900,
+                continuous_numbering=True, selection={"topics": ["verb_forms"]},
+                instructions=("In this section you are given 34 questions to be "
+                              "completed in 15 minutes. Read the sentence and "
+                              "fill in the blank using the correct form of the "
+                              "verb in brackets."),
+            ),
+            SectionBlueprint(
+                title="Section C2 - Tenses",
+                task_type="sentence_completion", item_count=8,
+                prep_seconds=0, response_seconds=0, budget_seconds=900,
+                continuous_numbering=True, selection={"topics": ["tenses"]},
+                instructions=("Fill in the blank using the appropriate tense "
+                              "provided in brackets."),
+            ),
+            SectionBlueprint(
+                title="Section C3 - Articles",
+                task_type="sentence_completion", item_count=6,
+                prep_seconds=0, response_seconds=0, budget_seconds=900,
+                continuous_numbering=True, selection={"topics": ["articles"]},
+                instructions=("Fill in the blank using the correct article."),
+            ),
+            SectionBlueprint(
+                title="Section C4 - Prepositions",
+                task_type="sentence_completion", item_count=6,
+                prep_seconds=0, response_seconds=0, budget_seconds=900,
+                continuous_numbering=True, selection={"topics": ["prepositions"]},
+                instructions=("Fill in the blank with the most suitable "
+                              "preposition provided in brackets."),
+            ),
+            SectionBlueprint(
+                title="Section C5 - Change the Voice (Active/Passive)",
+                task_type="voice_change", item_count=6,
+                prep_seconds=0, response_seconds=0, budget_seconds=900,
+                continuous_numbering=True,
+                instructions=("Change the voice of the following sentences "
+                              "(active/passive) as required, choosing the "
+                              "correct rewrite from the options."),
+            ),
+            # Section D: Listening Comprehension (16 questions = 4 clips x 4)
+            SectionBlueprint(
+                title="Section D - Listen & Answer",
+                task_type="listening_comprehension", item_count=16,
+                prep_seconds=0, response_seconds=0, prompt_plays_allowed=1,
+                budget_seconds=600, ack_gate="clip", continuous_numbering=True,
+                instructions=("In this section you will be presented with audio "
+                              "clips and questions based on the audio clips. "
+                              "You are given 10 minutes to complete all the "
+                              "questions. You can play each clip once and "
+                              "cannot pause it; the next four questions are "
+                              "based on it. Type 'Okay' after each clip to "
+                              "proceed to its questions."),
+            ),
+        ),
+        what_to_expect=(
+            "Four sections: reading & listening, speaking, grammar, and comprehension.",
+            "Sections A, B, C and D each have their own time budget.",
+            "Spoken items record once; each audio clip plays once and cannot be paused.",
+        ),
+        scale=ScaleBlueprint(0, 100, _VENDOR_BANDS, anchored=False),
+        subscores=_SPEECHX_SUBSCORES,
+        not_included=(
+            "This simulation covers reading, speaking, grammar and listening "
+            "comprehension. A dedicated vocabulary section is practised "
+            "separately under Practice, where the vocabulary quizzes cover the "
+            "same ground."
+        ),
     ),
 )
 

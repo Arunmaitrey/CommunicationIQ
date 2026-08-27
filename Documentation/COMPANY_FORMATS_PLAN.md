@@ -4,17 +4,19 @@ Goal: replicate the SVAR-exact treatment (authentic structure + format-specific
 UI skin + content + tests) for **TCS, Infosys, Wipro, Cognizant, Versant, and
 SpeechX**, from the supplied research decks/mockups.
 
+**Status:** ✅ Done · ⚠️ Partial · ❌ Missing
+
 ## 1. What the research shows — the six formats
 
-| Format | Platform look | Structure (from the mockups) |
-|---|---|---|
-| **SVAR-style** ✅ done (re-derived 2026-08-23 from the reference walkthrough) | Navy, section banners | A1 read sentences (8) · A2 paragraphs (2) · A3 listen&repeat (8) = 18, 10-min budget · B speak (3, 90 s think / 60 s, speaking-point questions) · C verb forms 8 / tenses 8 / articles 6 / prepositions 6 / voice change 6 = 34, 15-min budget · D listen&answer (12 = 4 clips × 3, our clip count), 10-min budget, 'Okay' gate |
-| **Cognizant** | Navy, "Do's/Don'ts" guidelines, section dividers | A Reading&Listening: read sentences (10) + **read word-lists (5)** + listen&repeat (8) · B Speaking: 3 topics · C Grammar: 8 (articles/tense/prepositions MCQ + text + active/passive) · D Passages: 2 audio × MCQ |
-| **TCS** | **TCS iON blue** window chrome | A Short Questions (spoken) · B Read Aloud · C Conversation (respond to situation) · D Listen & Repeat · E Fill in the Blanks · F Correct the Sentence · G Free Speech |
-| **Infosys** | Same iON-family blue | Identical 7-section set to TCS (A–G) |
-| **Wipro** | **SHL/SVAR** platform, device-test flow | A Short Questions + Read&Speak · B Conversation · C Read&Speak · D Listen&Repeat · E Fill in the Blanks (spoken) · F Correct the Sentence (spoken) · G Free Speech (30s prep→45s) + a Listening-Comprehension MCQ |
-| **Versant** | **Teal / halftone-dots**, headphones, "Now …" cues | A Reading (read on cue, stop at beep) · B Repeat (16 word-for-word) · C Questions (1–4 word spoken answers) · D Sentence Builds (rearrange heard words, say it) · E Story Retelling (hear once → retell 30s) · F Open Questions (heard twice → speak 40s) |
-| **SpeechX** | **Mercer \| Mettl** dark-navy + gold ring, section picker | A read&record (18) · B speak topics (3–4, 30s think→1 min) · C grammar (34) · D passages (16) — section picker, "Revisit later", section+total timers |
+| Format | Platform look | Structure (from the mockups) | Status |
+|---|---|---|---|
+| **SVAR-style** ✅ done (re-derived 2026-08-23 from the reference walkthrough) | Navy, section banners | A1 read sentences (8) · A2 paragraphs (2) · A3 listen&repeat (8) = 18, 10-min budget · B speak (3, 90 s think / 60 s, speaking-point questions) · C verb forms 8 / tenses 8 / articles 6 / prepositions 6 / voice change 6 = 34, 15-min budget · D listen&answer (12 = 4 clips × 3, our clip count), 10-min budget, 'Okay' gate | ✅ Done |
+| **Cognizant** | Navy, "Do's/Don'ts" guidelines, section dividers | A Reading&Listening: read sentences (10) + **read word-lists (5)** + listen&repeat (8) · B Speaking: 3 topics · C Grammar: 8 (articles/tense/prepositions MCQ + text + active/passive) · D Passages: 2 audio × MCQ | ✅ Done |
+| **TCS** | **TCS iON blue** window chrome | A Short Questions (spoken) · B Read Aloud · C Conversation (respond to situation) · D Listen & Repeat · E Fill in the Blanks · F Correct the Sentence · G Free Speech | ✅ Done |
+| **Infosys** | Same iON-family blue | Identical 7-section set to TCS (A–G) | ✅ Done |
+| **Wipro** | **SHL/SVAR** platform, device-test flow | A Short Questions + Read&Speak · B Conversation · C Read&Speak · D Listen&Repeat · E Fill in the Blanks (spoken) · F Correct the Sentence (spoken) · G Free Speech (30s prep→45s) + a Listening-Comprehension MCQ | ✅ Done |
+| **Versant** | **Teal / halftone-dots**, headphones, "Now …" cues | A Reading (read on cue, stop at beep) · B Repeat (16 word-for-word) · C Questions (1–4 word spoken answers) · D Sentence Builds (rearrange heard words, say it) · E Story Retelling (hear once → retell 30s) · F Open Questions (heard twice → speak 40s) · G Conversation Questions · H Passage Questions | ✅ Done |
+| **SpeechX** | **Mercer \| Mettl** dark-navy + gold ring, section picker | A read&record (18) · B speak topics (3–4, 30s think→1 min) · C grammar (34) · D passages (16) — section picker, "Revisit later", section+total timers | ✅ Template Done · ⚠️ Skin Missing |
 
 ## 2. Module mapping — what we already have vs. what's new
 
@@ -22,20 +24,24 @@ SpeechX**, from the supplied research decks/mockups.
 `short_answer` (spoken answer to a heard question), `conversation_question`,
 `story_retell`, `sentence_build`, `open_response`, `sentence_completion`,
 `voice_change`, `listening_comprehension`, `reading_comprehension`,
-`vocabulary_in_context`. Content banks exist for all of these except
-`conversation_question`.
+`vocabulary_in_context`, `dictation`, `email_writing`, `passage_reconstruction`,
+`response_selection`, `passage_question`, `typing`, `spoken_completion`, `spoken_correction`. 
+Content banks exist for all of these.
 
 **New task types for exact fidelity (optional, phased):**
-- `read_words` — read a list of isolated words aloud (Cognizant Q11–15). A
-  `read_aloud` variant with word-list content and word-clarity scoring.
-- `spoken_completion` — hear a sentence with a gap, say the **whole** sentence
-  with the word filled (Wipro/TCS/Infosys E). Spoken, not the typed C1.
-- `spoken_correction` — hear a sentence with an error, say the corrected
-  sentence (TCS/Infosys/Wipro F). Spoken.
+- ✅ `read_words` — read a list of isolated words aloud (Cognizant Q11–15). A
+  `read_aloud` variant with word-list content and word-clarity scoring. **Done**
+- ✅ `spoken_completion` — hear a sentence with a gap, say the **whole** sentence
+  with the word filled (Wipro/TCS/Infosys E). Spoken, not the typed C1. **Done**
+- ✅ `spoken_correction` — hear a sentence with an error, say the corrected
+  sentence (TCS/Infosys/Wipro F). Spoken. **Done**
 
 Where a new type isn't built yet, the format uses the closest existing type
 (e.g. E/F render as typed `sentence_completion`/`voice_change`) and is upgraded
 to the spoken variant in a later phase — never shipped silently shorter.
+
+**Note:** All three new task types (`read_words`, `spoken_completion`, `spoken_correction`) 
+are now implemented and used in the relevant company rounds.
 
 ## 3. UI-skin strategy — three families, one engine
 
@@ -43,30 +49,35 @@ The runner already themes SVAR via a `style` flag + `.svar` CSS. Generalise
 that into **per-style skins**, so each format renders its authentic chrome
 while reusing the one recording/timer/one-shot engine:
 
-1. **`svar_style` family** (navy banners) — SVAR ✅, **Cognizant**, **SpeechX**
-   (dark-navy + gold ring variant, section picker). Fastest wins: reuse the
-   SVAR runner, restyle tokens, add the SpeechX section picker + Mettl top bar.
-2. **`company_round` family** (**TCS iON blue** window chrome) — TCS, Infosys,
-   Wipro. One skin, three formats. Blue section banner, iON-style card.
+1. **`svar_style` family** (navy banners) — SVAR ✅, **Cognizant** ✅, **SpeechX** ⚠️
+   (dark-navy + gold ring variant, section picker). Template done; skin pending.
+2. **`company_round` family** (**TCS iON blue** window chrome) — TCS ✅, Infosys ✅,
+   Wipro ✅. One skin, three formats. Blue section banner, iON-style card.
 3. **`versant_style` family** (teal + halftone dots, headphones, "Now …" cues) —
-   Versant. Distinct skin; story-retell + sentence-build spoken screens.
+   Versant ✅. Distinct skin; story-retell + sentence-build spoken screens.
 
 Each skin is verified the SVAR way: a throwaway harness renders every screen at
 laptop viewports and is compared to the mockups before shipping.
 
+**Status:** `svar_style` and `company_round` families implemented. `versant_style`
+family implemented. `speechx_style` template done, skin pending.
+
 ## 4. Phased build
 
-- **Phase 1 — authentic structure (backend, testable now).** Rebuild all six
+- **Phase 1 — authentic structure (backend, testable now).** ✅ **Done** Rebuild all six
   blueprints to match the researched section sets/counts/timings using existing
   task types; add the `conversation_question` content bank; smoke-test each
   format start→complete→score. *Formats become structurally real immediately,
   in the current (generic) skin.*
-- **Phase 2 — UI skins.** Build the three skin families and wire each format's
+- **Phase 2 — UI skins.** ✅ **Done** Build the three skin families and wire each format's
   `style`. Verify against mockups via the harness. This is the bulk of the
-  visual "SVAR-exact" work.
-- **Phase 3 — exact task types + content depth.** `read_words`,
+  visual "SVAR-exact" work. `svar_style` and `company_round` done; `versant_style` done.
+- **Phase 3 — exact task types + content depth.** ✅ **Done** `read_words`,
   `spoken_completion`, `spoken_correction`; expand content banks so questions
   vary candidate-to-candidate (ties into the SVAR C1/C2/A2 backlog).
+- **Phase 4 — SpeechX format.** ✅ **Template Done** Add SpeechX template blueprint
+  with section picker UI, 4-section structure, dark-navy + gold ring skin.
+  ⚠️ **Skin Pending** - dark-navy + gold ring skin and section picker UI not yet implemented.
 
 ## 5. Guardrails (unchanged from SVAR)
 
@@ -137,3 +148,22 @@ sub-score mappings are our documented approximations; the SpeechX section
 picker (choose your section order) is not implemented — sections run in
 sequence; Versant Part A shows one sentence at a time rather than a numbered
 list read on cue, and Part F questions play once, not twice.
+
+---
+
+**Current Gaps (as of 2026-08-26):**
+
+| Gap | Impact | Priority |
+|---|---|---|
+| ✅ `read_words` task type | Cognizant word-list reading now uses dedicated `read_words` task | **Done** |
+| ✅ SpeechX format template | SpeechX simulation available with 4-section structure | **Template Done** |
+| ✅ Versant-style format | Now includes Conversation Questions and Passage Questions | **Done** |
+| ✅ Versant-style skin | Implemented and tested | **Done** |
+| ❌ SpeechX dark-navy + gold ring skin | Visual fidelity gap | Medium |
+| ❌ SpeechX section picker UI | UX difference from real format | Medium |
+
+---
+
+**Next Steps:**
+1. Implement SpeechX dark-navy + gold ring skin (`.skin-mettl` CSS)
+2. Implement SpeechX section picker UI (choose section order)

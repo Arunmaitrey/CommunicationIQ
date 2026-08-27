@@ -1,6 +1,6 @@
 # API Documentation
 
-Base URL: `http://localhost:8000/api/v1`
+Base URL: `http://localhost:8010/api/v1`
 
 ## Authentication
 
@@ -26,6 +26,10 @@ Tokens are obtained via `POST /api/v1/auth/login`.
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | POST | `/auth/login` | No | Login with email/password, returns JWT |
+| POST | `/auth/signup` | No | Self-register a student account |
+| GET | `/auth/me` | Any | Current session user profile |
+| POST | `/auth/change-password` | Any | Change own password |
+| POST | `/auth/preferences` | Any | Save user preferences (theme, language) |
 
 ---
 
@@ -187,7 +191,19 @@ Tokens are obtained via `POST /api/v1/auth/login`.
 | PATCH | `/platform/providers/{id}` | Platform | Update provider |
 | POST | `/platform/providers/{id}/active` | Platform | Toggle provider |
 | GET | `/platform/tenant-types` | Platform | Tenant type catalog |
-| GET | `/platform/tenants/{id}/export.zip` | Platform | Export tenant data |
+| POST | `/platform/tenants/{id}/logo` | Platform | Upload tenant logo |
+| POST | `/platform/tenants/{id}/logo-url` | Platform | Set tenant logo URL |
+| GET | `/platform/tenants/{id}/export.zip` | Platform (super_admin) | Export tenant data |
+| GET | `/platform/questions` | Platform | Question bank summary |
+| GET | `/platform/questions/items` | Platform | Paginated question items |
+| POST | `/platform/questions/reading` | Platform | Create reading question |
+| POST | `/platform/questions/writing` | Platform | Create writing question |
+| POST | `/platform/questions/listening` | Platform | Create listening question |
+| POST | `/platform/questions/grammar` | Platform | Create grammar question |
+| POST | `/platform/questions/vocabulary` | Platform | Create vocabulary question |
+| POST | `/platform/questions/speaking` | Platform | Create speaking question |
+| DELETE | `/platform/questions/{collection}/{item_id}` | Platform | Delete a question |
+| GET | `/platform/export-db` | Platform | Export entire DB to JSON |
 | GET | `/platform/assets/{key}` | Public | Serve static assets |
 
 ---

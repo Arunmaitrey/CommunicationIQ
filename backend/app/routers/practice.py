@@ -3,7 +3,7 @@
 The fast loop. A student who will not face a full speaking simulation on a
 Tuesday evening will still do ten grammar items on a bus, and the product's
 job is to make that count for something without letting it substitute for the
-thing that actually matters — hence the quiz XP cap, enforced in the ledger.
+thing that actually matters â€” hence the quiz XP cap, enforced in the ledger.
 
 The drill loop is the slow one: fail, understand why, do five similar items,
 take a harder one, re-test. It is always pointed at a diagnosed weakness, and
@@ -29,7 +29,7 @@ router = APIRouter(prefix="/student", tags=["practice"],
 DEFAULT_QUIZ_LENGTH = 10
 
 # Spaced repetition. Doubling-ish intervals, and an item retires after three
-# consecutive correct answers — the point is to stop showing someone something
+# consecutive correct answers â€” the point is to stop showing someone something
 # they now know, not to farm reviews.
 SR_INTERVALS = [1, 3, 7, 16, 35]
 MASTERY_STREAK = 3
@@ -56,7 +56,7 @@ async def next_quiz(principal: Principal, models: TenantModels,
     """A quiz session, weighted toward the student's weakest area.
 
     The correct answer is deliberately not in this payload. It arrives with
-    the result, after the answer has been given — a quiz whose key is in the
+    the result, after the answer has been given â€” a quiz whose key is in the
     network tab is not a measurement.
     """
     count = max(1, min(count, 25))
@@ -146,7 +146,7 @@ async def submit_quiz(body: QuizSubmission, principal: Principal,
         ref_type="quiz", ref_id=body.session_id or "", target_skill=target,
         difficulty=difficulty,
     )
-    # Quizzes advance the daily quest but never satisfy it outright — only a
+    # Quizzes advance the daily quest but never satisfy it outright â€” only a
     # full simulation does that (GAM-01).
     quest, quest_completed = await game.advance_quest(
         models, config, principal.user_id, amount=1.0, skill=target)
@@ -184,7 +184,7 @@ async def _update_mistake_bank(models: TenantModels, user_id: str,
                 due_at=now + timedelta(days=SR_INTERVALS[0]),
             ).create()
         else:
-            # Getting it wrong again resets the ladder — the schedule should
+            # Getting it wrong again resets the ladder â€” the schedule should
             # reflect what the student actually knows, not how long the item
             # has been in the list.
             entry.times_wrong += 1
@@ -282,7 +282,7 @@ async def create_drill(principal: Principal, models: TenantModels,
     if not mastery:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
-            "Take the baseline diagnostic first — a drill needs a diagnosis to aim at.")
+            "Take the baseline diagnostic first â€” a drill needs a diagnosis to aim at.")
 
     target = skill or mastery[0].skill
     record = next((m for m in mastery if m.skill == target), mastery[0])
@@ -297,7 +297,7 @@ async def create_drill(principal: Principal, models: TenantModels,
 
     easier = sorted(pool, key=lambda i: i.difficulty)
     chosen = easier[:min(DRILL_ITEMS, len(easier))]
-    # TRAIN-01 ends on something harder than the set that preceded it — the
+    # TRAIN-01 ends on something harder than the set that preceded it â€” the
     # loop is fail, understand, practise, then stretch.
     if len(easier) > len(chosen):
         chosen.append(easier[-1])
@@ -374,10 +374,10 @@ async def _why_for(models: TenantModels, user_id: str, skill: str) -> str:
     response; the join that enforced that becomes a ``$lookup`` here. The
     joined array is stripped before validation so the document parses clean.
     """
-    coll = models.FeatureRecord.get_pymongo_collection()
+    coll = models.FeatureRecord.get_motor_collection()
     docs = await coll.aggregate([
         {"$lookup": {
-            "from": models.Response.get_pymongo_collection().name,
+            "from": models.Response.get_motor_collection().name,
             "localField": "response_id",
             "foreignField": "_id",
             "as": "_response",

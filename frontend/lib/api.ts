@@ -44,13 +44,11 @@ export function sessionExpired(forToken?: string | null) {
   if (typeof window === "undefined") return;
   if (forToken !== undefined && forToken !== getToken()) return;
   if (expiring) return;
-  // Prevent infinite redirect loops: if we are already on the login page,
-  // do not redirect again.
   if (window.location.pathname === "/login") return;
   expiring = true;
   setToken(null);
   const back = window.location.pathname + window.location.search;
-  window.location.href = `/login?expired=1&next=${encodeURIComponent(back)}`;
+  window.location.replace(`/login?expired=1&next=${encodeURIComponent(back)}`);
 }
 
 /** Called on a successful sign-in so a later genuine expiry can redirect again. */
@@ -65,63 +63,85 @@ export function resetSessionExpiry() {
  *  browser has to set the header itself so it can include the multipart
  *  boundary, and overriding it makes the server see a body it cannot parse.
  */
+const DEFAULT_TIMEOUT_MS = 12_000;
+
+function withTimeout<T>(promise: Promise<T>, ms = DEFAULT_TIMEOUT_MS): Promise<T> {
+  if (typeof window === "undefined") return promise;
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ApiError(504, "Request timed out")), ms);
+  });
+  return Promise.race([promise.finally(() => clearTimeout(timer)), timeout]);
+}
+
 async function upload<T>(path: string, form: FormData): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    body: form,
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  });
-  if (res.status === 401) {
-    if (!path.includes("/auth/login")) {
-      sessionExpired(token);
+  const controller = typeof window !== "undefined" ? new AbortController() : null;
+  const id = setTimeout(() => controller?.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      body: form,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+      signal: controller?.signal,
+    });
+    if (res.status === 401) {
+      if (!path.includes("/auth/login")) {
+        sessionExpired(token);
+      }
+      throw new ApiError(401, "Incorrect email or password");
     }
-    throw new ApiError(401, "Incorrect email or password");
-  }
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      detail = (await res.json())?.detail ?? detail;
-    } catch {
-      /* a non-JSON error body is still an error */
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        detail = (await res.json())?.detail ?? detail;
+      } catch {
+        /* a non-JSON error body is still an error */
+      }
+      throw new ApiError(res.status, detail);
     }
-    throw new ApiError(res.status, detail);
+    return res.json() as Promise<T>;
+  } finally {
+    clearTimeout(id);
   }
-  return res.json() as Promise<T>;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(init.headers ?? {}),
-    },
-  });
+  const controller = typeof window !== "undefined" ? new AbortController() : null;
+  const id = setTimeout(() => controller?.abort(), DEFAULT_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...init,
+      signal: controller?.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
 
-  if (res.status === 401) {
-    // Do NOT trigger session expiry redirect from the login endpoint —
-    // a failed login is not a session expiry, and redirecting from here
-    // causes an infinite redirect loop.
-    if (!path.includes("/auth/login")) {
-      sessionExpired(token);
+    if (res.status === 401) {
+      if (!path.includes("/auth/login")) {
+        sessionExpired(token);
+      }
+      throw new ApiError(401, "Incorrect email or password");
     }
-    throw new ApiError(401, "Incorrect email or password");
-  }
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const body = await res.json();
-      detail = body?.detail ?? detail;
-    } catch {
-      /* a non-JSON error body is still an error; the status carries it */
+    if (!res.ok) {
+      let detail = res.statusText;
+      try {
+        const body = await res.json();
+        detail = body?.detail ?? detail;
+      } catch {
+        /* a non-JSON error body is still an error; the status carries it */
+      }
+      throw new ApiError(res.status, typeof detail === "string" ? detail : "Request failed");
     }
-    throw new ApiError(res.status, typeof detail === "string" ? detail : "Request failed");
+    if (res.status === 204) return undefined as T;
+    return (await res.json()) as T;
+  } finally {
+    clearTimeout(id);
   }
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
 }
 
 const get = <T,>(path: string) => request<T>(path);
@@ -132,16 +152,8 @@ const post = <T,>(path: string, body?: unknown) =>
 // Types — mirroring app/schemas.py
 // --------------------------------------------------------------------------
 
-/** Every role the server can put in a token.
- *
- *  `candidate` was added to the backend in Phase 9 and never added here, and
- *  the omission was not cosmetic: with no `candidate` member, no `switch` had
- *  to handle one and no `roles={[...]}` list looked incomplete. A candidate
- *  therefore could not reach the environment check, the runner, or their own
- *  report -- the three pages the invitation exists to deliver -- and
- *  `landingFor` sent them to the operator console by default.
- */
-export type Role = "student" | "candidate" | "trainer" | "tenant_admin" | "super_admin" | "finance" | "content" | "data_ml" | "support";
+/** The three roles in the simplified system. */
+export type Role = "student" | "tenant_admin" | "super_admin";
 
 /** Turn a stored asset path into something an <img> can actually load.
  *
@@ -174,6 +186,10 @@ export interface SessionUser {
   must_change_password: boolean;
   ui_language: string;
   preferred_theme: string;
+  roll_number?: string;
+  branch?: string;
+  year_of_study?: number | null;
+  l1_language?: string;
 }
 
 export interface ProfileSection {
@@ -362,8 +378,8 @@ export interface StudentSummary {
 }
 
 export interface TenantOverview {
-  tenant_name: string; tenant_slug: string; plan_name: string;
-  seats_used: number; seat_limit: number; students: number; trainers: number;
+  tenant_name: string; tenant_slug: string;
+  seats_used: number; seat_limit: number; students: number;
   cohorts: number; attempts_total: number; consent_pending: number;
 }
 
@@ -374,7 +390,7 @@ export interface SeasonRow {
 
 export interface PlatformOverview {
   tenants_total: number; tenants_active: number; seats_sold: number;
-  plans: number; providers_registered: number; capabilities_configured: number;
+  providers_registered: number; capabilities_configured: number;
   capabilities_total: number; audit_events_7d: number;
 }
 
@@ -409,23 +425,17 @@ export const EMPTY_TENANT_PROFILE: TenantProfile = {
 };
 
 export interface TenantRow {
-  id: string; name: string; slug: string;
+  id: string; name: string; slug: string; domain: string;
   tenant_type: string; tenant_type_label: string;
-  status: string; plan_id: string | null; plan_name: string;
+  status: string;
   seat_limit: number; seats_used: number; region: string;
   branding: TenantBranding;
   profile: TenantProfile;
-  subscription_status: string; trial_ends_at: string | null;
-  season_start: string | null; season_end: string | null; created_at: string;
+  created_at: string;
 }
 
 export interface TenantType { key: string; label: string }
 
-export interface PlanRow {
-  id: string; code: string; name: string; version: number; billing_model: string;
-  currency: string; price_per_seat: number; price_flat: number;
-  attempt_allowance: number; active: boolean;
-}
 
 export interface ProviderRow {
   id: string; capability: string; provider_key: string; name: string;
@@ -464,6 +474,8 @@ export const api = {
   login: (email: string, password: string) =>
     post<{ token: string; user: SessionUser }>("/auth/login", { email, password }),
   me: () => get<SessionUser>("/auth/me"),
+  savePreferences: (prefs: Record<string, unknown>) =>
+    post<{ ok: boolean }>("/auth/preferences", prefs),
 
   studentHome: () => get<StudentHome>("/student/home"),
   studentProfiles: () => get<SimulationProfile[]>("/student/profiles"),
@@ -524,8 +536,26 @@ export const api = {
 
   platformOverview: () => get<PlatformOverview>("/platform/overview"),
   platformTenants: () => get<TenantRow[]>("/platform/tenants"),
+  platformQuestions: (tenantId: string) =>
+    get<{ tenants: Record<string, Record<string, number>>[] }>(`/platform/questions?tenant_id=${tenantId}`),
+  platformQuestionItems: (tenantId: string, category: string, page = 1, pageSize = 10) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    get<{items: Record<string, any>[]; total: number; page: number; page_size: number; total_pages: number}>(
+      `/platform/questions/items?tenant_id=${tenantId}&category=${category}&page=${page}&page_size=${pageSize}`),
+  platformDeleteQuestion: async (collection: string, itemId: string, tenantId: string): Promise<void> => {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/platform/questions/${collection}/${itemId}?tenant_id=${tenantId}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+    if (!res.ok) throw new ApiError(res.status, "Delete failed");
+  },
+  platformCreateQuestion: (category: string, tenantId: string, body: Record<string, unknown>) =>
+    post<{ id?: string; passage_id?: string; prompt_id?: string; questions?: number }>(
+      `/platform/questions/${category}?tenant_id=${tenantId}`, body),
+  platformTenantUsers: (tenantId: string) => get<UserRow[]>(`/platform/tenants/${tenantId}/users`),
   tenantTypes: () => get<TenantType[]>("/platform/tenant-types"),
-  platformPlans: () => get<PlanRow[]>("/platform/plans"),
+
   platformCapabilities: () => get<CapabilityRow[]>("/platform/capabilities"),
   platformAudit: () => get<AuditRow[]>("/platform/audit"),
   platformGamification: () => get<GamificationConfig>("/platform/gamification"),
@@ -1413,12 +1443,6 @@ export const listeningApi = {
     post<ListeningResult>(`/student/listening/attempts/${attemptId}/submit`, body),
 };
 
-export interface Invoice {
-  id: string; tenant_id: string; tenant_name: string; number: string;
-  period_start: string; period_end: string; seats: number; subtotal: number;
-  gst_rate: number; gst_amount: number; total: number; currency: string;
-  status: string; issued_at: string | null;
-}
 
 const del = <T,>(path: string) => request<T>(path, { method: "DELETE" });
 const patch = <T,>(path: string, body: unknown) =>
@@ -1446,14 +1470,6 @@ export const adminApi = {
   deleteAssignment: (id: string) => del<{ deleted: boolean }>(`/tenant/assignments/${id}`),
 };
 
-export const trainerApi = {
-  flags: (includeResolved = false) =>
-    get<Flag[]>(`/trainer/flags?include_resolved=${includeResolved}`),
-  raiseFlag: (userId: string, reason: string, note: string) =>
-    post<Flag>("/trainer/flags", { user_id: userId, reason, note }),
-  resolveFlag: (id: string) => post<{ resolved: boolean }>(`/trainer/flags/${id}/resolve`),
-  momentum: () => get<MomentumRow[]>("/trainer/momentum"),
-};
 
 export const gameApi = {
   state: () => get<GameState>("/student/game"),
@@ -1470,6 +1486,7 @@ export const practiceApi = {
 
 };
 
+
 export const operatorApi = {
   /** null = leave unchanged, "" = clear back to the environment default. */
   updateNarrationSettings: (body: Record<string, unknown>) =>
@@ -1481,11 +1498,7 @@ export const operatorApi = {
   createTenant: (body: Record<string, unknown>) => post<TenantRow>("/platform/tenants", body),
   updateTenant: (id: string, body: Record<string, unknown>) =>
     patch<TenantRow>(`/platform/tenants/${id}`, body),
-  createPlan: (body: Record<string, unknown>) => post<PlanRow>("/platform/plans", body),
-  updatePlan: (id: string, body: Record<string, unknown>) =>
-    patch<PlanRow>(`/platform/plans/${id}`, body),
-  newPlanVersion: (id: string, body: Record<string, unknown>) =>
-    post<PlanRow>(`/platform/plans/${id}/version`, body),
+
   setTenantLogoUrl: (id: string, url: string) =>
     post<TenantRow>(`/platform/tenants/${id}/logo-url`, { url }),
   uploadTenantLogo: async (id: string, file: File) => {
@@ -1520,9 +1533,9 @@ export const operatorApi = {
     post<ProviderRow>("/platform/providers", body),
   updateProvider: (id: string, body: Record<string, unknown>) =>
     patch<ProviderRow>(`/platform/providers/${id}`, body),
-  invoices: () => get<Invoice[]>("/platform/invoices"),
-  issueInvoice: (tenantId: string) =>
-    post<Invoice>(`/platform/tenants/${tenantId}/invoice`),
-  updateGamification: (body: Record<string, unknown>) =>
+
+updateGamification: (body: Record<string, unknown>) =>
     put<GamificationConfig>("/platform/gamification", body),
+
+
 };

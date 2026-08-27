@@ -5,6 +5,8 @@ import type { LucideIcon } from "lucide-react";
 /* Shared primitives. Every colour here is a CSS variable — that is the whole
    reason sixteen themes work without sixteen sets of components. */
 
+export { useToast } from "./Toast";
+
 export function PageHeader({ title, sub, action }: {
   title: string; sub?: string; action?: ReactNode;
 }) {

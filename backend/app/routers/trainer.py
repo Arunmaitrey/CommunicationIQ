@@ -1,4 +1,4 @@
-"""Trainer surfaces — read and assign only.
+"""Trainer surfaces â€” read and assign only.
 
 A trainer sees the students in their own cohorts, and cannot alter a recorded
 score or an attempt history (TRN-05). Nothing in this router writes to
@@ -30,7 +30,7 @@ from app.schemas import (AttemptOut, AttemptResult, CohortOut,
                          CohortReadiness, MasteryOut, StudentSummary, UserOut)
 
 router = APIRouter(prefix="/trainer", tags=["trainer"],
-                   dependencies=[Depends(require_roles("trainer", "tenant_admin"))])
+                   dependencies=[Depends(require_roles("tenant_admin"))])
 
 
 async def _visible_cohorts(models: SimpleNamespace,
@@ -83,7 +83,7 @@ async def cohorts(principal: Principal,
                   models: TenantModels) -> list[CohortOut]:
     rows = await _visible_cohorts(models, principal)
 
-    coll = models.CohortMember.get_pymongo_collection()
+    coll = models.CohortMember.get_motor_collection()
     counts = {doc["_id"]: doc["count"] for doc in await coll.aggregate([
         {"$group": {"_id": "$cohort_id", "count": {"$sum": 1}}},
     ]).to_list(None)}
@@ -150,7 +150,7 @@ async def cohort_students(cohort_id: str, principal: Principal,
     ids = [u.id for u in users]
     latest = await _latest_overall(models, ids)
 
-    coll = models.Attempt.get_pymongo_collection()
+    coll = models.Attempt.get_motor_collection()
     attempt_docs = await coll.aggregate([
         {"$match": {"user_id": {"$in": ids or [""]}}},
         {"$group": {"_id": "$user_id", "count": {"$sum": 1},
@@ -167,10 +167,10 @@ async def cohort_students(cohort_id: str, principal: Principal,
         count, last = attempts.get(u.id, (0, None))
         summaries.append(StudentSummary(
             user=UserOut(
-                id=u.id, email=u.email, full_name=u.full_name, role=u.role,
-                active=u.active, roll_number=u.roll_number, branch=u.branch,
-                year_of_study=u.year_of_study, l1_language=u.l1_language,
-                created_at=u.created_at,
+                id=getattr(u, 'id', ''), email=getattr(u, 'email', ''), full_name=getattr(u, 'full_name', ''), role=getattr(u, 'role', 'student'),
+                active=getattr(u, 'active', True), roll_number=getattr(u, 'roll_number', ''), branch=getattr(u, 'branch', ''),
+                year_of_study=getattr(u, 'year_of_study', None), l1_language=getattr(u, 'l1_language', ''),
+                created_at=getattr(u, 'created_at', None),
             ),
             attempts=count,
             last_attempt_at=last,
@@ -262,7 +262,7 @@ async def student_result(attempt_id: str, principal: Principal,
 @router.get("/students/{user_id}/mastery", response_model=list[MasteryOut])
 async def student_mastery(user_id: str, principal: Principal,
                           models: TenantModels) -> list[MasteryOut]:
-    """Sub-skill mastery for one student — cohort-scoped, like every trainer view."""
+    """Sub-skill mastery for one student â€” cohort-scoped, like every trainer view."""
     await _one_of_mine(models, principal, user_id)
 
     rows = await models.SkillMastery.find(

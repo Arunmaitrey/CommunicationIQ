@@ -7,45 +7,44 @@ the metrics themselves carry no student data.
 """
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from collections import Counter
 
-from app.db import platform_sessionmaker, tenant_sessionmaker
+from app.sqlbridge import select
+
+from app.db import ensure_tenant_models, platform_sessionmaker
 from app.models.platform import Tenant
-from app.models.tenant import AttemptNarration
 
 
 async def _tenant_metrics(slug: str) -> dict:
-    async with tenant_sessionmaker(slug)() as s:
-        status_rows = (await s.execute(
-            select(AttemptNarration.status, func.count())
-            .group_by(AttemptNarration.status))).all()
-        by_status = {status: n for status, n in status_rows}
+    models = await ensure_tenant_models(slug)
+    jobs = await models.AttemptNarration.find_all().to_list()
 
-        error_rows = (await s.execute(
-            select(AttemptNarration.last_error_category, func.count())
-            .where(AttemptNarration.status == "failed")
-            .group_by(AttemptNarration.last_error_category))).all()
-        failures = {cat or "unknown": n for cat, n in error_rows}
+    by_status = Counter(j.status for j in jobs)
+    failures = Counter(
+        (j.last_error_category or "unknown")
+        for j in jobs if j.status == "failed")
 
-        # Cost/latency over ready rows only.
-        agg = (await s.execute(
-            select(func.coalesce(func.sum(AttemptNarration.input_tokens), 0),
-                   func.coalesce(func.sum(AttemptNarration.output_tokens), 0),
-                   func.coalesce(func.avg(AttemptNarration.provider_latency_ms), 0),
-                   func.coalesce(func.avg(AttemptNarration.attempt_count), 0))
-            .where(AttemptNarration.status == "ready"))).first()
+    # Cost/latency over ready rows only. coalesce(x, 0) becomes a plain
+    # default for an empty set.
+    ready = [j for j in jobs if j.status == "ready"]
+    input_tokens = sum(j.input_tokens or 0 for j in ready)
+    output_tokens = sum(j.output_tokens or 0 for j in ready)
+    avg_latency = (sum(j.provider_latency_ms or 0 for j in ready) / len(ready)
+                   if ready else 0.0)
+    avg_attempts = (sum(j.attempt_count or 0 for j in ready) / len(ready)
+                    if ready else 0.0)
 
-    ready = by_status.get("ready", 0)
-    failed = by_status.get("failed", 0)
-    total_terminal = ready + failed
+    ready_n = by_status.get("ready", 0)
+    failed_n = by_status.get("failed", 0)
+    total_terminal = ready_n + failed_n
     return {
-        "by_status": by_status,
-        "failures": failures,
-        "input_tokens": int(agg[0]),
-        "output_tokens": int(agg[1]),
-        "avg_latency_ms": round(float(agg[2]), 1),
-        "avg_attempts": round(float(agg[3]), 2),
-        "success_rate": round(ready / total_terminal, 3) if total_terminal else None,
+        "by_status": dict(by_status),
+        "failures": dict(failures),
+        "input_tokens": int(input_tokens),
+        "output_tokens": int(output_tokens),
+        "avg_latency_ms": round(float(avg_latency), 1),
+        "avg_attempts": round(float(avg_attempts), 2),
+        "success_rate": round(ready_n / total_terminal, 3) if total_terminal else None,
     }
 
 

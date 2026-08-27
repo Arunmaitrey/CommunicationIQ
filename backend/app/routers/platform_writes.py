@@ -1,9 +1,9 @@
 """Operator console — the write half.
 
-Switching a provider, onboarding an institution, changing the game economy and
-issuing an invoice all live here. Every one of them is audit-logged with the
-before and after, because "who changed the ASR provider on the morning of the
-drive" is a question somebody will eventually ask.
+Switching a provider, onboarding an institution, and changing the game economy
+all live here. Every one of them is audit-logged with the before and after,
+because "who changed the ASR provider on the morning of the drive" is a
+question somebody will eventually ask.
 
 Two things this file will not do:
 
@@ -26,17 +26,17 @@ from app.db import ensure_tenant_models
 from app.deps import Principal, require_platform
 from app.engine.contracts import Capability
 from app.engine.registry import clear_provider_cache
-from app.models.platform import (GamificationConfig, Invoice, Plan,
+from app.models.platform import (GamificationConfig,
                                  TENANT_TYPES,
-                                 ProviderConfig, ProviderRegistry, Subscription,
+                                 ProviderConfig, ProviderRegistry,
                                  Tenant, TenantUserDirectory)
 from app.provisioning import create_tenant_schema, validate_slug
 from app.routers.tenant_writes import temporary_password
 from app.schemas import (CapabilityConfigRequest, GamificationConfigOut,
-                         GamificationConfigRequest, InvoiceOut,
-                         LogoByUrlRequest, PlanOut, PlanRequest,
+                         GamificationConfigRequest,
+                         LogoByUrlRequest,
                          ProviderOut, ProviderRegisterRequest,
-                         PlanUpdateRequest, ProviderUpdateRequest,
+                         ProviderUpdateRequest,
                          TenantBranding, TenantCreateRequest, TenantOut,
                          TenantProfile, TenantTypeOut, TenantUpdateRequest)
 from app.security import hash_password
@@ -44,8 +44,6 @@ from app.storage import get_storage
 
 router = APIRouter(prefix="/platform", tags=["platform"],
                    dependencies=[Depends(require_platform())])
-
-GST_RATE = 18.0
 
 # Floors that protect students. A tenant can tune the economy; it cannot tune
 # these away, which is the difference between a setting and a guardrail.
@@ -353,13 +351,6 @@ def _branding_of(tenant: Tenant) -> TenantBranding:
 
 async def _tenant_out(tenant: Tenant, *, seats_used: int | None = None
                       ) -> TenantOut:
-    plan = await Plan.get(tenant.plan_id) if tenant.plan_id else None
-    subscription = await Subscription.find_one(
-        Subscription.tenant_id == tenant.id)
-    if subscription is not None:
-        subscription = await Subscription.find(
-            Subscription.tenant_id == tenant.id).sort("-id").limit(1).first_or_none()
-
     if seats_used is None:
         seats_used = 0
         try:
@@ -372,16 +363,13 @@ async def _tenant_out(tenant: Tenant, *, seats_used: int | None = None
     labels = dict(TENANT_TYPES)
     return TenantOut(
         id=tenant.id, name=tenant.name, slug=tenant.slug,
+        domain=tenant.domain,
         tenant_type=tenant.tenant_type,
         tenant_type_label=labels.get(tenant.tenant_type, tenant.tenant_type),
         status=tenant.status,
-        plan_id=tenant.plan_id, plan_name=plan.name if plan else "",
         seat_limit=tenant.seat_limit, seats_used=seats_used,
         region=tenant.region, branding=_branding_of(tenant),
         profile=_profile_of(tenant),
-        subscription_status=subscription.status if subscription else "",
-        trial_ends_at=subscription.trial_ends_at if subscription else None,
-        season_start=tenant.season_start, season_end=tenant.season_end,
         created_at=tenant.created_at,
     )
 
@@ -479,25 +467,22 @@ async def create_tenant(body: TenantCreateRequest, principal: Principal) -> Tena
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Unknown tenant type {body.tenant_type!r}")
 
-    plan = await Plan.get(body.plan_id) if body.plan_id else None
-    tenant = Tenant(name=body.name, slug=slug, status=body.status,
+    domain = body.domain.lower().strip() if body.domain else ""
+    if domain:
+        existing = await Tenant.find_one(Tenant.domain == domain)
+        if existing:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Domain {domain} is already registered")
+
+    tenant = Tenant(name=body.name, slug=slug, domain=domain,
+                    status=body.status,
                     tenant_type=body.tenant_type,
-                    plan_id=plan.id if plan else None,
                     seat_limit=body.seat_limit,
                     branding=body.branding.model_dump() if body.branding else {},
                     profile=body.profile.model_dump() if body.profile else {})
     if body.region:
         tenant.region = body.region
     await tenant.create()
-
-    if plan is not None:
-        await Subscription(
-            tenant_id=tenant.id, plan_id=plan.id,
-            status="trialing" if body.status == "trial" else "active",
-            seats=body.seat_limit,
-            trial_ends_at=(datetime.now(timezone.utc) + timedelta(days=30)
-                           if body.status == "trial" else None),
-        ).create()
 
     await create_tenant_schema(slug)
 
@@ -513,9 +498,13 @@ async def create_tenant(body: TenantCreateRequest, principal: Principal) -> Tena
     await audit.record(principal, "tenant.created", entity="Tenant",
                        entity_id=tenant.id, tenant_id=tenant.id,
                        after={"name": tenant.name, "slug": slug,
+                              "domain": domain,
                               "seat_limit": body.seat_limit})
 
-    return await _tenant_out(tenant, seats_used=1)
+    out = await _tenant_out(tenant, seats_used=1)
+    out.temp_password = password
+    out.admin_email = body.admin_email.lower()
+    return out
 
 
 @router.patch("/tenants/{tenant_id}", response_model=TenantOut)
@@ -527,7 +516,7 @@ async def update_tenant(tenant_id: str, body: TenantUpdateRequest,
 
     before = {"name": tenant.name, "status": tenant.status,
               "tenant_type": tenant.tenant_type,
-              "seat_limit": tenant.seat_limit, "plan_id": tenant.plan_id}
+              "seat_limit": tenant.seat_limit}
 
     if body.name is not None:
         tenant.name = body.name.strip()
@@ -567,11 +556,6 @@ async def update_tenant(tenant_id: str, body: TenantUpdateRequest,
                 status.HTTP_409_CONFLICT,
                 f"{in_use} accounts are active — the seat limit cannot go below that.")
         tenant.seat_limit = body.seat_limit
-    if body.plan_id is not None:
-        plan = await Plan.get(body.plan_id)
-        if plan is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
-        tenant.plan_id = plan.id
     if body.season_start is not None:
         tenant.season_start = body.season_start
     if body.season_end is not None:
@@ -581,202 +565,12 @@ async def update_tenant(tenant_id: str, body: TenantUpdateRequest,
     await audit.record(principal, "tenant.updated", entity="Tenant",
                        entity_id=tenant.id, tenant_id=tenant.id, before=before,
                        after={"status": tenant.status,
-                              "seat_limit": tenant.seat_limit,
-                              "plan_id": tenant.plan_id})
+                              "seat_limit": tenant.seat_limit})
 
     return await _tenant_out(tenant)
 
 
-# --------------------------------------------------------------------------
-# Plans and billing
-# --------------------------------------------------------------------------
 
-@router.post("/plans", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
-async def create_plan(body: PlanRequest, principal: Principal) -> PlanOut:
-    """Create a plan, or a new version of one.
-
-    Versions rather than edits: an institution's subscription keeps pointing
-    at the version it was sold, so changing a template never silently
-    re-prices a live customer.
-    """
-    latest = await Plan.find_one(Plan.code == body.code)
-    latest_version = latest.version if latest else 0
-
-    plan = Plan(code=body.code, name=body.name, version=latest_version + 1,
-                billing_model=body.billing_model, currency=body.currency,
-                price_per_seat=body.price_per_seat, price_flat=body.price_flat,
-                attempt_allowance=body.attempt_allowance,
-                features=body.features or {}, active=True)
-    await plan.create()
-
-    await audit.record(principal, "plan.created", entity="Plan", entity_id=plan.id,
-                       after={"code": plan.code, "version": plan.version})
-    return PlanOut(
-        id=plan.id, code=plan.code, name=plan.name, version=plan.version,
-        billing_model=plan.billing_model, currency=plan.currency,
-        price_per_seat=plan.price_per_seat, price_flat=plan.price_flat,
-        attempt_allowance=plan.attempt_allowance, active=plan.active,
-    )
-
-
-def _plan_out(plan: Plan) -> PlanOut:
-    return PlanOut(
-        id=plan.id, code=plan.code, name=plan.name, version=plan.version,
-        billing_model=plan.billing_model, currency=plan.currency,
-        price_per_seat=plan.price_per_seat, price_flat=plan.price_flat,
-        attempt_allowance=plan.attempt_allowance, active=plan.active,
-    )
-
-
-@router.patch("/plans/{plan_id}", response_model=PlanOut)
-async def update_plan(plan_id: str, body: PlanUpdateRequest,
-                      principal: Principal) -> PlanOut:
-    """Edit a plan template, or retire it.
-
-    Price and billing model cannot change here -- see PlanUpdateRequest. A
-    template whose price differs from what its customers are paying is worse
-    than no template at all.
-    """
-    plan = await Plan.get(plan_id)
-    if plan is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
-
-    before = {"name": plan.name, "attempt_allowance": plan.attempt_allowance,
-              "active": plan.active}
-
-    if body.active is False:
-        # Retiring a plan is fine; retiring one that customers are on, and
-        # saying nothing, is how a renewal quietly fails later.
-        in_use = await Tenant.find(Tenant.plan_id == plan.id).count()
-        if in_use:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                f"{in_use} tenant(s) are on this plan. Move them to another "
-                "plan first, or publish a new version and migrate them.")
-
-    if body.name is not None:
-        plan.name = body.name
-    if body.attempt_allowance is not None:
-        plan.attempt_allowance = body.attempt_allowance
-    if body.features is not None:
-        plan.features = body.features
-    if body.active is not None:
-        plan.active = body.active
-
-    await plan.save()
-    await audit.record(principal, "plan.updated", entity="Plan",
-                       entity_id=plan.id, before=before,
-                       after={"name": plan.name,
-                              "attempt_allowance": plan.attempt_allowance,
-                              "active": plan.active})
-    return _plan_out(plan)
-
-
-@router.post("/plans/{plan_id}/version", response_model=PlanOut,
-             status_code=status.HTTP_201_CREATED)
-async def new_plan_version(plan_id: str, body: PlanRequest,
-                           principal: Principal) -> PlanOut:
-    """Publish a new version of a plan under the same code.
-
-    The way to change a price. The old version stays exactly as it is, so
-    every customer already on it keeps the terms they agreed to, and new
-    assignments pick up the new one.
-    """
-    source = await Plan.get(plan_id)
-    if source is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
-
-    highest = await Plan.find_one(Plan.code == source.code)
-    highest_version = highest.version if highest else source.version
-
-    plan = Plan(
-        code=source.code, name=body.name, version=highest_version + 1,
-        billing_model=body.billing_model, currency=body.currency,
-        price_per_seat=body.price_per_seat, price_flat=body.price_flat,
-        attempt_allowance=body.attempt_allowance,
-        features=body.features or {}, active=True,
-    )
-    await plan.create()
-
-    await audit.record(principal, "plan.versioned", entity="Plan",
-                       entity_id=plan.id,
-                       before={"from": source.id, "version": source.version},
-                       after={"code": plan.code, "version": plan.version})
-    return _plan_out(plan)
-
-
-@router.post("/tenants/{tenant_id}/invoice", response_model=InvoiceOut,
-             status_code=status.HTTP_201_CREATED)
-async def issue_invoice(tenant_id: str, principal: Principal) -> InvoiceOut:
-    """Issue a GST invoice for the current cycle (BILL-04).
-
-    Seats are counted from the institution's actual active accounts, not from
-    the plan's headline number — billing for seats nobody is using is how a
-    pilot becomes a dispute.
-    """
-    tenant = await Tenant.get(tenant_id)
-    if tenant is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Institution not found")
-    plan = await Plan.get(tenant.plan_id) if tenant.plan_id else None
-    if plan is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "This institution has no plan assigned")
-
-    models = await ensure_tenant_models(tenant.slug)
-    seats = await models.User.find(
-        models.User.active == True).count()
-
-    if plan.billing_model == "per_seat":
-        subtotal = plan.price_per_seat * seats
-    elif plan.billing_model == "flat":
-        subtotal = plan.price_flat
-    else:
-        subtotal = 0.0
-
-    now = datetime.now(timezone.utc)
-    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    period_end = (period_start + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
-
-    count = await Invoice.find_all().count()
-    number = f"INV-{now:%Y%m}-{count + 1:04d}"
-
-    gst_amount = round(subtotal * GST_RATE / 100, 2)
-    invoice = Invoice(
-        tenant_id=tenant.id, number=number, period_start=period_start,
-        period_end=period_end, subtotal=round(subtotal, 2), gst_rate=GST_RATE,
-        gst_amount=gst_amount, total=round(subtotal + gst_amount, 2),
-        currency=plan.currency, status="issued", issued_at=now,
-    )
-    await invoice.create()
-
-    await audit.record(principal, "invoice.issued", entity="Invoice",
-                       entity_id=invoice.id, tenant_id=tenant.id,
-                       after={"number": number, "total": invoice.total,
-                              "seats": seats})
-
-    return InvoiceOut(
-        id=invoice.id, tenant_id=tenant.id, tenant_name=tenant.name,
-        number=number, period_start=period_start, period_end=period_end,
-        seats=seats, subtotal=invoice.subtotal, gst_rate=GST_RATE,
-        gst_amount=gst_amount, total=invoice.total, currency=invoice.currency,
-        status=invoice.status, issued_at=now,
-    )
-
-
-@router.get("/invoices", response_model=list[InvoiceOut])
-async def invoices() -> list[InvoiceOut]:
-    rows = await Invoice.find_all().sort("-created_at").limit(100).to_list()
-    names = {t.id: t.name for t in await Tenant.find_all().to_list()}
-    return [
-        InvoiceOut(
-            id=i.id, tenant_id=i.tenant_id, tenant_name=names.get(i.tenant_id, ""),
-            number=i.number, period_start=i.period_start, period_end=i.period_end,
-            seats=0, subtotal=i.subtotal, gst_rate=i.gst_rate,
-            gst_amount=i.gst_amount, total=i.total, currency=i.currency,
-            status=i.status, issued_at=i.issued_at,
-        )
-        for i in rows
-    ]
 
 
 # --------------------------------------------------------------------------

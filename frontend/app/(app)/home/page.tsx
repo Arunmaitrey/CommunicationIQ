@@ -1,6 +1,10 @@
 "use client";
 import Link from "next/link";
-import { ArrowRight, Play, TrendingUp } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowRight, BookOpen, Headphones, Lightbulb, LineChart,
+  Mic, PenLine, Play, Target, TrendingUp,
+} from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ErrorNote, PageHeader, Section, Skeleton, StatCard } from "@/components/ui";
 import { StreakChip, Workflow, type Step } from "@/components/Workflow";
@@ -145,6 +149,70 @@ function Home() {
                  detail="Timed practice tests and company rounds." />
       </div>
 
+      {/* Quick Actions */}
+      <Section title="Quick actions" className="mt-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <QuickAction href="/tests" icon={Mic} label="Take a Test" />
+          <QuickAction href="/practise" icon={Target} label="Practice Skills" />
+          <QuickAction href="/reading" icon={BookOpen} label="Reading Practice" />
+          <QuickAction href="/writing" icon={PenLine} label="Writing Practice" />
+          <QuickAction href="/listening" icon={Headphones} label="Listening Practice" />
+          <QuickAction href="/my-progress" icon={LineChart} label="My Progress" />
+        </div>
+      </Section>
+
+      {/* Recent Activity */}
+      <Section title="Recent activity" className="mt-4">
+        {data.recent_attempts && data.recent_attempts.length > 0 ? (
+          <div className="space-y-2">
+            {data.recent_attempts.slice(0, 3).map((a) => (
+              <div key={a.id} className="flex items-center gap-3 text-xs py-1.5 px-2 rounded-md hover:bg-surface2 transition-colors">
+                <span className="flex-1 font-medium truncate">{a.profile_name}</span>
+                {a.overall_score != null && (
+                  <span className="font-bold tabular-nums">{a.overall_score}</span>
+                )}
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide
+                  ${a.status === "scored"
+                    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"}`}>
+                  {a.status}
+                </span>
+                {a.status === "scored" && (
+                  <Link href={`/results/${a.id}`}
+                        className="underline text-muted hover:text-foreground ds-focus shrink-0">
+                    View Result
+                  </Link>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-muted">No attempts yet. Start a test to see your progress here.</p>
+        )}
+      </Section>
+
+      {/* Tips */}
+      <div className="ds-card p-5 mt-4">
+        <div className="flex items-center gap-2 mb-3">
+          <Lightbulb size={16} className="text-amber-500" />
+          <span className="text-sm font-bold">Tips for improvement</span>
+        </div>
+        <ul className="space-y-2">
+          <li className="text-xs text-muted leading-relaxed flex gap-2">
+            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-amber-400" />
+            Practice daily for at least 10 minutes.
+          </li>
+          <li className="text-xs text-muted leading-relaxed flex gap-2">
+            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-amber-400" />
+            Record in a quiet environment for best scoring.
+          </li>
+          <li className="text-xs text-muted leading-relaxed flex gap-2">
+            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-amber-400" />
+            Review your reports to identify patterns.
+          </li>
+        </ul>
+      </div>
+
       {data.recent_attempts.some((a) => a.status === "scored") && (
         <Section title="Your last test" className="mt-4">
           {data.recent_attempts.filter((a) => a.status === "scored").slice(0, 1).map((a) => (
@@ -220,6 +288,21 @@ function Doorway({ href, title, detail }: {
         <ArrowRight size={14} className="text-muted ml-auto" />
       </div>
       <p className="text-[11px] text-muted mt-1 leading-relaxed">{detail}</p>
+    </Link>
+  );
+}
+
+function QuickAction({ href, icon: Icon, label }: {
+  href: string; icon: LucideIcon; label: string;
+}) {
+  return (
+    <Link href={href}
+          className="ds-card p-3 hover:bg-surface2 transition-colors ds-focus flex items-center gap-3 group">
+      <span className="rounded-lg p-2 shrink-0 transition-colors"
+            style={{ background: "color-mix(in srgb, var(--primary) 10%, transparent)" }}>
+        <Icon size={16} style={{ color: "var(--primary)" }} />
+      </span>
+      <span className="text-xs font-bold group-hover:underline">{label}</span>
     </Link>
   );
 }

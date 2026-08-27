@@ -1,7 +1,9 @@
 fastapi>=0.115.6
 uvicorn[standard]>=0.34.0
 # Beanie ODM for MongoDB — the only database layer. No SQL, no PostgreSQL.
-beanie>=1.28
+# Pinned <2.0: Beanie 2.x removed class-level expression access
+# (Model.field == x), which this codebase's query layer depends on.
+beanie>=1.28,<2.0
 motor>=3.5
 pymongo[srv]>=4.10
 # SQLAlchemy remains the in-process query-expression API consumed by

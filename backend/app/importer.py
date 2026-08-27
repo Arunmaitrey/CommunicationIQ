@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
-VALID_ROLES = {"student", "trainer", "tenant_admin"}
+VALID_ROLES = {"student", "tenant_admin"}
 VALID_L1 = {"", "telugu", "hindi", "tamil", "kannada", "malayalam", "marathi",
             "bengali", "gujarati", "punjabi", "odia", "other"}
 

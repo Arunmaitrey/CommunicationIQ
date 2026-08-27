@@ -62,7 +62,7 @@ function MyProgress() {
                   sub={`${d.total_xp.toLocaleString()} XP`} />
         <StatCard icon={LineChart} label="Drive in" tone="var(--secondary)"
                   value={d.days_to_drive != null ? `${d.days_to_drive}d` : "—"}
-                  sub="your cohort's date" />
+                  sub="days until drive" />
       </div>
 
       {/* Kept from the old Progress screen, because the distinction is real

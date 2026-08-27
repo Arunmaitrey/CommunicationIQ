@@ -1,8 +1,8 @@
 """Control-plane models — ``CommunicationIQ`` database only.
 
-Tenant registry, plans and subscriptions, platform staff, the Provider
-Registry, model versions, gamification economy config, feature flags and the
-immutable audit log. No student, attempt, recording or score data appears here.
+Tenant registry, platform staff, the Provider Registry, model versions,
+gamification economy config, feature flags and the immutable audit log.
+No student, attempt, recording or score data appears here.
 """
 from __future__ import annotations
 
@@ -11,6 +11,8 @@ from datetime import date, datetime, timezone
 
 from beanie import Document, Indexed
 from pydantic import Field
+
+from app.models._common import StrId
 
 
 def _uuid() -> str:
@@ -22,30 +24,8 @@ def _now() -> datetime:
 
 
 # --------------------------------------------------------------------------
-# Tenancy, plans, billing
+# Tenancy
 # --------------------------------------------------------------------------
-
-class Plan(Document):
-    """Versioned pricing template (PLAT-03)."""
-
-    id: str = Field(default_factory=_uuid)
-    code: str = Field(default="", index=True)
-    name: str
-    version: int = 1
-    # per_seat | flat | usage | pilot
-    billing_model: str = "per_seat"
-    currency: str = "INR"
-    price_per_seat: float = 0
-    price_flat: float = 0
-    # Attempts a student gets per simulation profile before re-purchase (STU-09).
-    attempt_allowance: int = 3
-    features: dict = Field(default_factory=dict)
-    active: bool = True
-    created_at: datetime = Field(default_factory=_now)
-
-    class Settings:
-        name = "plans"
-
 
 TENANT_TYPES: tuple[tuple[str, str], ...] = (
     ("engineering_college", "Engineering college"),
@@ -71,13 +51,13 @@ TENANT_TYPE_KEYS = frozenset(key for key, _ in TENANT_TYPES)
 class Tenant(Document):
     """A customer. Routing record for its database (PLAT-01/02)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     name: str
     slug: str = Field(unique=True, index=True)
+    domain: str = Field(default="", index=True)
     tenant_type: str = "engineering_college"
     # active | trial | suspended | offboarding | closed
     status: str = "trial"
-    plan_id: str | None = None
     seat_limit: int = 100
     region: str = "ap-south-1 (Mumbai)"
     branding: dict = Field(default_factory=dict)
@@ -91,42 +71,7 @@ class Tenant(Document):
         name = "tenants"
 
 
-class Subscription(Document):
-    __tablename__ = "subscriptions"
 
-    id: str = Field(default_factory=_uuid)
-    tenant_id: str = Field(default="", index=True)
-    plan_id: str
-    status: str = "trialing"
-    seats: int = 0
-    negotiated_price: float | None = None
-    started_at: datetime = Field(default_factory=_now)
-    trial_ends_at: datetime | None = None
-    renews_at: datetime | None = None
-
-    class Settings:
-        name = "subscriptions"
-
-
-class Invoice(Document):
-    """GST-compliant invoice record (BILL-04)."""
-
-    id: str = Field(default_factory=_uuid)
-    tenant_id: str = Field(default="", index=True)
-    number: str = Field(unique=True, index=True)
-    period_start: datetime
-    period_end: datetime
-    subtotal: float = 0
-    gst_rate: float = 18.0
-    gst_amount: float = 0
-    total: float = 0
-    currency: str = "INR"
-    status: str = "draft"
-    issued_at: datetime | None = None
-    created_at: datetime = Field(default_factory=_now)
-
-    class Settings:
-        name = "invoices"
 
 
 # --------------------------------------------------------------------------
@@ -136,13 +81,15 @@ class Invoice(Document):
 class PlatformUser(Document):
     """Internal staff account (PLAT-16)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     email: str = Field(unique=True, index=True)
     full_name: str
     password_hash: str
     role: str = "support"
     mfa_enabled: bool = False
     active: bool = True
+    ui_language: str = "en"
+    preferred_theme: str = ""
     last_login_at: datetime | None = None
     created_at: datetime = Field(default_factory=_now)
 
@@ -153,7 +100,7 @@ class PlatformUser(Document):
 class InvitationDirectory(Document):
     """Redemption lookup: token -> which institution to open a session against."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     token: str = Field(unique=True, index=True)
     tenant_id: str = Field(default="", index=True)
     tenant_slug: str = Field(default="", index=True)
@@ -166,7 +113,7 @@ class InvitationDirectory(Document):
 class TenantUserDirectory(Document):
     """Sign-in lookup: email -> which institution to open a session against."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     email: str = Field(unique=True, index=True)
     tenant_id: str = Field(default="", index=True)
     tenant_slug: str = Field(default="", index=True)
@@ -184,7 +131,7 @@ class TenantUserDirectory(Document):
 class ProviderRegistry(Document):
     """One registered implementation of one capability."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     capability: str = Field(default="", index=True)
     provider_key: str
     name: str
@@ -202,7 +149,7 @@ class ProviderRegistry(Document):
 class ProviderConfig(Document):
     """Which provider serves a capability, for whom, and what happens on failure."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     capability: str = Field(default="", index=True)
     tenant_id: str | None = Field(default=None, index=True)
     primary_provider_id: str
@@ -220,7 +167,7 @@ class ProviderConfig(Document):
 class ModelVersion(Document):
     """A promotable version of a model behind a provider."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     provider_id: str = Field(default="", index=True)
     version: str
     notes: str = ""
@@ -235,7 +182,7 @@ class ModelVersion(Document):
 class ProviderCall(Document):
     """Per-call telemetry feeding the provider performance dashboard (PLAT-13)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     capability: str = Field(default="", index=True)
     provider_id: str = Field(default="", index=True)
     provider_version: str = ""
@@ -258,7 +205,7 @@ class ProviderCall(Document):
 class GamificationConfig(Document):
     """The game economy, tunable without a deploy (PLAT-17)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     tenant_id: str | None = Field(default=None, index=True, unique=True)
     xp_table: dict = Field(default_factory=dict)
     difficulty_multipliers: dict = Field(default_factory=dict)
@@ -275,7 +222,7 @@ class GamificationConfig(Document):
 
 
 class FeatureFlag(Document):
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     key: str = Field(default="", index=True)
     tenant_id: str | None = Field(default=None, index=True)
     enabled: bool = False
@@ -288,7 +235,7 @@ class FeatureFlag(Document):
 class AuditLog(Document):
     """Append-only record of admin and score-affecting actions (PLAT-14, NFR-11)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     actor_type: str = "system"
     actor_id: str = ""
     actor_label: str = ""
@@ -307,7 +254,7 @@ class AuditLog(Document):
 class PlatformSetting(Document):
     """Operator-editable configuration, one JSON document per key."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     key: str = Field(unique=True, index=True)
     value: dict = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=_now)
@@ -317,7 +264,7 @@ class PlatformSetting(Document):
 
 
 CONTROL_DOCUMENTS = [
-    Plan, Tenant, Subscription, Invoice, PlatformUser, InvitationDirectory,
+    Tenant, PlatformUser, InvitationDirectory,
     TenantUserDirectory, ProviderRegistry, ProviderConfig, ModelVersion,
     ProviderCall, GamificationConfig, FeatureFlag, AuditLog, PlatformSetting,
 ]

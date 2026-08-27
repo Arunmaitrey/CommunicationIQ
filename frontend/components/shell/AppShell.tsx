@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useState, useCallback, useMemo } from "react";
 import {
   LogOut, Menu, PanelLeftClose, PanelLeftOpen, X,
 } from "lucide-react";
@@ -19,9 +19,11 @@ import { ROLE_LABEL } from "@/lib/roles";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, signOut } = useRole();
   const pathname = usePathname();
+  const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, toggleRail] = useRailCollapsed();
-  const sections = navFor(user?.role);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const sections = useMemo(() => navFor(user?.role), [user?.role]);
 
   // Branding comes off the session so it is present on first paint. A tenant
   // with none leaves these null and the product mark is used instead.
@@ -106,7 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <div className="text-xs font-semibold truncate max-w-[12rem]">{user.full_name}</div>
                 <div className="text-[10px] text-muted">{ROLE_LABEL[user.role] ?? user.role}</div>
               </div>
-              <button onClick={signOut} className="btn btn-icon btn-ghost ds-focus" title="Sign out">
+              <button onClick={() => setShowLogoutConfirm(true)} className="btn btn-icon btn-ghost ds-focus" title="Sign out">
                 <LogOut size={15} />
               </button>
             </div>
@@ -117,6 +119,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </main>
       </div>
+
+      {/* Logout confirmation popup */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={() => setShowLogoutConfirm(false)}>
+          <div className="absolute inset-0 bg-black/50" />
+          <div className="relative ds-card p-6 max-w-sm w-full mx-4 animate-fade-up" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 rounded-full" style={{ background: "color-mix(in srgb, var(--rag-amber) 12%, transparent)" }}>
+                <LogOut size={18} style={{ color: "var(--rag-amber)" }} />
+              </div>
+              <div>
+                <div className="text-sm font-bold">Sign out?</div>
+                <div className="text-xs text-muted">You will be returned to the login page.</div>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button className="btn btn-ghost btn-sm ds-focus" onClick={() => setShowLogoutConfirm(false)}>Cancel</button>
+              <button className="btn btn-sm ds-focus" style={{ background: "var(--rag-amber)", color: "white" }} onClick={signOut}>Sign out</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <PoweredByFloat />
     </div>
@@ -173,15 +197,13 @@ function RailContent({ sections, pathname, onNavigate, brand, collapsed = false 
             {section.items.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               const Icon = item.icon;
+              const handleEnter = useCallback(() => router.prefetch(item.href), [item.href]);
               return (
                 <Link
                   key={item.href}
                   href={item.href}
                   onClick={onNavigate}
-                  // Feeds the CSS tooltip when collapsed. The label also stays
-                  // in the DOM below, so a screen reader reads the destination
-                  // either way -- an icon-only link that announces nothing is
-                  // not a link anybody can use.
+                  onMouseEnter={handleEnter}
                   data-label={item.label}
                   aria-current={active ? "page" : undefined}
                   className={`rail-item flex items-center gap-2.5 px-4 py-2 text-[13px] font-medium ds-focus ${

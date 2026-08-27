@@ -42,7 +42,7 @@ function SeasonView() {
         title="Your season"
         sub={season.is_real_drive_date
           ? `${season.days_remaining} days to your placement drive. Everything here counts backwards from that date.`
-          : "No drive date set for your cohort, so this is a rolling 90-day plan — not a deadline anyone chose."}
+          : "No placement drive date set yet, so this is a rolling 90-day plan — not a deadline anyone chose."}
       />
 
       {!season.is_real_drive_date && (

@@ -21,7 +21,7 @@ from app.routers.trainer import _latest_overall, _visible_cohorts
 from app.schemas import FlagOut, FlagRequest, MomentumRow
 
 router = APIRouter(prefix="/trainer", tags=["trainer"],
-                   dependencies=[Depends(require_roles("trainer", "tenant_admin"))])
+                   dependencies=[Depends(require_roles("tenant_admin"))])
 
 # A student who has gone quiet this long, with a drive this close, is worth a
 # trainer's attention. Both halves matter: silence in week one of a ninety-day
@@ -120,7 +120,7 @@ async def momentum(principal: Principal,
         In(models.User.id, user_ids or [""]),
         models.User.role == "student").to_list()}
 
-    coll = models.Attempt.get_pymongo_collection()
+    coll = models.Attempt.get_motor_collection()
     activity_docs = await coll.aggregate([
         {"$match": {"user_id": {"$in": user_ids or [""]}}},
         {"$group": {"_id": "$user_id", "count": {"$sum": 1},
@@ -168,6 +168,6 @@ async def momentum(principal: Principal,
             flagged=user_id in flagged,
         ))
 
-    # The ones needing attention first — that is the whole point of the screen.
+    # The ones needing attention first â€” that is the whole point of the screen.
     rows.sort(key=lambda r: (not r.suggest_flag, -(r.days_since_activity or 999)))
     return rows

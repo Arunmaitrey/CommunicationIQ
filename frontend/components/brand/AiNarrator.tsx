@@ -50,7 +50,7 @@ export function AiNarrator({ speaking }: { speaking: boolean }) {
       </div>
 
       {/* A small "AI" tag so nobody mistakes it for a recorded person. */}
-      <span className="ai-narrator__tag">AI voice</span>
+      <span className="ai-narrator__tag">Synthetic voice</span>
     </div>
   );
 }

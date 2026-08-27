@@ -1,13 +1,9 @@
 "use client";
 import { createContext, useCallback, useContext, useEffect, useState, ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { api, resetSessionExpiry, setToken, type SessionUser } from "@/lib/api";
 import { IDENTITY_EVENT } from "@/components/ThemeProvider";
 
-/** The signed-in account, kept where the theme can find it.
- *
- *  The identity is mirrored into localStorage under "commiq.identity" purely
- *  so ThemeProvider can key a theme per account without importing this file —
- *  the theme has to apply before any provider tree renders. */
 const IDENTITY_KEY = "commiq.identity";
 
 interface Ctx {
@@ -30,13 +26,13 @@ function writeIdentity(user: SessionUser | null) {
   } else {
     localStorage.removeItem(IDENTITY_KEY);
   }
-  // A tab does not receive its own storage events, so the theme is told directly.
   window.dispatchEvent(new Event(IDENTITY_EVENT));
 }
 
 export function RoleProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   const refresh = useCallback(async () => {
     try {
@@ -57,21 +53,18 @@ export function RoleProvider({ children }: { children: ReactNode }) {
       setLoading(false);
       return;
     }
-    // Try cached identity first for instant nav, then refresh in background
-    try {
-      const cached = localStorage.getItem(IDENTITY_KEY);
-      if (cached) {
+    const cached = localStorage.getItem(IDENTITY_KEY);
+    if (cached) {
+      try {
         const parsed = JSON.parse(cached);
         setUser({ ...parsed, id: "", email: parsed.email, full_name: "", role: parsed.role, scope: "" } as SessionUser);
-        setLoading(false);
-      }
-    } catch { /* ignore */ }
-    void refresh();
+      } catch { /* ignore */ }
+    }
+    const id = setTimeout(() => setLoading(false), 4000);
+    void refresh().finally(() => clearTimeout(id));
   }, [refresh]);
 
   const signIn = (u: SessionUser, token: string) => {
-    // A previous expiry in this page session latched the redirect off; a new
-    // sign-in has to re-arm it or the next genuine expiry goes unnoticed.
     resetSessionExpiry();
     setToken(token);
     setUser(u);
@@ -83,7 +76,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     writeIdentity(null);
-    window.location.href = "/login";
+    router.replace("/login");
   };
 
   return (

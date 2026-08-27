@@ -41,6 +41,13 @@ function Tests() {
   const [starting, setStarting] = useState("");
   const [startError, setStartError] = useState("");
 
+  const inProgressByProfile = new Map<string, string>();
+  for (const a of data?.recent_attempts ?? []) {
+    if ((a.status === "in_progress" || a.status === "created") && !inProgressByProfile.has(a.profile_id)) {
+      inProgressByProfile.set(a.profile_id, a.id);
+    }
+  }
+
   if (loading) return <Skeleton rows={6} />;
   if (error) return <ErrorNote message={error} />;
 
@@ -57,13 +64,15 @@ function Tests() {
     setStartError("");
     try {
       const attempt = await attemptApi.start(profileId, "practice");
-      // Straight into the environment check — the runner is never entered
-      // without one, because a dead microphone must not cost an attempt.
       router.push(`/attempt/${attempt.attempt_id}/check`);
     } catch (err) {
       setStartError(err instanceof ApiError ? err.detail : "Could not start the test");
       setStarting("");
     }
+  }
+
+  function resume(attemptId: string) {
+    router.push(`/attempt/${attemptId}/check`);
   }
 
   return (
@@ -122,7 +131,9 @@ function Tests() {
             {baseline.map((p) => (
               <TestCard key={p.id} profile={p} first consented={consented}
                         starting={starting === p.id} anyStarting={starting !== ""}
-                        onStart={() => void start(p.id)} />
+                        inProgressAttemptId={inProgressByProfile.get(p.id)}
+                        onStart={() => void start(p.id)}
+                        onResume={() => resume(inProgressByProfile.get(p.id)!)} />
             ))}
           </div>
         </Section>
@@ -138,7 +149,9 @@ function Tests() {
             {formats.map((p) => (
               <TestCard key={p.id} profile={p} consented={consented}
                         starting={starting === p.id} anyStarting={starting !== ""}
-                        onStart={() => void start(p.id)} />
+                        inProgressAttemptId={inProgressByProfile.get(p.id)}
+                        onStart={() => void start(p.id)}
+                        onResume={() => resume(inProgressByProfile.get(p.id)!)} />
             ))}
           </div>
         </Section>
@@ -153,7 +166,9 @@ function Tests() {
             {company.map((p) => (
               <TestCard key={p.id} profile={p} consented={consented}
                         starting={starting === p.id} anyStarting={starting !== ""}
-                        onStart={() => void start(p.id)} />
+                        inProgressAttemptId={inProgressByProfile.get(p.id)}
+                        onStart={() => void start(p.id)}
+                        onResume={() => resume(inProgressByProfile.get(p.id)!)} />
             ))}
           </div>
         </Section>
@@ -167,9 +182,10 @@ function Tests() {
   );
 }
 
-function TestCard({ profile: p, first, consented, starting, anyStarting, onStart }: {
+function TestCard({ profile: p, first, consented, starting, anyStarting, inProgressAttemptId, onStart, onResume }: {
   profile: SimulationProfile; first?: boolean; consented: boolean;
-  starting: boolean; anyStarting: boolean; onStart: () => void;
+  starting: boolean; anyStarting: boolean; inProgressAttemptId?: string;
+  onStart: () => void; onResume: () => void;
 }) {
   const items = p.sections.reduce((n, s) => n + s.item_count, 0);
   const oneShot = p.sections.some((s) => s.prompt_plays_allowed > 0 && !s.allow_replay);
@@ -180,6 +196,7 @@ function TestCard({ profile: p, first, consented, starting, anyStarting, onStart
         <div className="text-sm font-bold">{p.name}</div>
         {first && <Badge tone="var(--primary)">Do this first</Badge>}
         {p.company && <Badge tone="var(--accent)">{p.company}</Badge>}
+        {inProgressAttemptId && <Badge tone="var(--rag-green)">In Progress</Badge>}
       </div>
 
       <p className="text-[11px] text-muted mt-1.5 leading-relaxed">{p.description}</p>
@@ -215,14 +232,27 @@ function TestCard({ profile: p, first, consented, starting, anyStarting, onStart
           {consented ? "Mic check first, then the test begins."
                      : "Locked until you have consented above."}
         </span>
-        <button
-          className="btn btn-primary btn-sm ds-focus shrink-0"
-          disabled={!consented || anyStarting}
-          onClick={onStart}
-          title={consented ? "" : "Consent is required before recording"}
-        >
-          {starting ? "Starting…" : "Start"}
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {inProgressAttemptId && (
+            <button
+              className="btn btn-sm ds-focus"
+              style={{ background: "var(--rag-green)", color: "white" }}
+              disabled={!consented || anyStarting}
+              onClick={onResume}
+              title={consented ? "" : "Consent is required before recording"}
+            >
+              Resume
+            </button>
+          )}
+          <button
+            className="btn btn-primary btn-sm ds-focus"
+            disabled={!consented || anyStarting}
+            onClick={onStart}
+            title={consented ? "" : "Consent is required before recording"}
+          >
+            {starting ? "Starting…" : "Start"}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -123,6 +123,9 @@ DIMENSIONS_BY_TASK: dict[str, frozenset[str]] = {
     "passage_reconstruction": frozenset({"content", "grammar"}),
     # Timed typing: copy a given text. Measures speed (WPM) and accuracy.
     "typing": frozenset({"accuracy", "fluency"}),
+    # Read word lists aloud (Cognizant Q11-15): word-level clarity and accuracy.
+    "read_words": frozenset({"accuracy", "completeness", "disfluency",
+                              "fluency", "latency", "pronunciation"}),
 }
 
 

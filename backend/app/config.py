@@ -83,6 +83,7 @@ class Settings(BaseSettings):
             return [str(x).strip() for x in loaded if str(x).strip()]
         return [part.strip() for part in text.split(",") if part.strip()]
     app_url: str = "http://localhost:3010"
+    port: int = 8010
 
     # Tenant schemas are named tenant_<slug>; the control plane lives in `public`.
     tenant_schema_prefix: str = "tenant_"
@@ -113,7 +114,7 @@ class Settings(BaseSettings):
     # explanation. It sits strictly downstream of scoring: it reads a finished
     # result and writes to its own table, and nothing in the scoring path waits
     # on it. Every knob here is about the job, not the score.
-    narration_enabled: bool = True
+    narration_enabled: bool = False
     # Provider selected by config alone; all three satisfy one contract and
     # feed the identical evidence/validation/privacy/retry pipeline.
     #   opensource — a self-hosted OpenAI-compatible server (the default): with

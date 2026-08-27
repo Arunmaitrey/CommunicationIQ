@@ -65,7 +65,7 @@ function Consent() {
           </Fact>
           <Fact icon={ShieldCheck} title="What it is used for">
             Scoring your answer and building your diagnostic report. Your
-            trainer and your institution see your scores and your progress —
+            institution admin can see your scores and your progress —
             never your recordings.
           </Fact>
           <Fact icon={Trash2} title="How long it is kept">

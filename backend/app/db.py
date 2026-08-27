@@ -53,17 +53,14 @@ async def init_mongo() -> None:
     await client.admin.command("ping")
     from app.models.platform import CONTROL_DOCUMENTS
     await init_beanie(database=control_db(), document_models=CONTROL_DOCUMENTS)
+    from app.sqlbridge import register_model
+    for doc in CONTROL_DOCUMENTS:
+        register_model(doc)
     _client_inited = True
 
 
 # ---------------------------------------------------------------------------
 # Tenant document bundles (lazy per-slug init)
-#
-# Beanie 2.0 stores the DB reference on the class object itself.  When we
-# call init_beanie(db_A, [User, Attempt, ...]) and then later
-# init_beanie(db_B, [User, Attempt, ...]) the second call overwrites the
-# first's binding.  We fix this by creating per-tenant subclasses that each
-# carry their own _database reference.
 # ---------------------------------------------------------------------------
 
 _tenant_bundles: dict[str, SimpleNamespace] = {}
@@ -71,36 +68,44 @@ _tenant_locks: dict[str, asyncio.Lock] = {}
 
 
 def _make_tenant_subclasses(slug: str, base_docs: list) -> list:
-    """Create per-tenant Document subclasses.
+    """Create per-tenant Document subclasses."""
+    # Beanie fields are descriptors that may not work on type()-created
+    # subclasses. Add a __getattr__ fallback that reads from the internal
+    # state dict so that access like user.year_of_study returns the actual
+    # value instead of an ExpressionField descriptor object.
+    _orig_getattr = getattr(type(base_docs[0]), '__getattr__', None) if base_docs else None
 
-    Each subclass is created via ``type()`` *without* putting ``Settings``
-    in the namespace (which would trigger a Pydantic field-detection error),
-    then we patch ``Settings`` as a plain class attribute after creation.
-    """
+    def _safe_getattr(self, item):
+        # 1. Try normal attribute resolution first
+        try:
+            val = object.__getattribute__(self, item)
+        except AttributeError:
+            val = None
+        # 2. If it looks like a Beanie ExpressionField or descriptor, fall back
+        #    to Pydantic's stored field values
+        if val is not None and type(val).__name__ in ('ExpressionField', 'IndexField'):
+            # Pydantic v2 stores field values in __dict__
+            d = object.__getattribute__(self, '__dict__')
+            if item in d:
+                return d[item]
+        return val
+
     subclasses = []
     for cls in base_docs:
         orig_name = cls.__name__
-        sub = type(
-            orig_name,
-            (cls,),
-            {
-                "__qualname__": f"{orig_name}_{slug}",
-                "__module__": cls.__module__,
-            },
-        )
-        # Patch Settings after class creation — Pydantic won't re-inspect.
+        ns = {
+            "__qualname__": f"{orig_name}_{slug}",
+            "__module__": cls.__module__,
+            "__getattr__": _safe_getattr,
+        }
+        sub = type(orig_name, (cls,), ns)
         sub.Settings = type("Settings", (), {"name": cls.Settings.name})
         subclasses.append(sub)
     return subclasses
 
 
 async def ensure_tenant_models(slug: str) -> SimpleNamespace:
-    """Return a namespace of Beanie Document classes bound to ``tenant_<slug>``.
-
-    The bundle is created and its documents registered with Beanie on first
-    use, then cached.  Each tenant gets distinct document subclasses so that
-    multiple tenants coexist without init_beanie clobbering DB bindings.
-    """
+    """Return a namespace of Beanie Document classes bound to ``tenant_<slug>``."""
     cached = _tenant_bundles.get(slug)
     if cached is not None:
         return cached
@@ -114,6 +119,9 @@ async def ensure_tenant_models(slug: str) -> SimpleNamespace:
         db = tenant_db(slug)
         tenant_docs = _make_tenant_subclasses(slug, list(TENANT_DOCUMENTS))
         await init_beanie(database=db, document_models=tenant_docs)
+        from app.sqlbridge import register_model
+        for doc in tenant_docs:
+            register_model(doc)
         bundle = SimpleNamespace(**{cls.__name__: cls for cls in tenant_docs})
         _tenant_bundles[slug] = bundle
         return bundle
@@ -143,6 +151,7 @@ class Session:
 
     def __init__(self, models: SimpleNamespace):
         self._models = models
+        self.models = models  # Public accessor for tenant-bound Beanie classes
         self._new: list = []
 
     async def __aenter__(self) -> Session:
@@ -171,13 +180,34 @@ class Session:
     def rollback(self) -> None:
         self._new.clear()
 
+    async def refresh(self, obj: Any) -> None:
+        """Re-fetch an object from the database."""
+        if hasattr(obj, 'id') and hasattr(obj, '__class__') and hasattr(obj.__class__, 'get'):
+            refreshed = await obj.__class__.get(obj.id)
+            if refreshed is not None:
+                for key in list(vars(refreshed).keys()):
+                    if not key.startswith('_'):
+                        setattr(obj, key, getattr(refreshed, key))
+
     async def get(self, model: type, pk: Any):
         return await model.get(pk)
 
     async def execute(self, stmt):
+        # The app.sqlbridge builders are the supported path: real SQLAlchemy
+        # cannot even construct select(Model) for a Beanie document class, so
+        # anything that reaches here built by sqlalchemy is legacy.
+        from app.sqlbridge import Delete as BridgeDelete, Select as BridgeSelect, \
+            Update as BridgeUpdate
+
+        if isinstance(stmt, BridgeSelect):
+            return await self._exec_bridge_select(stmt)
+        if isinstance(stmt, BridgeDelete):
+            return await self._exec_bridge_delete(stmt)
+        if isinstance(stmt, BridgeUpdate):
+            return await self._exec_bridge_update(stmt)
+
         from sqlalchemy.sql.selectable import Select
         from sqlalchemy.sql.dml import Delete, Update
-        from sqlalchemy import func as sa_func
 
         if isinstance(stmt, Delete):
             return await self._exec_delete(stmt)
@@ -186,6 +216,65 @@ class Session:
         if isinstance(stmt, Select):
             return await self._exec_select(stmt)
         raise TypeError(f"Unsupported statement type: {type(stmt)}")
+
+    async def _exec_bridge_select(self, stmt):
+        from app.sqlbridge import normalize_conditions, owner_of
+
+        model = stmt.entity or getattr(stmt, "_from_model", None)
+        if model is None and stmt.columns:
+            # Column-only select: the ExpressionField instance knows its class.
+            model = owner_of(stmt.columns[0])
+        if stmt.is_count:
+            target = stmt._from_model or stmt.entity
+            if target is None:
+                raise TypeError("count() needs select_from(Model) or an entity")
+            filters = normalize_conditions(stmt._where)
+            total = await (target.find(*filters).count() if filters
+                           else target.find().count())
+            return _ScalarResult(total)
+
+        if model is None:
+            raise TypeError("select() needs a document class")
+
+        query = model.find(*normalize_conditions(stmt._where))
+        if stmt._sort:
+            query = query.sort(
+                *[("_id" if s.field == "id" else s.field, s.direction)
+                  for s in stmt._sort])
+        if stmt._limit is not None:
+            query = query.limit(stmt._limit)
+        if stmt._offset is not None:
+            query = query.skip(stmt._offset)
+        docs = await query.to_list()
+
+        if not stmt.columns:
+            return _Result(docs)
+        names = [str(c) for c in stmt.columns]
+        rows = [_Row(names, tuple(getattr(d, n, None) for n in names))
+                for d in docs]
+        return _Result(rows, unwrap_single=len(names) == 1)
+
+    async def _exec_bridge_delete(self, stmt):
+        from app.sqlbridge import normalize_conditions
+
+        filters = normalize_conditions(stmt._where)
+        if filters:
+            await stmt.model.find(*filters).delete()
+        else:
+            await stmt.model.find_all().delete()
+        return None
+
+    async def _exec_bridge_update(self, stmt):
+        from app.sqlbridge import normalize_conditions
+
+        filters = normalize_conditions(stmt._where)
+        docs = await stmt.model.find(*filters).to_list() if filters \
+            else await stmt.model.find_all().to_list()
+        for doc in docs:
+            for k, v in stmt.values_map.items():
+                setattr(doc, "_id" if k == "id" else k, v)
+            await doc.save()
+        return len(docs)
 
     async def _exec_delete(self, stmt) -> None:
         table = stmt.table
@@ -219,13 +308,17 @@ class Session:
         if select_cols and isinstance(select_cols[0], sa_func.Function):
             model = self._resolve_model_from_select(stmt)
             if model:
-                count = await model.find().count()
+                filter_args = self._extract_where(stmt.whereclause)
+                if filter_args:
+                    count = await model.find(*filter_args).count()
+                else:
+                    count = await model.find().count()
                 return _ScalarResult(count)
 
         if select_cols:
             first = select_cols[0]
             if hasattr(first, 'class_'):
-                model = first.class_
+                model = self._resolve(first.class_) or first.class_
                 result = await self._find_with_clauses(model, stmt)
                 return _Result(result)
             if hasattr(first, 'table'):
@@ -252,6 +345,11 @@ class Session:
                 return desc['entity']
         if hasattr(stmt, 'froms') and stmt.froms:
             for fc in stmt.froms:
+                # Direct Beanie Document class
+                if hasattr(fc, 'Settings') and hasattr(fc.Settings, 'name'):
+                    m = self._resolve(fc)
+                    if m:
+                        return m
                 if hasattr(fc, 'name'):
                     m = self._resolve(fc)
                     if m:
@@ -292,6 +390,22 @@ class Session:
         return await query.to_list()
 
     def _resolve(self, table_or_model):
+        # Direct Beanie Document class passed (e.g. select_from(Attempt))
+        if hasattr(table_or_model, 'Settings') and hasattr(table_or_model.Settings, 'name'):
+            ns = self._models
+            for attr in dir(ns):
+                obj = getattr(ns, attr)
+                if obj is table_or_model:
+                    return obj
+            # Fall back to matching by Settings.name
+            table_name = table_or_model.Settings.name
+            for attr in dir(ns):
+                obj = getattr(ns, attr)
+                if hasattr(obj, 'Settings') and hasattr(obj.Settings, 'name'):
+                    if obj.Settings.name == table_name:
+                        return obj
+            return None
+
         if hasattr(table_or_model, 'name'):
             table_name = table_or_model.name
         elif hasattr(table_or_model, '__tablename__'):
@@ -339,9 +453,11 @@ class Session:
         col_name = getattr(left, 'name', None) or getattr(left, 'key', None)
         if col_name is None:
             return None
+        # Beanie stores the primary key as '_id', not 'id'
+        if col_name == 'id':
+            col_name = '_id'
         value = right.value if hasattr(right, 'value') else right
 
-        from sqlalchemy import operators as sa_ops
         from beanie.operators import Eq, Ne, Gt, Gte, Lt, Lte, In, NotIn, RegEx
 
         op_map = {sa_ops.eq: Eq, sa_ops.ne: Ne, sa_ops.gt: Gt, sa_ops.ge: Gte,
@@ -362,10 +478,31 @@ class Session:
         return None
 
 
+class _Row(tuple):
+    """A projected row: unpacks like a tuple, reads like an object."""
+
+    def __new__(cls, names: list[str], values: tuple):
+        self = super().__new__(cls, values)
+        object.__setattr__(self, "_names", names)
+        return self
+
+    def __getattr__(self, name: str):
+        try:
+            return self[self._names.index(name)]
+        except (ValueError, IndexError):
+            raise AttributeError(name)
+
+
 class _Result:
-    def __init__(self, data: list):
+    def __init__(self, data: list, unwrap_single: bool = False):
         self._data = data
+        # True for projected column selects, where each row is a tuple and
+        # scalars() must hand back the first element of each.
+        self._unwrap = unwrap_single
     def scalars(self):
+        if self._unwrap:
+            return _Result([r[0] if isinstance(r, tuple) else r
+                            for r in self._data])
         return self
     def all(self):
         return self._data
@@ -381,6 +518,19 @@ class _Result:
         return self._data[0]
     def one_or_none(self):
         return None if not self._data else self.one()
+    def scalar_one(self):
+        row = self.one()
+        return row[0] if isinstance(row, tuple) else row
+    def scalar_one_or_none(self):
+        row = self.first()
+        if row is None:
+            return None
+        return row[0] if isinstance(row, tuple) else row
+    def scalar(self):
+        row = self.first()
+        if row is None:
+            return None
+        return row[0] if isinstance(row, tuple) else row
     def __iter__(self):
         return iter(self._data)
     def __len__(self):
@@ -401,6 +551,10 @@ class _ScalarResult:
     def one(self):
         return self._value
     def scalar(self):
+        return self._value
+    def scalar_one(self):
+        return self._value
+    def scalar_one_or_none(self):
         return self._value
     def __iter__(self):
         return iter([self._value])

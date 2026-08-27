@@ -9,7 +9,7 @@ import { PLATFORM_ROLES } from "@/lib/roles";
 import { Badge, ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
 import {
   api, ApiError, assetUrl, operatorApi, EMPTY_TENANT_PROFILE,
-  type PlanRow, type TenantProfile, type TenantRow,
+  type TenantProfile, type TenantRow, type UserRow,
 } from "@/lib/api";
 import { useData } from "@/lib/useData";
 
@@ -32,15 +32,15 @@ const STATUS_TONE: Record<string, string> = {
 };
 
 type Draft = {
-  name: string; slug: string; tenant_type: string; status: string;
-  seat_limit: number; plan_id: string; region: string;
+  name: string; slug: string; domain: string; tenant_type: string; status: string;
+  seat_limit: number; region: string;
   admin_email: string; admin_name: string;
 };
 
 function newDraft(defaultType: string): Draft {
   return {
-    name: "", slug: "", tenant_type: defaultType, status: "trial",
-    seat_limit: 100, plan_id: "", region: "", admin_email: "", admin_name: "",
+    name: "", slug: "", domain: "", tenant_type: defaultType, status: "trial",
+    seat_limit: 100, region: "", admin_email: "", admin_name: "",
   };
 }
 
@@ -249,7 +249,6 @@ function ProfileFields({ value, onChange }: {
 
 function Tenants() {
   const tenants = useData(() => api.platformTenants());
-  const plans = useData(() => api.platformPlans());
   const types = useData(() => api.tenantTypes());
 
   const [creating, setCreating] = useState(false);
@@ -263,7 +262,6 @@ function Tenants() {
   const [problem, setProblem] = useState("");
   const [note, setNote] = useState("");
 
-  const planList = useMemo(() => plans.data ?? [], [plans.data]);
   const typeList = useMemo(() => types.data ?? [], [types.data]);
 
   async function run(what: string, fn: () => Promise<unknown>, ok = "") {
@@ -285,12 +283,24 @@ function Tenants() {
     const body = {
       ...draft,
       slug: draft.slug || slugify(draft.name),
-      plan_id: draft.plan_id || null,
+
       region: draft.region || undefined,
       profile: newProfile,
     };
-    await run("create", () => operatorApi.createTenant(body),
-              "Tenant created. Its admin must set a password on first sign-in.");
+    try {
+      setBusy("create");
+      setProblem("");
+      setNote("");
+      const result = await operatorApi.createTenant(body) as { id: string; slug: string; name: string; temp_password?: string; admin_email?: string };
+      tenants.reload();
+      const pw = result.temp_password || "(check server logs)";
+      const email = result.admin_email || draft.admin_email;
+      setNote(`Institution created. Admin credentials: Email: ${email} | Password: ${pw} | Must change password on first login.`);
+    } catch (err) {
+      setProblem(err instanceof ApiError ? err.detail : "That did not work");
+    } finally {
+      setBusy("");
+    }
     setCreating(false);
     setShowMore(false);
     setDraft(newDraft(typeList[0]?.key ?? "engineering_college"));
@@ -336,6 +346,11 @@ function Tenants() {
                      onChange={(e) => setDraft({ ...draft, slug: slugify(e.target.value) })}
                      placeholder={draft.name ? slugify(draft.name) : "gayatri_tech"} />
             </Field>
+            <Field label="Email domain" hint="Students with this email domain can self-register (e.g. gayatri.ac.in)">
+              <input className="ds-input w-full" value={draft.domain}
+                     onChange={(e) => setDraft({ ...draft, domain: e.target.value })}
+                     placeholder="e.g. gayatri.ac.in" />
+            </Field>
             <Field label="Tenant type">
               <select className="ds-input w-full" value={draft.tenant_type}
                       onChange={(e) => setDraft({ ...draft, tenant_type: e.target.value })}>
@@ -348,15 +363,7 @@ function Tenants() {
                 {STATUSES.map((v) => <option key={v} value={v}>{v}</option>)}
               </select>
             </Field>
-            <Field label="Plan">
-              <select className="ds-input w-full" value={draft.plan_id}
-                      onChange={(e) => setDraft({ ...draft, plan_id: e.target.value })}>
-                <option value="">No plan yet</option>
-                {planList.filter((p) => p.active).map((p) => (
-                  <option key={p.id} value={p.id}>{p.name}</option>
-                ))}
-              </select>
-            </Field>
+
             <Field label="Seat limit">
               <input className="ds-input w-full" type="number" min={1}
                      value={draft.seat_limit}
@@ -407,7 +414,7 @@ function Tenants() {
               <TenantCard
                 key={t.id}
                 tenant={t}
-                plans={planList}
+
                 types={typeList}
                 open={editing === t.id}
                 busy={busy}
@@ -421,9 +428,8 @@ function Tenants() {
   );
 }
 
-function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
+function TenantCard({ tenant, types, open, busy, onToggle, onRun }: {
   tenant: TenantRow;
-  plans: PlanRow[];
   types: { key: string; label: string }[];
   open: boolean;
   busy: string;
@@ -432,10 +438,10 @@ function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
 }) {
   const [form, setForm] = useState({
     name: tenant.name,
+    domain: tenant.domain,
     tenant_type: tenant.tenant_type,
     status: tenant.status,
     seat_limit: tenant.seat_limit,
-    plan_id: tenant.plan_id ?? "",
     region: tenant.region,
     display_name: tenant.branding.display_name,
     primary_color: tenant.branding.primary_color,
@@ -444,7 +450,21 @@ function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
   const [logoUrl, setLogoUrl] = useState("");
   const [profile, setProfile] = useState<TenantProfile>(tenant.profile);
   const [showDetails, setShowDetails] = useState(false);
+  const [showStudents, setShowStudents] = useState(false);
+  const [students, setStudents] = useState<{id:string;full_name:string;email:string;role:string;active:boolean}[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  async function loadStudents() {
+    if (showStudents) { setShowStudents(false); return; }
+    setLoadingStudents(true);
+    try {
+      const data = await api.platformTenantUsers(tenant.id);
+      setStudents(data as UserRow[]);
+    } catch { /* silent */ }
+    setLoadingStudents(false);
+    setShowStudents(true);
+  }
 
   const overSeats = tenant.seats_used > tenant.seat_limit;
 
@@ -479,8 +499,8 @@ function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
           <span style={{ color: overSeats ? "var(--rag-red)" : undefined }}>
             {tenant.seats_used}/{tenant.seat_limit} seats
           </span>
-          {tenant.plan_name && <> · {tenant.plan_name}</>}
-          {tenant.subscription_status && <> · {tenant.subscription_status}</>}
+          {tenant.domain && <> · @{tenant.domain}</>}
+
         </div>
       </div>
 
@@ -494,6 +514,11 @@ function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
               <Field label="Name">
                 <input className="ds-input w-full" value={form.name}
                        onChange={(e) => setForm({ ...form, name: e.target.value })} />
+              </Field>
+              <Field label="Email domain" hint="Students with this domain can self-register">
+                <input className="ds-input w-full" value={form.domain}
+                       onChange={(e) => setForm({ ...form, domain: e.target.value })}
+                       placeholder="e.g. gayatri.ac.in" />
               </Field>
               <Field label="Tenant type">
                 <select className="ds-input w-full" value={form.tenant_type}
@@ -516,18 +541,6 @@ function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
                 <input className="ds-input w-full" type="number" min={1}
                        value={form.seat_limit}
                        onChange={(e) => setForm({ ...form, seat_limit: Number(e.target.value) })} />
-              </Field>
-              <Field label="Plan">
-                <select className="ds-input w-full" value={form.plan_id}
-                        onChange={(e) => setForm({ ...form, plan_id: e.target.value })}>
-                  <option value="">No plan</option>
-                  {plans.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} · {p.currency} {p.billing_model === "flat"
-                        ? p.price_flat : `${p.price_per_seat}/seat`}
-                    </option>
-                  ))}
-                </select>
               </Field>
             </div>
           </div>
@@ -605,6 +618,32 @@ function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
           </div>
 
           <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+            <button type="button" className="btn btn-ghost btn-sm ds-focus w-full text-left"
+                    onClick={loadStudents}>
+              {showStudents ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              Students & users ({tenant.seats_used} active)
+            </button>
+            {showStudents && (
+              <div className="mt-2 space-y-1">
+                {loadingStudents ? <div className="text-[11px] text-muted">Loading...</div> : (
+                  students.length === 0 ? <div className="text-[11px] text-muted">No users yet</div> : (
+                    students.map((u) => (
+                      <div key={u.id} className="flex items-center gap-2 text-[11px] py-1 px-2 rounded" style={{ background: "var(--surface)" }}>
+                        <span className="font-medium flex-1 truncate">{u.full_name}</span>
+                        <span className="text-muted truncate">{u.email}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                          background: u.role === "tenant_admin" ? "var(--accent)" : u.role === "student" ? "var(--primary)" : "var(--muted)",
+                          color: "white"
+                        }}>{u.role}</span>
+                      </div>
+                    ))
+                  )
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
             <button type="button" className="btn btn-ghost btn-sm ds-focus"
                     onClick={() => setShowDetails(!showDetails)}>
               {showDetails ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -620,7 +659,7 @@ function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
                       tenant_type: form.tenant_type,
                       status: form.status,
                       seat_limit: form.seat_limit,
-                      plan_id: form.plan_id || null,
+
                       region: form.region,
                       branding: {
                         display_name: form.display_name,
@@ -633,11 +672,7 @@ function TenantCard({ tenant, plans, types, open, busy, onToggle, onRun }: {
                     }), "Saved.")}>
               {busy === "save" ? "Saving…" : "Save changes"}
             </button>
-            <button className="btn btn-ghost btn-sm ds-focus" disabled={busy !== ""}
-                    onClick={() => void onRun("invoice",
-                      () => operatorApi.issueInvoice(tenant.id), "Invoice issued.")}>
-              Issue invoice
-            </button>
+
             {/* super_admin only — the server enforces it; other platform
                 roles see the 403's own words instead of a hidden button
                 they would not know exists. Audit-logged server-side. */}

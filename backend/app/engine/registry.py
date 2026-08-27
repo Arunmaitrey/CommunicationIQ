@@ -22,8 +22,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, TypeVar
 
-from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.sqlbridge import or_, select
+from app.db import Session as AsyncSession
 
 from app.db import platform_sessionmaker
 from app.engine.contracts import CONTRACT_FOR, Capability, ProviderMeta

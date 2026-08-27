@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.db import ensure_tenant_models, ensure_platform_models, tenant_db_name
+from app.db import Session, ensure_tenant_models, ensure_platform_models, tenant_db_name
 from app.models.platform import Tenant
 from app.security import TokenPrincipal, decode_token
 
@@ -45,9 +45,22 @@ async def tenant_models(principal: Principal) -> AsyncIterator[SimpleNamespace]:
 
 TenantModels = Annotated[SimpleNamespace, Depends(tenant_models)]
 
-# TenantSession is an alias for TenantModels — the same Beanie bundle
-# exposed as a session-compatible dependency for routers that need it.
-TenantSession = TenantModels
+
+async def _tenant_session(principal: Principal) -> AsyncIterator[Session]:
+    """A Session wrapper around the Beanie bundle for routers that need
+    session.execute(select(...)) compatibility."""
+    if principal.scope != "tenant" or not principal.tenant_slug:
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "This endpoint requires an institution session",
+        )
+    models = await ensure_tenant_models(principal.tenant_slug)
+    yield Session(models)
+
+
+# TenantSession is a Session-wrapped dependency that supports
+# session.execute(select(...)) for SQLAlchemy-style queries.
+TenantSession = Annotated[Session, Depends(_tenant_session)]
 
 
 async def _platform_session() -> SimpleNamespace:
