@@ -19,33 +19,11 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
                      Request, Response as HttpResponse, UploadFile, status)
-from app.sqlbridge import func, select
-
 from app.config import settings
-from app.db import ensure_tenant_models
+from app.invitations import CANDIDATE_ROLE
+from app.db import ensure_tenant_models, func, select
 from app import formats
-from app.deps import PlatformSession, Principal, TenantModels, TenantSession, require_roles
-from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
-from app import deadline as app_deadline
-from app import reconstruction as app_reconstruction
-import app.models.tenant as _tm
-
-
-def _model(session: TenantSession, name: str):
-    """Resolve a tenant-bound Beanie model from the session's namespace.
-    Falls back to the base class from app.models.tenant."""
-    models = getattr(session, 'models', None)
-    if models is not None:
-        return getattr(models, name, getattr(_tm, name))
-    return getattr(_tm, name)
-
-
-async def _get_profile_sections(session: TenantSession, profile_id: str):
-    """Get all sections for a profile, ordered by position."""
-    ProfileSection = _model(session, 'ProfileSection')
-    return await ProfileSection.find(ProfileSection.profile_id == profile_id).sort(ProfileSection.position).to_list()
-
-# ─── module-level imports ───
+from app.deps import Principal, PlatformSession, TenantSession, require_roles
 from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
 from app import deadline as app_deadline
 from app import reconstruction as app_reconstruction
@@ -72,9 +50,19 @@ from app.schemas import (AnswerSubmission, AttemptResult, CandidateResume,
                          StartAttemptRequest, WordTimingOut)
 from app.storage import get_storage, recording_key
 
-# Students only.
+# Students and invited candidates, and nobody else.
+#
+# A candidate is admitted here because this is the only thing they came to do
+# -- sit one assessment -- and every other student surface (`/student/home`,
+# `/student/profiles`, practice, drills, progress) still names `student`
+# alone, so the widening is to this router and no further.
+#
+# What stops a candidate reaching somebody else's attempt is not this guard
+# but `_own_attempt`, which has always compared `attempt.user_id` against the
+# caller and 404s otherwise. The role check decides which doors exist; that
+# check decides whose rooms are behind them.
 router = APIRouter(prefix="/student/attempts", tags=["attempt"],
-                   dependencies=[Depends(require_roles("student"))])
+                   dependencies=[Depends(require_roles("student", "candidate"))])
 
 # Task types whose text the student is meant to read. Everything else is
 # heard, and its text must not reach the client before the prompt is served.
@@ -192,18 +180,11 @@ async def _own_attempt(session: TenantSession, principal: Principal,
 
 
 async def _recording_consent(session: TenantSession, user_id: str) -> ConsentRecord | None:
-    # Use the tenant-bound ConsentRecord from the session's models namespace,
-    # not the base class (which is not bound to any Beanie database).
-    CR = getattr(session, '_models', None)
-    if CR is not None:
-        CR = getattr(CR, 'ConsentRecord', ConsentRecord)
-    else:
-        CR = ConsentRecord
-    results = await CR.find(
-        CR.user_id == user_id,
-        CR.scope == "recording",
-    ).sort(("at", -1)).limit(1).to_list()
-    return results[0] if results else None
+    return (await session.execute(
+        select(ConsentRecord)
+        .where(ConsentRecord.user_id == user_id, ConsentRecord.scope == "recording")
+        .order_by(ConsentRecord.at.desc())
+    )).scalars().first()
 
 
 @router.post("", response_model=RunnerPayload, status_code=status.HTTP_201_CREATED)
@@ -223,27 +204,55 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
             "Recording consent is required before an attempt can start",
         )
 
-    SP = _model(session, 'SimulationProfile')
-    AttemptM = _model(session, 'Attempt')
-    InvitationM = _model(session, 'Invitation')
-
-    profile = await SP.get(body.profile_id)
+    profile = (await session.execute(
+        select(SimulationProfile)
+        .where(SimulationProfile.id == body.profile_id)
+    )).scalars().first()
     if profile is None or profile.status != "published":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Simulation not available")
 
+    # SimulationProfile carries no relationship to its sections — they are a
+    # separate collection, addressed by profile_id, and were never anything
+    # SQLAlchemy's selectinload could actually eager-load once this became a
+    # Beanie document; fetched explicitly instead.
+    sections = (await session.execute(
+        select(ProfileSection).where(ProfileSection.profile_id == profile.id)
+    )).scalars().all()
+
+    # A practice session may carry the assessment attempt that prescribed it.
+    # Validated here so the loop can trust it later: it must be the caller's
+    # own scored attempt. Anything else is dropped, not stored.
     source_attempt_id = None
     if body.source_attempt_id:
-        source = await session.get(AttemptM, body.source_attempt_id)
+        source = await session.get(Attempt, body.source_attempt_id)
         if (source is not None and source.user_id == principal.user_id
                 and source.status == "scored"):
             source_attempt_id = source.id
 
-    prior_docs = await AttemptM.find(
-        AttemptM.user_id == principal.user_id,
-        AttemptM.profile_id == profile.id).to_list()
-    prior = len(prior_docs)
+    prior = (await session.execute(
+        select(func.count()).select_from(Attempt)
+        .where(Attempt.user_id == principal.user_id, Attempt.profile_id == profile.id)
+    )).scalar_one()
 
-    attempt = AttemptM(
+    # An invitation buys one sitting.
+    #
+    # A student may attempt a simulation as often as they like -- that is what
+    # practice is. An invited candidate is a different arrangement: an
+    # employer sent one link for one assessment, and the result is a hiring
+    # decision. Nothing enforced that. The link was correctly single-use, and
+    # the session it minted could POST a fresh attempt at the same profile as
+    # often as the candidate wanted, so anybody who did not like their score
+    # could sit it again until they did.
+    #
+    # Checked by role rather than by counting invitations, so it holds for
+    # every candidate however they were admitted.
+    if principal.role == CANDIDATE_ROLE and prior:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "You have already sat this assessment. An invitation is for one "
+            "sitting -- ask whoever invited you if you need another.")
+
+    attempt = Attempt(
         source_attempt_id=source_attempt_id,
         user_id=principal.user_id,
         profile_id=profile.id,
@@ -255,6 +264,21 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
     session.add(attempt)
     await session.flush()
 
+    # Tie the invitation to the attempt it produced.
+    #
+    # `Invitation.attempt_id` has existed since Phase 9, described in the model
+    # as "the attempt that followed", and nothing ever wrote it. An operator
+    # asking "which sitting did this link produce" had to infer it from the
+    # candidate id and a timestamp.
+    if principal.role == CANDIDATE_ROLE:
+        invitation = (await session.execute(
+            select(Invitation).where(
+                Invitation.candidate_id == principal.user_id,
+                Invitation.profile_id == profile.id)
+        )).scalars().first()
+        if invitation is not None and not invitation.attempt_id:
+            invitation.attempt_id = attempt.id
+
     position = 1
 
     # An unscored item first, where the assessment asks for one.
@@ -264,10 +288,8 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
     # whether the microphone works at all. Scoring that measures the software's
     # unfamiliarity rather than their English. One item, from the first
     # section, marked so nothing it produces counts.
-    if getattr(profile, "practice_item", False):
-        sections = await _get_profile_sections(session, profile.id)
-        if sections:
-            first = min(sections, key=lambda s: s.position)
+    if getattr(profile, "practice_item", False) and sections:
+        first = min(sections, key=lambda s: s.position)
         kind, key = app_sections.source_of(first.task_type)
         if kind == "task":
             for item in await _pick_items(session, first, principal.user_id,
@@ -278,7 +300,7 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
                 position += 1
                 break
 
-    for section in sorted((await _get_profile_sections(session, profile.id)), key=lambda s: s.position):
+    for section in sorted(sections, key=lambda s: s.position):
         # Where the items come from is a property of the task type, not of
         # how it is answered -- Dictation is typed and draws on the spoken
         # sentence bank. The Response row is the same shape whichever bank it
@@ -349,12 +371,13 @@ async def _pick_writing_prompts(session: TenantSession,
     which section, so the rule lives with the other task-type properties
     rather than as a condition here.
     """
-    WritingPrompt = _model(session, 'WritingPrompt')
+    from app.models.tenant import WritingPrompt
 
     allowed = app_sections.prompt_kinds_for(kind)
-    pool = await WritingPrompt.find(
-        WritingPrompt.status == "published",
-        WritingPrompt.kind.in_(sorted(allowed))).to_list()
+    pool = list((await session.execute(
+        select(WritingPrompt).where(WritingPrompt.status == "published",
+                                    WritingPrompt.kind.in_(sorted(allowed)))
+    )).scalars().all())
     pool = app_selection.eligible(pool, _pool_of(section), "writing_prompt")
     if not pool:
         return []
@@ -373,7 +396,7 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
 
     Randomised across passages so a retake is not the identical test.
     """
-    QuizItem = _model(session, 'QuizItem')
+    from app.models.tenant import QuizItem
 
     # The caller normally passes the category; falling back to the central
     # map rather than a local copy is what stopped the two drifting the last
@@ -384,9 +407,10 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
     if not category:
         return []
 
-    pool = await QuizItem.find(
-        QuizItem.category == category,
-        QuizItem.status == "published").to_list()
+    pool = list((await session.execute(
+        select(QuizItem).where(QuizItem.category == category,
+                               QuizItem.status == "published")
+    )).scalars().all())
     if not pool:
         return []
 
@@ -450,10 +474,10 @@ async def _pick_items(session: TenantSession, section: ProfileSection,
     # Usually the section's own task type; Dictation borrows the Repeat
     # Sentence bank, so the caller can say which.
     wanted = task_type or section.task_type
-    TaskItemM = _model(session, 'TaskItem')
-    pool = await TaskItemM.find(
-        TaskItemM.task_type == wanted,
-        TaskItemM.status == "published").to_list()
+    pool = list((await session.execute(
+        select(TaskItem).where(TaskItem.task_type == wanted,
+                               TaskItem.status == "published")
+    )).scalars().all())
 
     # Narrow before choosing, never after. Choosing adaptively and then
     # filtering would discard exactly the items the ability estimate picked.
@@ -498,17 +522,15 @@ async def _pick_items(session: TenantSession, section: ProfileSection,
 
 async def _ability_of(session: TenantSession, user_id: str) -> float:
     """A working ability estimate from what this student has already scored."""
-    AttemptM = _model(session, 'Attempt')
-    ScoreRecordM = _model(session, 'ScoreRecord')
-    attempt_docs = await AttemptM.find(AttemptM.user_id == user_id).to_list()
-    attempt_ids = [a.id for a in attempt_docs] or [""]
-    score_docs = await ScoreRecordM.find(
-        ScoreRecordM.attempt_id.in_(attempt_ids),
-        ScoreRecordM.dimension == "overall",
-        ScoreRecordM.response_id == None,  # noqa: E711
-        ScoreRecordM.is_shadow == False,  # noqa: E712
-    ).sort(("created_at", -1)).limit(5).to_list()
-    scores = [s.score for s in score_docs]
+    scores = list((await session.execute(
+        select(ScoreRecord.score)
+        .join(Attempt, Attempt.id == ScoreRecord.attempt_id)
+        .where(Attempt.user_id == user_id,
+               ScoreRecord.dimension == "overall",
+               ScoreRecord.response_id.is_(None),
+               ScoreRecord.is_shadow.is_(False))
+        .order_by(ScoreRecord.created_at.desc()).limit(5)
+    )).scalars().all())
     return irt.ability_from_scores(scores)
 
 
@@ -548,35 +570,33 @@ async def resume(principal: Principal,
     An enrolled student asking where they left off is not an error; the answer
     is just that this is not how they get there.
     """
-    InvitationM = _model(session, 'Invitation')
-    AttemptM = _model(session, 'Attempt')
-    SP = _model(session, 'SimulationProfile')
-
-    invitations = await InvitationM.find(
-        InvitationM.candidate_id == principal.user_id
-    ).sort(("redeemed_at", -1)).limit(1).to_list()
-    invitation = invitations[0] if invitations else None
+    invitation = (await session.execute(
+        select(Invitation)
+        .where(Invitation.candidate_id == principal.user_id)
+        .order_by(Invitation.redeemed_at.desc())
+    )).scalars().first()
 
     if invitation is None:
         return CandidateResume()
 
-    profile = await session.get(SP, invitation.profile_id)
+    profile = await session.get(SimulationProfile, invitation.profile_id)
 
-    attempts = await AttemptM.find(
-        AttemptM.user_id == principal.user_id,
-        Attempt.profile_id == invitation.profile_id
-    ).sort(("attempt_number", -1)).limit(1).to_list()
-    attempt = attempts[0] if attempts else None
+    # The attempt is looked up rather than read off the invitation, because
+    # the invitation records the *first* one and the source of truth for
+    # "where am I now" is the attempt table.
+    attempt = (await session.execute(
+        select(Attempt)
+        .where(Attempt.user_id == principal.user_id,
+               Attempt.profile_id == invitation.profile_id)
+        .order_by(Attempt.attempt_number.desc())
+    )).scalars().first()
 
-    CR = getattr(session, '_models', None)
-    if CR is not None:
-        CR = getattr(CR, 'ConsentRecord', ConsentRecord)
-    else:
-        CR = ConsentRecord
-    consented = await CR.find_one(
-        CR.user_id == principal.user_id,
-        CR.scope == "recording",
-        CR.granted == True)  # noqa: E712
+    consented = (await session.execute(
+        select(ConsentRecord.id).where(
+            ConsentRecord.user_id == principal.user_id,
+            ConsentRecord.scope == "recording",
+            ConsentRecord.granted.is_(True))
+    )).scalars().first()
 
     return CandidateResume(
         profile_id=invitation.profile_id,
@@ -594,8 +614,9 @@ async def resume(principal: Principal,
 async def runner(attempt_id: str, principal: Principal,
                  session: TenantSession) -> RunnerPayload:
     attempt = await _own_attempt(session, principal, attempt_id)
-    SP = _model(session, 'SimulationProfile')
-    profile = await SP.get(attempt.profile_id)
+    profile = (await session.execute(
+        select(SimulationProfile).where(SimulationProfile.id == attempt.profile_id)
+    )).scalars().first()
     if profile is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Simulation not found")
     return await _runner_payload(session, attempt, profile)
@@ -609,27 +630,28 @@ async def _select_mode_sources(session: TenantSession, responses):
     a writing section could not even be started, because the column it was
     borrowing has a foreign key pointing somewhere else.
     """
-    QuizItem = _model(session, 'QuizItem')
-    WritingPrompt = _model(session, 'WritingPrompt')
-    ListeningPassage = _model(session, 'ListeningPassage')
-    ReadingPassage = _model(session, 'ReadingPassage')
+    from app.models.tenant import (ListeningPassage, QuizItem, ReadingPassage,
+                                   WritingPrompt)
 
     quiz_ids = [r.quiz_item_id for r in responses if r.quiz_item_id]
     prompt_ids = [r.prompt_id for r in responses if r.prompt_id]
     if not quiz_ids and not prompt_ids:
         return {}, {}, {}
 
-    quiz = {q.id: q for q in await QuizItem.find(
-        QuizItem.id.in_(quiz_ids or [""])).to_list()}
+    quiz = {q.id: q for q in (await session.execute(
+        select(QuizItem).where(QuizItem.id.in_(quiz_ids or [""]))
+    )).scalars().all()}
 
-    prompts = {w.id: w for w in await WritingPrompt.find(
-        WritingPrompt.id.in_(prompt_ids or [""])).to_list()}
+    prompts = {w.id: w for w in (await session.execute(
+        select(WritingPrompt).where(WritingPrompt.id.in_(prompt_ids or [""]))
+    )).scalars().all()}
 
     passage_ids = [q.passage_id for q in quiz.values() if q.passage_id]
     passages: dict[str, object] = {}
     for model in (ListeningPassage, ReadingPassage):
-        for row in await model.find(
-            model.id.in_(passage_ids or [""])).to_list():
+        for row in (await session.execute(
+            select(model).where(model.id.in_(passage_ids or [""]))
+        )).scalars().all():
             passages[row.id] = row
     return quiz, passages, prompts
 
@@ -741,21 +763,19 @@ def _select_item(response, section, question, passages) -> RunnerItem:
 
 async def _runner_payload(session: TenantSession, attempt: Attempt,
                           profile: SimulationProfile) -> RunnerPayload:
-    ResponseM = _model(session, 'Response')
-    TaskItemM = _model(session, 'TaskItem')
-    ResponseAudioM = _model(session, 'ResponseAudio')
-    FeatureRecordM = _model(session, 'FeatureRecord')
+    responses = list((await session.execute(
+        select(Response).where(Response.attempt_id == attempt.id)
+        .order_by(Response.position)
+    )).scalars().all())
 
-    response_docs = await ResponseM.find(
-        ResponseM.attempt_id == attempt.id).sort(("position", 1)).to_list()
-    responses = list(response_docs)
-
-    sections_list = await _get_profile_sections(session, profile.id)
-    sections = {s.id: s for s in sections_list}
+    profile_sections = (await session.execute(
+        select(ProfileSection).where(ProfileSection.profile_id == profile.id)
+    )).scalars().all()
+    sections = {s.id: s for s in profile_sections}
     item_ids = [r.item_id for r in responses if r.item_id]
-    item_docs = await TaskItemM.find(
-        TaskItemM.id.in_(item_ids or [""])).to_list()
-    items = {i.id: i for i in item_docs}
+    items = {i.id: i for i in (await session.execute(
+        select(TaskItem).where(TaskItem.id.in_(item_ids or [""]))
+    )).scalars().all()}
 
     quiz, passages, prompts = await _select_mode_sources(session, responses)
 
@@ -774,13 +794,13 @@ async def _runner_payload(session: TenantSession, attempt: Attempt,
         }
     # What the server already holds, so a reload resumes rather than restarts.
     response_ids = [r.id for r in responses] or [""]
-    _ra_docs = await ResponseAudioM.find(
-        ResponseAudioM.response_id.in_(response_ids),
-        ResponseAudioM.deleted_at == None).to_list()  # noqa: E711
-    with_audio = {r.response_id for r in _ra_docs}
-    _fr_docs = await FeatureRecordM.find(
-        FeatureRecordM.response_id.in_(response_ids)).to_list()
-    with_features = {f.response_id for f in _fr_docs}
+    with_audio = set((await session.execute(
+        select(ResponseAudio.response_id).where(
+            ResponseAudio.response_id.in_(response_ids),
+            ResponseAudio.deleted_at.is_(None)))).scalars().all())
+    with_features = set((await session.execute(
+        select(FeatureRecord.response_id).where(
+            FeatureRecord.response_id.in_(response_ids)))).scalars().all())
 
     def _answered(r: Response) -> bool:
         return bool(r.skipped or r.selected_index is not None
@@ -1567,24 +1587,21 @@ async def _run_game_hook(session, platform, principal, attempt, outcome) -> None
     try:
         config = await game.config_for(platform, principal.tenant_id)
 
-        previous = None
-        prior_docs = await Attempt.find(
-            Attempt.user_id == principal.user_id,
-            Attempt.profile_id == attempt.profile_id,
-            Attempt.id != attempt.id).to_list()
-        prior_attempt_ids = [a.id for a in prior_docs]
-        previous = None
-        if prior_attempt_ids:
-            prev_docs = await ScoreRecord.find(
-                ScoreRecord.attempt_id.in_(prior_attempt_ids),
-                ScoreRecord.dimension == "overall",
-                ScoreRecord.response_id == None,  # noqa: E711
-            ).sort(("score", -1)).limit(1).to_list()
-            previous = prev_docs[0].score if prev_docs else None
+        previous = (await session.execute(
+            select(ScoreRecord.score)
+            .join(Attempt, Attempt.id == ScoreRecord.attempt_id)
+            .where(Attempt.user_id == principal.user_id,
+                   Attempt.profile_id == attempt.profile_id,
+                   Attempt.id != attempt.id,
+                   ScoreRecord.dimension == "overall",
+                   ScoreRecord.response_id.is_(None))
+            .order_by(ScoreRecord.score.desc()).limit(1)
+        )).scalars().first()
 
-        section_docs = await ProfileSection.find(
-            ProfileSection.profile_id == attempt.profile_id).to_list()
-        sections = [s.task_type for s in section_docs]
+        sections = list((await session.execute(
+            select(ProfileSection.task_type)
+            .where(ProfileSection.profile_id == attempt.profile_id)
+        )).scalars().all())
 
         profile = await session.get(SimulationProfile, attempt.profile_id)
         full_simulation = bool(profile and not profile.is_baseline
@@ -2386,24 +2403,16 @@ async def _result(session: TenantSession, attempt: Attempt,
                                             candidate.profile_id))
                 linked = True
         if source is None:
-            # Two-step instead of a SQL join: eligible profiles first, then
-            # the newest scored attempt among them.
-            eligible_profiles = {p.id for p in (await session.execute(
-                select(SimulationProfile)
-                .where(SimulationProfile.style != "drill")
-            )).scalars().all()}
-            scored = list((await session.execute(
-                select(Attempt)
+            source = (await session.execute(
+                select(Attempt, SimulationProfile)
+                .join(SimulationProfile,
+                      SimulationProfile.id == Attempt.profile_id)
                 .where(Attempt.user_id == attempt.user_id,
                        Attempt.id != attempt.id,
-                       Attempt.status == "scored")
-                .order_by(Attempt.scored_at.desc())
-            )).scalars().all())
-            matched = next((a for a in scored
-                            if a.profile_id in eligible_profiles), None)
-            if matched is not None:
-                source = (matched, await session.get(SimulationProfile,
-                                                     matched.profile_id))
+                       Attempt.status == "scored",
+                       SimulationProfile.style != "drill")
+                .order_by(Attempt.scored_at.desc()).limit(1)
+            )).first()
 
         assessment_score = None
         assessment_profile_id = ""

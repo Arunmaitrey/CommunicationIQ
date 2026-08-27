@@ -46,28 +46,29 @@ async def tenant_models(principal: Principal) -> AsyncIterator[SimpleNamespace]:
 TenantModels = Annotated[SimpleNamespace, Depends(tenant_models)]
 
 
-async def _tenant_session(principal: Principal) -> AsyncIterator[Session]:
-    """A Session wrapper around the Beanie bundle for routers that need
-    session.execute(select(...)) compatibility."""
+async def tenant_session(principal: Principal) -> AsyncIterator[Session]:
+    """The same institution's document bundle, wrapped so routers written
+    against the SQLAlchemy async-session API (``session.execute(select(...))``,
+    ``session.get(Model, id)``) can use it unchanged. ``TenantModels`` above
+    is the same bundle for routers that call Beanie directly instead.
+    """
     if principal.scope != "tenant" or not principal.tenant_slug:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             "This endpoint requires an institution session",
         )
-    models = await ensure_tenant_models(principal.tenant_slug)
-    yield Session(models)
+    yield Session(await ensure_tenant_models(principal.tenant_slug))
 
 
-# TenantSession is a Session-wrapped dependency that supports
-# session.execute(select(...)) for SQLAlchemy-style queries.
-TenantSession = Annotated[Session, Depends(_tenant_session)]
+TenantSession = Annotated[Session, Depends(tenant_session)]
 
 
-async def _platform_session() -> SimpleNamespace:
-    return await ensure_platform_models()
+async def platform_session() -> AsyncIterator[Session]:
+    """The control-plane bundle, wrapped the same way as ``tenant_session``."""
+    yield Session(await ensure_platform_models())
 
 
-PlatformSession = Annotated[SimpleNamespace, Depends(_platform_session)]
+PlatformSession = Annotated[Session, Depends(platform_session)]
 
 
 async def tenant_models_for(tenant: Tenant) -> SimpleNamespace:

@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import logging
 
-from app.sqlbridge import select
+from app.db import select
 
 from app.engine.contracts.types import Capability, ProviderUnavailable
 from app.engine.pipeline import SCALE_MAX, SCALE_MIN, band_label
@@ -66,20 +66,12 @@ async def score_pending(tenant, providers, tenant_id: str | None,
     whether the candidate understood. ``_unscored_reasons`` in the attempts
     router notices the missing dimension and says so.
     """
-    # Join replaced with a section-type map: fetch the sections whose task
-    # type is scored here, then keep this attempt's responses that point at
-    # one of them (the same rows an inner join would return).
-    sec_types = {s.id: s.task_type for s in (await tenant.execute(
-        select(ProfileSection)
-        .where(ProfileSection.task_type.in_(sorted(SCORED_HERE)))
-    )).scalars().all()}
-    rows = []
-    for response in (await tenant.execute(
-        select(Response).where(Response.attempt_id == attempt_id)
-    )).scalars().all():
-        task_type = sec_types.get(response.section_id)
-        if task_type is not None:
-            rows.append((response, task_type))
+    rows = list((await tenant.execute(
+        select(Response, ProfileSection.task_type)
+        .join(ProfileSection, ProfileSection.id == Response.section_id)
+        .where(Response.attempt_id == attempt_id,
+               ProfileSection.task_type.in_(sorted(SCORED_HERE)))
+    )).all())
     if not rows:
         return 0
 

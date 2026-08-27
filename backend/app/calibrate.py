@@ -15,10 +15,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 
-from app.sqlbridge import select
-
 from app import audit
-from app.db import platform_sessionmaker, tenant_sessionmaker
+from app.db import platform_sessionmaker, select, tenant_sessionmaker
 from app.engine.psychometrics import irt
 from app.engine.psychometrics.bkt import DEMONSTRATED_AT
 from app.models.platform import Tenant
@@ -37,44 +35,30 @@ async def gather(slug: str) -> list[tuple[str, str, bool]]:
 
     async with tenant_sessionmaker(slug)() as session:
         # Quiz responses are already binary and are the cleanest signal.
-        # (Join replaced with an attempt->user map; Mongo has no server-side
-        # join and the bridge does not pretend otherwise.)
-        attempts = {a.id: a.user_id for a in (await session.execute(
-            select(Attempt))).scalars().all()}
-        for attempt_id, item_id, correct in (await session.execute(
-            select(Response.attempt_id, Response.quiz_item_id,
-                   Response.is_correct)
+        for user_id, item_id, correct in (await session.execute(
+            select(Attempt.user_id, Response.quiz_item_id, Response.is_correct)
+            .join(Attempt, Attempt.id == Response.attempt_id)
             .where(Response.quiz_item_id.is_not(None),
                    Response.is_correct.is_not(None))
         )).all():
-            user_id = attempts.get(attempt_id)
-            if user_id is None:
-                continue
             triples.append((user_id, item_id, bool(correct)))
 
         # Speech items: the accuracy score if there is one, otherwise the
         # response-level overall. Nothing is invented for a skipped item.
-        responses = {r.id: r for r in (await session.execute(
-            select(Response)
-            .where(Response.item_id.is_not(None),
-                   Response.skipped.is_(False))
-        )).scalars().all()}
         rows = (await session.execute(
-            select(ScoreRecord.response_id, ScoreRecord.dimension,
+            select(Attempt.user_id, Response.item_id, ScoreRecord.dimension,
                    ScoreRecord.score)
-            .where(ScoreRecord.is_shadow.is_(False),
+            .join(Response, Response.attempt_id == Attempt.id)
+            .join(ScoreRecord, ScoreRecord.response_id == Response.id)
+            .where(Response.item_id.is_not(None),
+                   Response.skipped.is_(False),
+                   ScoreRecord.is_shadow.is_(False),
                    ScoreRecord.dimension.in_(["accuracy", "pronunciation"]))
         )).all()
 
         best: dict[tuple[str, str], float] = {}
-        for response_id, dimension, score in rows:
-            response = responses.get(response_id)
-            if response is None:
-                continue
-            user_id = attempts.get(response.attempt_id)
-            if user_id is None or response.item_id is None:
-                continue
-            key = (user_id, response.item_id)
+        for user_id, item_id, dimension, score in rows:
+            key = (user_id, item_id)
             # Accuracy is the more direct evidence of "did they do this item";
             # pronunciation only stands in where accuracy was not scored.
             if dimension == "accuracy" or key not in best:

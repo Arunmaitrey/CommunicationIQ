@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.sqlbridge import delete, select, update
+from app.db import delete, select, update
 
 from app.models.tenant import (Attempt, Drill, FeatureRecord, Response,
                                ResponseAudio, ScoreRecord)

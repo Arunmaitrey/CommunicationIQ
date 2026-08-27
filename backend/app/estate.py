@@ -29,9 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.sqlbridge import delete, func, select
-
-from app.db import platform_sessionmaker, tenant_sessionmaker
+from app.db import delete, func, platform_sessionmaker, select, tenant_sessionmaker
 from app.models.platform import Tenant
 from app.models.tenant import (Assignment, Attempt, Invitation, ProfileSection,
                                SimulationProfile)
