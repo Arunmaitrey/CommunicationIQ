@@ -79,6 +79,7 @@ def _rate_note(wpm: int | None, correct: int, total: int) -> str:
 @router.get("/passages", response_model=list[ReadingPassageOut])
 async def passages(principal: Principal,
                    models: TenantModels) -> list[ReadingPassageOut]:
+    # Practice shows all published passages so students always have content.
     rows = await models.ReadingPassage.find(
         models.ReadingPassage.status == "published").sort(
         models.ReadingPassage.difficulty).to_list()

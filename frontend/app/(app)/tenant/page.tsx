@@ -5,6 +5,12 @@ import { ErrorNote, PageHeader, Progress, Section, Skeleton, StatCard } from "@/
 import { Workflow, type Step } from "@/components/Workflow";
 import { api, type TenantOverview } from "@/lib/api";
 import { useData } from "@/lib/useData";
+import {
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, Legend,
+} from "recharts";
+
+const COLORS = ["var(--primary)", "var(--secondary)", "var(--accent)", "var(--rag-amber)", "var(--rag-green)"];
 
 export default function TenantOverviewPage() {
   return (
@@ -50,6 +56,55 @@ function Overview() {
           count against the limit.
         </div>
       </Section>
+
+      <div className="grid lg:grid-cols-2 gap-4 mb-4">
+        <Section title="Consent status">
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie
+                  data={[
+                    { name: "Consented", value: data.students - data.consent_pending },
+                    { name: "Pending", value: data.consent_pending },
+                  ]}
+                  cx="50%"
+                  cy="50%"
+                  innerRadius={40}
+                  outerRadius={70}
+                  paddingAngle={3}
+                  dataKey="value"
+                  label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                  labelLine={false}
+                >
+                  <Cell fill="var(--rag-green)" />
+                  <Cell fill="var(--rag-amber)" />
+                </Pie>
+                <Legend />
+                <Tooltip />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </Section>
+
+        <Section title="Seat usage">
+          <div className="h-48">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={[
+                { name: "Used", value: data.seats_used },
+                { name: "Available", value: Math.max(0, data.seat_limit - data.seats_used) },
+              ]}>
+                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="value" radius={[4, 4, 0, 0]} barSize={40}>
+                  <Cell fill="var(--primary)" />
+                  <Cell fill="var(--surface-2)" />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Section>
+      </div>
 
       <Section title="Activity">
         <div className="text-xs text-muted">

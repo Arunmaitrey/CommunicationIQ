@@ -6,6 +6,10 @@ import { Badge, ErrorNote, PageHeader, Section, Skeleton, Table } from "@/compon
 import { api, type CohortReadiness, type StudentSummary } from "@/lib/api";
 import { READINESS } from "@/lib/roles";
 import { useData } from "@/lib/useData";
+import {
+  PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, Legend,
+} from "recharts";
 
 export default function TenantReadinessPage() {
   return (
@@ -68,6 +72,58 @@ function Readiness() {
             <Tile label="Needs training" value={totals.training} total={totals.total} tone="var(--rag-amber)" />
             <Tile label="High risk" value={totals.risk} total={totals.total} tone="var(--rag-red)" />
             <Tile label="Not started" value={totals.none} total={totals.total} tone="var(--muted)" />
+          </div>
+
+          {/* Charts */}
+          <div className="grid md:grid-cols-2 gap-4 mb-4">
+            <Section title="Readiness distribution">
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: "Placement ready", value: totals.ready },
+                        { name: "Needs training", value: totals.training },
+                        { name: "High risk", value: totals.risk },
+                        { name: "Not started", value: totals.none },
+                      ]}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={45}
+                      outerRadius={85}
+                      paddingAngle={3}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      <Cell fill="var(--rag-green)" />
+                      <Cell fill="var(--rag-amber)" />
+                      <Cell fill="var(--rag-red)" />
+                      <Cell fill="var(--muted)" />
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </Section>
+
+            <Section title="Cohort averages">
+              <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={rows.map((r) => ({ name: r.cohort_name, score: r.average_overall ?? 0, students: r.total }))} barSize={30}>
+                    <XAxis dataKey="name" tick={{ fontSize: 10 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                    <Tooltip formatter={(v) => typeof v === "number" ? v.toFixed(1) : v} />
+                    <Bar dataKey="score" radius={[4, 4, 0, 0]} fill="var(--primary)">
+                      {rows.map((r, i) => (
+                        <Cell key={i} fill={(r.average_overall ?? 0) >= 60 ? "var(--rag-green)" : (r.average_overall ?? 0) >= 40 ? "var(--rag-amber)" : "var(--rag-red)"} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </Section>
           </div>
 
           {/* Top performers leaderboard */}

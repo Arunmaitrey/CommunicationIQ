@@ -85,7 +85,7 @@ async def invitation_result(invitation_id: str, principal: Principal,
     of it. An employer could build an assessment, invite somebody, watch the
     invitation turn "redeemed" -- and never see the result. The candidate's
     own report lives behind `/student/attempts/{id}/result`, which is scoped
-    to the person who sat it, and every trainer route is cohort-scoped, which
+    to the person who sat it, and every admin route is cohort-scoped, which
     a candidate is not in. There was no route at all.
 
     Authorised by the invitation rather than by the attempt: this admin's

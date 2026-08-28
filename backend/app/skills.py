@@ -1,6 +1,6 @@
 """The four language skills, and how much of each this build can actually do.
 
-Reading, Writing, Listening and Speaking are how every student, trainer and
+Reading, Writing, Listening and Speaking are how every student, admin and
 placement officer already thinks about English. The product measured exactly
 one of them and never said so: there was no Listening screen, no Reading
 screen, no Writing anything, and nothing anywhere admitted the gap.
@@ -51,7 +51,7 @@ class SkillModule:
 
 
 async def _count_tasks(models: SimpleNamespace, types: tuple[str, ...]) -> int:
-    """Count published task items of the given types using Beanie."""
+    """Count published task items of the given types."""
     items = await models.TaskItem.find(
         In(models.TaskItem.task_type, list(types)),
         models.TaskItem.status == "published",
@@ -60,7 +60,7 @@ async def _count_tasks(models: SimpleNamespace, types: tuple[str, ...]) -> int:
 
 
 async def _count_quiz(models: SimpleNamespace, categories: tuple[str, ...]) -> int:
-    """Count published quiz items in the given categories using Beanie."""
+    """Count published quiz items in the given categories."""
     items = await models.QuizItem.find(
         In(models.QuizItem.category, list(categories)),
         models.QuizItem.status == "published",
@@ -81,8 +81,9 @@ async def _mastery(models: SimpleNamespace, user_id: str,
 
 
 async def _count_writing_prompts(models: SimpleNamespace) -> int:
+    """Count published writing prompts."""
     return len(await models.WritingPrompt.find(
-        models.WritingPrompt.status == "published"
+        models.WritingPrompt.status == "published",
     ).to_list())
 
 

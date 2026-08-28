@@ -32,17 +32,4 @@ class NotificationProvider(Protocol):
         ...
 
 
-@runtime_checkable
-class PaymentProvider(Protocol):
-    """Capability: ``payment``."""
 
-    contract_version = "1.0"
-    provider_key: str
-    version: str
-
-    async def create_intent(self, *, amount_paise: int, currency: str,
-                            reference: str, description: str = "") -> PaymentIntent:
-        ...
-
-    async def verify_webhook(self, *, payload: bytes, signature: str) -> bool:
-        ...

@@ -57,7 +57,7 @@ function LoginForm() {
       <div className="hidden lg:flex flex-1 flex-col justify-between p-10 relative overflow-hidden"
            style={{ background: "var(--rail)", color: "var(--rail-text)" }}>
         <div className="auth-dotgrid absolute inset-0" />
-        <div className="relative"><BrandLockup /></div>
+        <div className="relative"><Link href="/" className="hover:opacity-80 transition-opacity"><BrandLockup /></Link></div>
 
         {/* The instrument the product measures, rendered in 3D. */}
         <div className="relative flex-1 flex items-center justify-center py-6">
@@ -80,7 +80,7 @@ function LoginForm() {
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <div className="flex items-center justify-between mb-6">
-            <div className="lg:hidden"><BrandLockup /></div>
+            <div className="lg:hidden"><Link href="/" className="hover:opacity-80 transition-opacity"><BrandLockup /></Link></div>
             <div className="ml-auto"><ThemePicker /></div>
           </div>
 

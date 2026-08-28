@@ -49,6 +49,7 @@ async def passages(principal: Principal,
     Includes passages already attempted: re-listening to something you scored
     badly on is the point, not a loophole.
     """
+    # Practice shows all published passages so students always have content.
     rows = await models.ListeningPassage.find(
         models.ListeningPassage.status == "published").sort(
         models.ListeningPassage.difficulty).to_list()

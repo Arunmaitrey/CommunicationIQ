@@ -8,7 +8,7 @@ Three rules the endpoints enforce rather than trust the UI for:
   clear "you need twelve more seats".
 * **Nothing is silently overwritten.** An import row for an existing email
   updates profile fields and never a password, a role, or a history.
-* **Trainers cannot reach this file.** Every route is tenant_admin only.
+* **admins cannot reach this file.** Every route is tenant_admin only.
 """
 from __future__ import annotations
 

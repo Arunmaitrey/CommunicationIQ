@@ -23,7 +23,7 @@ is not available: the speech models already do not fit the deployment target,
 and an unvalidated language model marking student essays would be the least
 defensible thing in this product. These heuristics are transparent -- every
 number can be traced to something countable in the text, which means a
-trainer can disagree with one and see exactly why it came out that way. That
+admin can disagree with one and see exactly why it came out that way. That
 is worth more here than an extra few points of correlation nobody can audit.
 
 **Not part of the frozen scoring path.** The validation baseline covers the
@@ -79,7 +79,7 @@ class Measure:
     score: float
     # 0 when there was not enough evidence. Never a quiet zero-as-bad.
     confidence: float
-    # What was counted, so a trainer can disagree with the number and see why.
+    # What was counted, so a admin can disagree with the number and see why.
     basis: str
     detail: dict = field(default_factory=dict)
 

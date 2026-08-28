@@ -1,11 +1,11 @@
 "use client";
 import Link from "next/link";
-import { Award, Flame, LineChart, TrendingUp } from "lucide-react";
+import { Award, FileText, Flame, LineChart, TrendingUp } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
   ErrorNote, GapMeter, PageHeader, Section, Skeleton, StatCard,
 } from "@/components/ui";
-import { api, type Mastery, type StudentHome } from "@/lib/api";
+import { api, attemptApi, type Mastery, type StudentHome } from "@/lib/api";
 import { skillLabel } from "@/lib/roles";
 import { useData } from "@/lib/useData";
 
@@ -118,13 +118,21 @@ function MyProgress() {
         ) : (
           <div className="space-y-2">
             {d.recent_attempts.filter((a) => a.status === "scored").map((a) => (
-              <Link key={a.id} href={`/results/${a.id}`}
-                    className="flex items-center gap-3 text-xs py-1.5 border-b border-border last:border-0 hover:bg-surface2 ds-focus">
-                <span className="flex-1 font-medium">{a.profile_name}</span>
+              <div key={a.id} className="flex items-center gap-3 text-xs py-1.5 border-b border-border last:border-0">
+                <Link href={`/results/${a.id}`} className="flex-1 font-medium hover:underline ds-focus">
+                  {a.profile_name}
+                </Link>
                 <span className="font-bold w-12 text-right">
                   {a.overall_score != null ? a.overall_score : "not scored"}
                 </span>
-              </Link>
+                <button
+                  onClick={() => window.open(attemptApi.reportUrl(a.id), "_blank")}
+                  className="btn btn-ghost text-[10px] px-2 py-1 ds-focus"
+                  title="Download PDF report"
+                >
+                  <FileText size={11} /> Report
+                </button>
+              </div>
             ))}
             {d.recent_attempts.every((a) => a.status !== "scored") && (
               <p className="text-xs text-muted">

@@ -749,7 +749,7 @@ class NotificationLog(Document):
 
 
 class StudentFlag(Document):
-    """Trainer's at-risk flag with a staff-visible note (TRN-03)."""
+    """admin's at-risk flag with a staff-visible note (TRN-03)."""
 
     id: StrId = Field(default_factory=_uuid, alias="_id")
     tenant_id: str = Field(default="", index=True)

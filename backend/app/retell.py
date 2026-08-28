@@ -8,7 +8,7 @@ number:
 * they spoke beautifully and remembered almost none of it.
 
 The first is a language problem. The second is a listening and working-memory
-problem. They need different practice, and a trainer looking at one merged
+problem. They need different practice, and a admin looking at one merged
 score cannot tell which they are looking at — so the merged score is worse
 than useless, it is misleading.
 

@@ -76,7 +76,7 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
     writeIdentity(null);
-    router.replace("/login");
+    router.replace("/");
   };
 
   return (

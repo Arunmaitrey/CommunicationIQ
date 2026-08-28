@@ -176,29 +176,49 @@ async def season(models: TenantModels) -> list[dict]:
 
 
 @router.get("/reviews", response_model=list[ReviewOut])
-async def tenant_reviews(models: TenantModels,
+async def tenant_reviews(principal: Principal, models: TenantModels,
                          limit: int = 50) -> list[ReviewOut]:
     """All reviews for this tenant, most recent first."""
-    reviews = await ExamReview.find_all().sort("created_at", "DESC").limit(limit).to_list()
-    user_ids = list({r.user_id for r in reviews})
-    profile_ids = list({r.profile_id for r in reviews})
-    users = {u.id: u for u in await User.find(In(User.id, user_ids)).to_list()} if user_ids else {}
-    profiles = {p.id: p for p in await SimulationProfile.find(
-        In(SimulationProfile.id, profile_ids)).to_list()} if profile_ids else {}
+    from app.db import control_db
+    db = control_db()
+    tenant_id = principal.tenant_id or ""
+    query = {"tenant_id": tenant_id} if tenant_id else {}
+    raw = await db.exam_reviews.find(query).sort("created_at", -1).limit(limit).to_list()
+    if not raw:
+        return []
+    user_ids = list({r.get("user_id", "") for r in raw if r.get("user_id")})
+    profile_ids = list({r.get("profile_id", "") for r in raw if r.get("profile_id")})
+    users = {}
+    if user_ids:
+        async for u in db.users.find({"_id": {"$in": user_ids}}):
+            users[u["_id"]] = u
+    profiles = {}
+    if profile_ids:
+        async for p in db.simulation_profiles.find({"_id": {"$in": profile_ids}}):
+            profiles[p["_id"]] = p
     return [
         ReviewOut(
-            id=r.id, attempt_id=r.attempt_id, user_id=r.user_id,
-            user_name=getattr(users.get(r.user_id), 'full_name', ''),
-            user_email=getattr(users.get(r.user_id), 'email', ''),
-            profile_name=getattr(profiles.get(r.profile_id), 'name', ''),
-            rating=r.rating, difficulty=r.difficulty,
-            comment=r.comment, created_at=r.created_at,
+            id=str(r.get("_id", "")),
+            attempt_id=r.get("attempt_id", ""),
+            user_id=r.get("user_id", ""),
+            user_name=users.get(r.get("user_id", ""), {}).get("full_name", ""),
+            user_email=users.get(r.get("user_id", ""), {}).get("email", ""),
+            profile_name=profiles.get(r.get("profile_id", ""), {}).get("name", ""),
+            rating=r.get("rating", 0),
+            difficulty=r.get("difficulty", "just_right"),
+            comment=r.get("comment", ""),
+            created_at=r.get("created_at", ""),
         )
-        for r in reviews
+        for r in raw
     ]
 
 
-def _ensure_aware(dt: datetime) -> datetime:
+def _ensure_aware(dt) -> datetime:
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt.replace("Z", "+00:00"))
+        except Exception:
+            return datetime.now(timezone.utc)
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
@@ -263,50 +283,75 @@ async def cohort_readiness(cohort_id: str, principal: Principal,
 @router.get("/cohorts/{cohort_id}/students", response_model=list[StudentSummary])
 async def cohort_students(cohort_id: str, principal: Principal,
                           models: TenantModels) -> list[StudentSummary]:
+    """Students in a specific cohort with scores and readiness."""
+    from app.db import control_db
+    db = control_db()
+
     cohort = await models.Cohort.get(cohort_id)
     if cohort is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Cohort not found")
 
-    members = await models.CohortMember.find(
-        models.CohortMember.cohort_id == cohort_id).to_list()
-    member_ids = [m.user_id for m in members]
-    users = await models.User.find(
-        In(models.User.id, member_ids or [""]),
-        models.User.role == "student"
-    ).sort(models.User.full_name).to_list()
-    ids = [u.id for u in users]
-    latest = await _latest_overall(models, ids)
+    # Get member user_ids
+    member_docs = await db.cohort_members.find({"cohort_id": cohort_id}).to_list()
+    member_ids = [m["user_id"] for m in member_docs if m.get("user_id")]
+    if not member_ids:
+        return []
 
-    coll = models.Attempt.get_motor_collection()
-    attempt_docs = await coll.aggregate([
-        {"$match": {"user_id": {"$in": ids or [""]}}},
-        {"$group": {"_id": "$user_id", "count": {"$sum": 1},
-                    "last": {"$max": "$created_at"}}},
-    ]).to_list(None)
-    attempts = {doc["_id"]: (doc["count"], doc["last"]) for doc in attempt_docs}
+    # Get users
+    users_docs = await db.users.find({"_id": {"$in": member_ids}, "role": "student"}).to_list()
+    if not users_docs:
+        return []
 
-    flagged = {f.user_id for f in await models.StudentFlag.find(
-        models.StudentFlag.resolved == False).to_list()}
+    user_ids = [u["_id"] for u in users_docs]
+
+    # Get latest overall score per user
+    latest = {}
+    score_docs = await db.score_records.find({
+        "user_id": {"$in": user_ids}, "dimension": "overall", "is_shadow": {"$ne": True}
+    }).sort("created_at", -1).to_list()
+    for s in score_docs:
+        uid = s.get("user_id")
+        if uid and uid not in latest:
+            latest[uid] = s.get("score")
+
+    # Get attempt counts and last attempt date
+    attempt_count = {}
+    last_attempt = {}
+    attempt_docs = await db.attempts.find({"user_id": {"$in": user_ids}}).to_list()
+    for a in attempt_docs:
+        uid = a.get("user_id")
+        if uid:
+            attempt_count[uid] = attempt_count.get(uid, 0) + 1
+            scored = a.get("scored_at")
+            if scored:
+                if uid not in last_attempt or scored > last_attempt[uid]:
+                    last_attempt[uid] = scored
+
+    # Get flagged users
+    flagged_docs = await db.student_flags.find({"user_id": {"$in": user_ids}}).to_list()
+    flagged = {f.get("user_id") for f in flagged_docs}
 
     now = datetime.now(timezone.utc)
-    summaries: list[StudentSummary] = []
-    for u in users:
-        count, last = attempts.get(u.id, (0, None))
-        summaries.append(StudentSummary(
+    results = []
+    for u in users_docs:
+        uid = u["_id"]
+        last = last_attempt.get(uid)
+        last_dt = _ensure_aware(last) if last else None
+        results.append(StudentSummary(
             user=UserOut(
-                id=getattr(u, 'id', ''), email=getattr(u, 'email', ''), full_name=getattr(u, 'full_name', ''), role=getattr(u, 'role', 'student'),
-                active=getattr(u, 'active', True), roll_number=getattr(u, 'roll_number', ''), branch=getattr(u, 'branch', ''),
-                year_of_study=getattr(u, 'year_of_study', None), l1_language=getattr(u, 'l1_language', ''),
-                created_at=getattr(u, 'created_at', None),
+                id=uid, full_name=u.get("full_name", ""), email=u.get("email", ""),
+                role=u.get("role", "student"), active=True,
+                roll_number=u.get("roll_number", ""), branch=u.get("branch", ""),
+                created_at=u.get("created_at", now)
             ),
-            attempts=count,
+            attempts=attempt_count.get(uid, 0),
             last_attempt_at=last,
-            overall_score=latest.get(u.id),
-            readiness=band(latest.get(u.id)),
-            days_since_activity=(now - _ensure_aware(last)).days if last else None,
-            flagged=u.id in flagged,
+            overall_score=latest.get(uid),
+            readiness=band(latest.get(uid)),
+            days_since_activity=(now - last_dt).days if last_dt else None,
+            flagged=uid in flagged,
         ))
-    return summaries
+    return results
 
 
 @router.get("/students/{user_id}/attempts", response_model=list[AttemptOut])
@@ -334,3 +379,154 @@ async def student_attempts(user_id: str, principal: Principal,
         scored_at=r.scored_at,
         ip_address=getattr(r, "ip_address", ""),
     ) for r in rows]
+
+
+@router.get("/results", response_model=list[AttemptOut])
+async def tenant_results(principal: Principal, models: TenantModels) -> list[AttemptOut]:
+    """All completed attempts for this tenant."""
+    attempts = await models.Attempt.find(
+        models.Attempt.tenant_id == principal.tenant_id,
+        models.Attempt.status == "submitted"
+    ).sort(-models.Attempt.scored_at).to_list()
+    profiles = await models.SimulationProfile.find(
+        In(models.SimulationProfile.id, [r.profile_id for r in attempts] or [""])).to_list()
+    names = {p.id: p.name for p in profiles}
+    return [AttemptOut(
+        id=r.id, profile_id=r.profile_id, profile_name=names.get(r.profile_id, ""),
+        attempt_number=r.attempt_number, status=r.status, mode=r.mode,
+        is_baseline=r.is_baseline, overall_score=None,
+        started_at=r.started_at, submitted_at=r.submitted_at,
+        scored_at=r.scored_at, ip_address=getattr(r, "ip_address", ""),
+    ) for r in attempts]
+
+
+@router.get("/readiness", response_model=list[StudentSummary])
+async def tenant_readiness_overview(principal: Principal, models: TenantModels) -> list[StudentSummary]:
+    """Readiness overview for all students in tenant."""
+    from app.db import control_db
+    from app.readiness import band
+    from app.models.tenant import User
+    db = control_db()
+    
+    # Get student user_ids for this tenant
+    users_docs = await db.users.find({"tenant_id": principal.tenant_id, "role": "student"}).to_list()
+    user_ids = [u["_id"] for u in users_docs]
+    if not user_ids:
+        return []
+    
+    # Get latest overall score per user
+    latest = {}
+    score_docs = await db.score_records.find({
+        "user_id": {"$in": user_ids}, "dimension": "overall", "is_shadow": {"$ne": True}
+    }).sort("created_at", -1).to_list()
+    for s in score_docs:
+        uid = s.get("user_id")
+        if uid and uid not in latest:
+            latest[uid] = s.get("score")
+    
+    # Get last attempt date per user and attempt count
+    last_attempt = {}
+    attempt_count = {}
+    attempt_docs = await db.attempts.find({"user_id": {"$in": user_ids}}).to_list()
+    for a in attempt_docs:
+        uid = a.get("user_id")
+        if uid:
+            attempt_count[uid] = attempt_count.get(uid, 0) + 1
+            scored = a.get("scored_at")
+            if scored:
+                if uid not in last_attempt or scored > last_attempt[uid]:
+                    last_attempt[uid] = scored
+    
+    # Get flagged users
+    flagged = set()
+    flag_docs = await db.student_flags.find({"user_id": {"$in": user_ids}}).to_list()
+    for f in flag_docs:
+        flagged.add(f.get("user_id"))
+
+    now = datetime.now(timezone.utc)
+    results = []
+    for u in users_docs:
+        uid = u["_id"]
+        last = last_attempt.get(uid)
+        last_dt = _ensure_aware(last) if last else None
+        results.append(StudentSummary(
+            user=UserOut(
+                id=uid, full_name=u.get("full_name", ""), email=u.get("email", ""),
+                role=u.get("role", "student"), active=True,
+                roll_number=u.get("roll_number", ""), branch=u.get("branch", ""),
+                year_of_study=u.get("year_of_study"), l1_language=u.get("l1_language", ""),
+                created_at=u.get("created_at", now)
+            ),
+            attempts=attempt_count.get(uid, 0),
+            last_attempt_at=last,
+            overall_score=latest.get(uid),
+            readiness=band(latest.get(uid)),
+            days_since_activity=(now - last_dt).days if last_dt else None,
+            flagged=uid in flagged,
+        ))
+    return results
+
+
+@router.get("/export-results")
+async def export_results_csv(principal: Principal, models: TenantModels):
+    """Export all student results as CSV for the tenant admin."""
+    import csv
+    import io
+    from fastapi.responses import Response as HttpResponse
+    from app.db import control_db
+    db = control_db()
+
+    users_docs = await db.users.find({
+        "tenant_id": principal.tenant_id, "role": "student"
+    }).to_list()
+    user_ids = [u["_id"] for u in users_docs]
+    user_map = {u["_id"]: u for u in users_docs}
+
+    latest = {}
+    score_docs = await db.score_records.find({
+        "user_id": {"$in": user_ids}, "dimension": "overall", "is_shadow": {"$ne": True}
+    }).sort("created_at", -1).to_list()
+    for s in score_docs:
+        uid = s.get("user_id")
+        if uid and uid not in latest:
+            latest[uid] = s.get("score")
+
+    attempt_count = {}
+    attempt_docs = await db.attempts.find({"user_id": {"$in": user_ids}}).to_list()
+    for a in attempt_docs:
+        uid = a.get("user_id")
+        if uid:
+            attempt_count[uid] = attempt_count.get(uid, 0) + 1
+
+    member_docs = await db.cohort_members.find({"user_id": {"$in": user_ids}}).to_list()
+    user_cohorts: dict[str, list[str]] = {}
+    for m in member_docs:
+        uid, cid = m.get("user_id"), m.get("cohort_id")
+        if uid and cid:
+            user_cohorts.setdefault(uid, []).append(cid)
+    cohort_ids = list({cid for cids in user_cohorts.values() for cid in cids})
+    cohort_names: dict[str, str] = {}
+    if cohort_ids:
+        cohorts_db = await db.cohorts.find({"_id": {"$in": cohort_ids}}).to_list()
+        cohort_names = {c["_id"]: c.get("name", "") for c in cohorts_db}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Name", "Email", "Roll Number", "Branch",
+                     "Cohort", "Total Attempts", "Best Score", "Readiness"])
+    for uid in user_ids:
+        u = user_map.get(uid, {})
+        sc = latest.get(uid)
+        cohort_list = user_cohorts.get(uid, [])
+        cohort_str = ", ".join(cohort_names.get(c, c) for c in cohort_list) if cohort_list else "---"
+        writer.writerow([
+            u.get("full_name", ""), u.get("email", ""),
+            u.get("roll_number", ""), u.get("branch", ""),
+            cohort_str, attempt_count.get(uid, 0),
+            sc if sc is not None else "---", band(sc),
+        ])
+    content = output.getvalue().encode("utf-8")
+    return HttpResponse(
+        content=content, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="student-results.csv"'},
+    )

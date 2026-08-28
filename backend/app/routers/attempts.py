@@ -232,6 +232,13 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
         select(ProfileSection).where(ProfileSection.profile_id == profile.id)
     )).scalars().all()
 
+    if not sections:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"This assessment ({profile.name}) has no sections configured. "
+            "Contact your institution admin to add sections before starting.",
+        )
+
     # A practice session may carry the assessment attempt that prescribed it.
     # Validated here so the loop can trust it later: it must be the caller's
     # own scored attempt. Anything else is dropped, not stored.
@@ -1937,7 +1944,7 @@ async def export_csv(attempt_id: str, principal: Principal,
     """The whole result as a spreadsheet.
 
     CSV rather than a PDF because of what each is for. A PDF is a thing you
-    send to somebody; a CSV is a thing you can check. A trainer wanting to see
+    send to somebody; a CSV is a thing you can check. A admin wanting to see
     whether a cohort's grammar moved needs rows, and a student disputing a
     score needs the numbers next to the evidence rather than a rendered page
     they cannot interrogate.
@@ -2031,7 +2038,7 @@ async def play_response_audio(attempt_id: str, response_id: str,
                               session: TenantSession) -> HttpResponse:
     """Stream one recording back to the student who made it (DIAG-02).
 
-    Only to them. There is no trainer or admin route to this endpoint and
+    Only to them. There is no admin or admin route to this endpoint and
     there will not be one: staff see scores and mastery, never recordings. A
     recording past its retention date is gone, and says so plainly rather than
     404-ing as though it never existed.
@@ -2582,38 +2589,43 @@ async def _result(session: TenantSession, attempt: Attempt,
 async def submit_review(attempt_id: str, body: ReviewRequest,
                         principal: Principal, session: TenantSession) -> ReviewOut:
     """Submit a review for an attempt. One review per student per attempt."""
+    from app.db import control_db
     attempt = await _own_attempt(session, principal, attempt_id)
+    db = control_db()
 
-    existing = (await session.execute(
-        select(ExamReview).where(
-            ExamReview.attempt_id == attempt_id,
-            ExamReview.user_id == principal.user_id)
-    )).scalars().first()
+    existing = await db.exam_reviews.find_one({
+        "attempt_id": attempt_id, "user_id": principal.user_id
+    })
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "You have already reviewed this attempt.")
 
-    review = ExamReview(
-        attempt_id=attempt_id,
-        user_id=principal.user_id,
-        tenant_id=principal.tenant_id or "",
-        profile_id=attempt.profile_id or "",
-        rating=body.rating,
-        difficulty=body.difficulty,
-        comment=body.comment,
-    )
-    session.add(review)
-    await session.commit()
+    import uuid
+    review_id = str(uuid.uuid4())
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    doc = {
+        "_id": review_id,
+        "attempt_id": attempt_id,
+        "user_id": principal.user_id,
+        "tenant_id": principal.tenant_id or "",
+        "profile_id": attempt.profile_id or "",
+        "rating": body.rating,
+        "difficulty": body.difficulty,
+        "comment": body.comment,
+        "created_at": now,
+    }
+    await db.exam_reviews.insert_one(doc)
 
     profile = await session.get(SimulationProfile, attempt.profile_id)
     return ReviewOut(
-        id=review.id, attempt_id=review.attempt_id,
-        user_id=review.user_id,
+        id=review_id, attempt_id=attempt_id,
+        user_id=principal.user_id,
         user_name=principal.full_name,
         user_email=principal.email,
         profile_name=profile.name if profile else "",
-        rating=review.rating, difficulty=review.difficulty,
-        comment=review.comment, created_at=review.created_at,
+        rating=body.rating, difficulty=body.difficulty,
+        comment=body.comment, created_at=now,
     )
 
 
@@ -2621,21 +2633,54 @@ async def submit_review(attempt_id: str, body: ReviewRequest,
 async def get_my_review(attempt_id: str, principal: Principal,
                         session: TenantSession) -> ReviewOut | None:
     """Get the current user's review for an attempt, if any."""
+    from app.db import control_db
     await _own_attempt(session, principal, attempt_id)
-    review = (await session.execute(
-        select(ExamReview).where(
-            ExamReview.attempt_id == attempt_id,
-            ExamReview.user_id == principal.user_id)
-    )).scalars().first()
-    if review is None:
+    db = control_db()
+    doc = await db.exam_reviews.find_one({
+        "attempt_id": attempt_id, "user_id": principal.user_id
+    })
+    if doc is None:
         return None
-    profile = await session.get(SimulationProfile, review.profile_id)
+    profile = await session.get(SimulationProfile, doc.get("profile_id", ""))
     return ReviewOut(
-        id=review.id, attempt_id=review.attempt_id,
-        user_id=review.user_id,
+        id=str(doc.get("_id", "")), attempt_id=attempt_id,
+        user_id=principal.user_id,
         user_name=principal.full_name,
         user_email=principal.email,
         profile_name=profile.name if profile else "",
-        rating=review.rating, difficulty=review.difficulty,
-        comment=review.comment, created_at=review.created_at,
+        rating=doc.get("rating", 0), difficulty=doc.get("difficulty", "just_right"),
+        comment=doc.get("comment", ""), created_at=doc.get("created_at", ""),
     )
+
+
+@router.get("/{attempt_id}/reviews", response_model=list[ReviewOut])
+async def get_attempt_reviews(attempt_id: str, principal: Principal,
+                              session: TenantSession) -> list[ReviewOut]:
+    """All reviews for an attempt. Visible to admins and super admins."""
+    from app.db import control_db
+    db = control_db()
+    raw = await db.exam_reviews.find({"attempt_id": attempt_id}).to_list()
+    if not raw:
+        return []
+    user_ids = list({r.get("user_id", "") for r in raw if r.get("user_id")})
+    profile_ids = list({r.get("profile_id", "") for r in raw if r.get("profile_id")})
+    users = {}
+    if user_ids:
+        async for u in db.users.find({"_id": {"$in": user_ids}}):
+            users[u["_id"]] = u
+    profiles = {}
+    if profile_ids:
+        async for p in db.simulation_profiles.find({"_id": {"$in": profile_ids}}):
+            profiles[p["_id"]] = p
+    return [
+        ReviewOut(
+            id=str(r.get("_id", "")), attempt_id=attempt_id,
+            user_id=r.get("user_id", ""),
+            user_name=users.get(r.get("user_id", ""), {}).get("full_name", ""),
+            user_email=users.get(r.get("user_id", ""), {}).get("email", ""),
+            profile_name=profiles.get(r.get("profile_id", ""), {}).get("name", ""),
+            rating=r.get("rating", 0), difficulty=r.get("difficulty", "just_right"),
+            comment=r.get("comment", ""), created_at=r.get("created_at", ""),
+        )
+        for r in raw
+    ]

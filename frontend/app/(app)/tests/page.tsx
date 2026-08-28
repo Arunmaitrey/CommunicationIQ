@@ -146,15 +146,39 @@ function Tests() {
             Built in the shape of the tests employers use — same section order,
             same timings, same one-shot audio. The questions are ours.
           </p>
-          <div className="grid md:grid-cols-2 gap-3">
-            {formats.map((p) => (
-              <TestCard key={p.id} profile={p} consented={consented}
-                        starting={starting === p.id} anyStarting={starting !== ""}
-                        inProgressAttemptId={inProgressByProfile.get(p.id)}
-                        onStart={() => void start(p.id)}
-                        onResume={() => resume(inProgressByProfile.get(p.id)!)} />
-            ))}
-          </div>
+          {(() => {
+            const formatNames = Array.from(new Set(formats.map((p) => p.company))).sort();
+            const filteredFormats = companyFilter
+              ? formats.filter((p) => p.company === companyFilter)
+              : formats;
+            return (
+              <>
+                {formatNames.length > 1 && (
+                  <div className="flex items-center gap-1.5 mb-3">
+                    <Filter size={12} className="text-muted" />
+                    <select
+                      className="ds-input text-xs py-1 px-2"
+                      style={{ minWidth: 140 }}
+                      value={companyFilter}
+                      onChange={(e) => setCompanyFilter(e.target.value)}
+                    >
+                      <option value="">All Companies</option>
+                      {formatNames.map((cn) => <option key={cn} value={cn}>{cn}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className="grid md:grid-cols-2 gap-3">
+                  {filteredFormats.map((p) => (
+                    <TestCard key={p.id} profile={p} consented={consented}
+                              starting={starting === p.id} anyStarting={starting !== ""}
+                              inProgressAttemptId={inProgressByProfile.get(p.id)}
+                              onStart={() => void start(p.id)}
+                              onResume={() => resume(inProgressByProfile.get(p.id)!)} />
+                  ))}
+                </div>
+              </>
+            );
+          })()}
         </Section>
       )}
 
@@ -238,6 +262,18 @@ function TestCard({ profile: p, first, consented, starting, anyStarting, inProgr
         </span>
       </div>
 
+      {items === 0 && (
+        <div className="flex items-start gap-1.5 mt-2">
+          <AlertTriangle size={11} className="shrink-0 mt-0.5"
+                         style={{ color: "var(--rag-red)" }} />
+          <span className="text-[10px] leading-relaxed"
+                style={{ color: "var(--rag-red)" }}>
+            This assessment has no questions configured yet. Contact your
+            institution admin.
+          </span>
+        </div>
+      )}
+
       {oneShot && (
         <div className="flex items-start gap-1.5 mt-2">
           <AlertTriangle size={11} className="shrink-0 mt-0.5"
@@ -272,9 +308,9 @@ function TestCard({ profile: p, first, consented, starting, anyStarting, inProgr
           )}
           <button
             className="btn btn-primary btn-sm ds-focus"
-            disabled={!consented || anyStarting}
+            disabled={!consented || anyStarting || items === 0}
             onClick={onStart}
-            title={consented ? "" : "Consent is required before recording"}
+            title={items === 0 ? "No questions configured" : consented ? "" : "Consent is required before recording"}
           >
             {starting ? "Starting…" : "Start"}
           </button>

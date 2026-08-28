@@ -40,7 +40,7 @@ const DEFAULT: ThemeId = "campus";
  *
  *  Per account, not per browser. A placement lab is a room of shared machines:
  *  one student picking Cyberpunk must not hand it to the next person who signs
- *  in, and a trainer demoing to a principal must not inherit either.
+ *  in, and a admin demoing to a principal must not inherit either.
  *
  *  Still per browser, and honestly so — the same student on the lab PC and on
  *  their phone starts at the default on each. Carrying it across devices means

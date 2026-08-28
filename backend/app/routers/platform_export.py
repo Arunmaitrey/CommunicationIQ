@@ -54,7 +54,7 @@ router = APIRouter(prefix="/platform", tags=["platform"],
                    dependencies=[Depends(require_platform("super_admin"))])
 
 # Who belongs in the export: everyone whose account exists to sit an
-# assessment. Trainer and admin accounts trying things out are not student
+# assessment. admin and admin accounts trying things out are not student
 # data, and their attempts are dropped with them.
 ROSTER_ROLES = ("student", "candidate")
 
@@ -248,7 +248,7 @@ async def _write_reports(models: SimpleNamespace, zf: zipfile.ZipFile,
             attempt_owner[a["_id"]] = (a["user_id"], a["profile_id"])
             who = people.get(a["user_id"])
             if who is None:
-                continue  # a trainer or admin trying things out
+                continue  # a admin or admin trying things out
             score, band = overall.get(a["_id"], ("", ""))
             write([a["_id"], who[0], who[1],
                    profiles.get(a["profile_id"], ""), a["mode"],

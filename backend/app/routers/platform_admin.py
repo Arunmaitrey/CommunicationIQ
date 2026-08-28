@@ -7,6 +7,7 @@ reachable through any endpoint in this file.
 """
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime, timedelta, timezone
 
@@ -209,40 +210,7 @@ _ASSET_TYPES = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
 # arbitrary storage keys from an authenticated route would turn this into a
 # reader for every recording on disk.
 _ASSET_KEY = re.compile(r"^branding/[a-z][a-z0-9_]{1,40}/logo\.(png|jpg|jpeg|webp|gif)$")
-
-
-@asset_router.get("/assets/{key:path}")
-async def branding_asset(key: str) -> HttpResponse:
-    """Serve a tenant logo.
-
-    Deliberately outside the platform-admin dependency: this is on the sign-in
-    page and in every student's sidebar, so requiring a platform token would
-    mean it never renders for the people it is for. The narrow key pattern is
-    what keeps that safe -- nothing but a logo can be addressed.
-    """
-    if not _ASSET_KEY.match(key):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-
-    storage = get_storage()
-    if not storage.exists(key):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-
-    try:
-        data = storage.get(key)
-    except (ValueError, OSError) as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found") from exc
-
-    return HttpResponse(
-        content=data,
-        media_type=_ASSET_TYPES.get(key.rsplit(".", 1)[-1], "application/octet-stream"),
-        headers={
-            "Cache-Control": "public, max-age=300",
-            # A logo is an image and is only ever an image. Says so, so a
-            # browser cannot be talked into treating it as anything else.
-            "X-Content-Type-Options": "nosniff",
-            "Content-Disposition": "inline",
-        },
-    )
+_AUDIO_KEY = re.compile(r"^audio/[a-f0-9]{64}\.(wav|m4a|mp3)$")
 
 
 # --------------------------------------------------------------------------
@@ -430,6 +398,7 @@ async def _create_speaking(body):
         prompt_text=body.get("prompt_text", ""),
         company=body.get("company", ""),
         reference_text=body.get("reference_text", ""),
+        prompt_audio_key=body.get("audio_key", ""),
         difficulty=body.get("difficulty", 0.3), status="published",
     )
     await ti.create()
@@ -505,27 +474,36 @@ async def export_db() -> HttpResponse:
 @router.get("/reviews")
 async def platform_reviews(limit: int = 100) -> list[dict]:
     """All reviews across all tenants, for superadmin visibility."""
-    from app.models.tenant import ExamReview, User, SimulationProfile
-    reviews = await ExamReview.find_all().sort("created_at", "DESC").limit(limit).to_list()
-    if not reviews:
+    from app.db import control_db
+    db = control_db()
+    raw = await db.exam_reviews.find().sort("created_at", -1).limit(limit).to_list()
+    if not raw:
         return []
-    user_ids = list({r.user_id for r in reviews})
-    profile_ids = list({r.profile_id for r in reviews})
-    users = {u.id: u for u in await User.find({"_id": {"$in": user_ids}}).to_list()} if user_ids else {}
-    profiles = {p.id: p for p in await SimulationProfile.find(
-        {"_id": {"$in": profile_ids}}).to_list()} if profile_ids else {}
+    user_ids = list({r.get("user_id", "") for r in raw if r.get("user_id")})
+    profile_ids = list({r.get("profile_id", "") for r in raw if r.get("profile_id")})
+    users = {}
+    if user_ids:
+        async for u in db.users.find({"_id": {"$in": user_ids}}):
+            users[u["_id"]] = u
+    profiles = {}
+    if profile_ids:
+        async for p in db.simulation_profiles.find({"_id": {"$in": profile_ids}}):
+            profiles[p["_id"]] = p
     return [
         {
-            "id": r.id, "attempt_id": r.attempt_id,
-            "user_id": r.user_id,
-            "user_name": getattr(users.get(r.user_id), 'full_name', ''),
-            "user_email": getattr(users.get(r.user_id), 'email', ''),
-            "tenant_id": r.tenant_id,
-            "profile_name": getattr(profiles.get(r.profile_id), 'name', ''),
-            "rating": r.rating, "difficulty": r.difficulty,
-            "comment": r.comment, "created_at": r.created_at,
+            "id": str(r.get("_id", "")),
+            "attempt_id": r.get("attempt_id", ""),
+            "user_id": r.get("user_id", ""),
+            "user_name": users.get(r.get("user_id", ""), {}).get("full_name", ""),
+            "user_email": users.get(r.get("user_id", ""), {}).get("email", ""),
+            "tenant_id": r.get("tenant_id", ""),
+            "profile_name": profiles.get(r.get("profile_id", ""), {}).get("name", ""),
+            "rating": r.get("rating", 0),
+            "difficulty": r.get("difficulty", "just_right"),
+            "comment": r.get("comment", ""),
+            "created_at": r.get("created_at", ""),
         }
-        for r in reviews
+        for r in raw
     ]
 
 
@@ -552,8 +530,15 @@ async def platform_questions(category: str = "", company: str = "",
         writing_filter["company"] = company
     writing_prompts = await WritingPrompt.find(writing_filter).limit(limit).to_list()
 
-    listening = await ListeningPassage.find({"status": "published"}).limit(limit).to_list()
-    reading = await ReadingPassage.find({"status": "published"}).limit(limit).to_list()
+    listening_filter = {"status": "published"}
+    if company:
+        listening_filter["company"] = company
+    listening = await ListeningPassage.find(listening_filter).limit(limit).to_list()
+
+    reading_filter = {"status": "published"}
+    if company:
+        reading_filter["company"] = company
+    reading = await ReadingPassage.find(reading_filter).limit(limit).to_list()
 
     def _item_out(item, kind):
         return {
@@ -566,6 +551,8 @@ async def platform_questions(category: str = "", company: str = "",
             "company": getattr(item, "company", ""),
             "difficulty": getattr(item, "difficulty", 0),
             "status": getattr(item, "status", "published"),
+            "audio_key": getattr(item, "audio_key", "")
+                         or getattr(item, "prompt_audio_key", ""),
         }
 
     return {
@@ -645,7 +632,7 @@ async def delete_question(collection: str, item_id: str) -> dict:
 @router.post("/questions/audio")
 async def upload_audio(file: "UploadFile") -> dict:
     """Upload an audio file (WAV, M4A, MP3) for listening passages or prompts."""
-    import uuid, os
+    import uuid
     ext = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
     key = f"audio/{uuid.uuid4().hex}{ext}"
     upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "audio")
@@ -656,3 +643,84 @@ async def upload_audio(file: "UploadFile") -> dict:
         f.write(content)
     await audit_log.record_system("platform.upload_audio", entity=key)
     return {"key": key, "size": len(content), "ok": True}
+
+
+# --------------------------------------------------------------------------
+# Prompt audio bank — browse & preview the pre-rendered TTS clips
+# --------------------------------------------------------------------------
+
+_PROMPT_AUDIO_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "prompt_audio")
+
+
+@router.get("/prompt-audio")
+async def list_prompt_audio() -> dict:
+    """List all pre-rendered prompt audio files with metadata."""
+    files = []
+    if os.path.isdir(_PROMPT_AUDIO_DIR):
+        for name in sorted(os.listdir(_PROMPT_AUDIO_DIR)):
+            path = os.path.join(_PROMPT_AUDIO_DIR, name)
+            if os.path.isfile(path):
+                ext = os.path.splitext(name)[1].lower()
+                size = os.path.getsize(path)
+                files.append({"name": name, "ext": ext, "size": size})
+    return {"files": files, "count": len(files)}
+
+
+# Served on asset_router (no auth) so the browser <audio> element can play it.
+
+
+_PROMPT_AUDIO_SAFE = re.compile(r"^[a-f0-9\-]+\.(wav|m4a|mp3)$")
+
+
+@asset_router.get("/assets/{key:path}")
+async def serve_prompt_audio(key: str) -> HttpResponse:
+    """Serve a pre-rendered prompt audio file for playback.
+
+    Falls through to the branding/audio handler below if the key doesn't match
+    the prompt-audio pattern.
+    """
+    if _PROMPT_AUDIO_SAFE.match(key):
+        path = os.path.join(_PROMPT_AUDIO_DIR, key)
+        if os.path.isfile(path):
+            ext = os.path.splitext(key)[1].lower()
+            media = {".m4a": "audio/mp4", ".wav": "audio/wav", ".mp3": "audio/mpeg"}.get(ext, "application/octet-stream")
+            with open(path, "rb") as f:
+                data = f.read()
+            return HttpResponse(content=data, media_type=media,
+                                headers={"Cache-Control": "public, max-age=600",
+                                         "X-Content-Type-Options": "nosniff"})
+
+    # Not a prompt audio file — try branding assets and uploaded audio below.
+    if _ASSET_KEY.match(key):
+        storage = get_storage()
+        if not storage.exists(key):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+        try:
+            data = storage.get(key)
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found") from exc
+        ext = key.rsplit(".", 1)[-1]
+        media = _ASSET_TYPES.get(ext, "application/octet-stream")
+        return HttpResponse(
+            content=data, media_type=media,
+            headers={"Cache-Control": "public, max-age=300",
+                     "X-Content-Type-Options": "nosniff",
+                     "Content-Disposition": "inline"},
+        )
+
+    if _AUDIO_KEY.match(key):
+        audio_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "audio")
+        fname = key.replace("audio/", "")
+        path = os.path.join(audio_dir, fname)
+        if not os.path.isfile(path):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
+        ext = os.path.splitext(fname)[1].lower()
+        media = {".wav": "audio/wav", ".m4a": "audio/mp4", ".mp3": "audio/mpeg"}.get(ext, "application/octet-stream")
+        with open(path, "rb") as f:
+            data = f.read()
+        return HttpResponse(content=data, media_type=media,
+                            headers={"Cache-Control": "public, max-age=600",
+                                     "X-Content-Type-Options": "nosniff"})
+
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")

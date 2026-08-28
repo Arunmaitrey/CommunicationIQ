@@ -4,8 +4,12 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertTriangle, ChevronDown, ChevronRight, Clock, Gauge, Loader2, Lock, Mic,
-  Star, Volume2,
+  Star, Volume2, Trophy,
 } from "lucide-react";
+import {
+  RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell,
+} from "recharts";
 import { ListenBack } from "@/components/ListenBack";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useRole } from "@/components/RoleProvider";
@@ -425,6 +429,11 @@ function Result() {
       <Skills skills={data.skills ?? []} sections={data.sections ?? []}
               scaleMin={data.scale_min} scaleMax={data.scale_max} />
 
+      {/* Skill Scoreboard - 0-100 scale with radar chart */}
+      {measured.length > 0 && (
+        <Scoreboard dimensions={measured} scaleMin={data.scale_min} scaleMax={data.scale_max} />
+      )}
+
       <Highlights strengths={data.strengths} weaknesses={data.weaknesses} />
 
       <Evidence evidence={data.evidence} />
@@ -433,6 +442,10 @@ function Result() {
 
       {user?.role === "student" && (
         <StudentReview attemptId={data.attempt_id} />
+      )}
+
+      {user?.role !== "student" && (
+        <AdminReviewView attemptId={data.attempt_id} />
       )}
 
       {data.overall == null && measured.length > 0 && (
@@ -1097,5 +1110,165 @@ function StudentReview({ attemptId }: { attemptId: string }) {
         {loading ? "Submitting..." : "Submit Review"}
       </button>
     </div>
+  );
+}
+
+function AdminReviewView({ attemptId }: { attemptId: string }) {
+  const [reviews, setReviews] = useState<Array<{
+    id: string; user_name: string; user_email: string;
+    rating: number; difficulty: string; comment: string; created_at: string;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/v1/student/attempts/${attemptId}/reviews`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("commiq.token") || ""}` },
+        });
+        if (res.ok && !cancelled) {
+          setReviews(await res.json());
+        }
+      } catch { /* ignore */ }
+      finally { if (!cancelled) setLoading(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [attemptId]);
+
+  if (loading) return <Skeleton rows={2} />;
+  if (reviews.length === 0) {
+    return (
+      <Section title="Reviews">
+        <p className="text-xs text-muted">No reviews have been submitted for this exam yet.</p>
+      </Section>
+    );
+  }
+
+  const DIFFICULTY_LABEL: Record<string, string> = {
+    easy: "Easy", just_right: "Just Right", hard: "Hard",
+  };
+
+  return (
+    <Section title={`Reviews (${reviews.length})`}>
+      <div className="space-y-3">
+        {reviews.map((r) => (
+          <div key={r.id} className="ds-card p-4">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <span className="text-xs font-bold">{r.user_name || "Anonymous"}</span>
+                {r.user_email && <span className="text-[10px] text-muted ml-2">{r.user_email}</span>}
+              </div>
+              <div className="flex items-center gap-1">
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <Star key={s} size={12} fill={s <= r.rating ? "var(--rag-amber)" : "none"}
+                        style={{ color: s <= r.rating ? "var(--rag-amber)" : "var(--border)" }} />
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                background: r.difficulty === "easy" ? "color-mix(in srgb, var(--rag-green) 12%, transparent)"
+                  : r.difficulty === "hard" ? "color-mix(in srgb, var(--rag-red) 12%, transparent)"
+                  : "color-mix(in srgb, var(--primary) 12%, transparent)",
+                color: r.difficulty === "easy" ? "var(--rag-green)"
+                  : r.difficulty === "hard" ? "var(--rag-red)" : "var(--primary)",
+              }}>
+                {DIFFICULTY_LABEL[r.difficulty] || r.difficulty}
+              </span>
+              <span className="text-[10px] text-muted">
+                {r.created_at ? new Date(r.created_at).toLocaleDateString() : ""}
+              </span>
+            </div>
+            {r.comment && <p className="text-xs text-muted mt-1">{r.comment}</p>}
+          </div>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
+/** Visual scoreboard with radar chart and bar chart for all dimensions.
+ *  Normalises scores to 0-100 scale for easy reading. */
+function Scoreboard({ dimensions, scaleMin, scaleMax }: {
+  dimensions: [string, number][];
+  scaleMin: number;
+  scaleMax: number;
+}) {
+  const range = scaleMax - scaleMin;
+
+  // Normalise to 0-100
+  const normalised = dimensions.map(([dim, score]) => ({
+    dimension: DIMENSION_LABEL[dim] ?? dim.replace(/_/g, " "),
+    raw: score,
+    normalised: Math.round(((score - scaleMin) / range) * 100),
+    dim,
+  }));
+
+  const avgScore = Math.round(normalised.reduce((s, d) => s + d.normalised, 0) / normalised.length);
+
+  // Color based on score
+  const getScoreColor = (score: number) => {
+    if (score >= 70) return "var(--rag-green)";
+    if (score >= 50) return "var(--rag-amber)";
+    return "var(--rag-red)";
+  };
+
+  return (
+    <Section title="Skill Scoreboard" className="mb-4">
+      <div className="grid md:grid-cols-2 gap-6">
+        {/* Overall Score Badge */}
+        <div className="flex flex-col items-center justify-center">
+          <div
+            className="w-32 h-32 rounded-full flex flex-col items-center justify-center"
+            style={{
+              background: `conic-gradient(${getScoreColor(avgScore)} ${avgScore * 3.6}deg, var(--border) ${avgScore * 3.6}deg)`,
+            }}
+          >
+            <div className="w-28 h-28 rounded-full flex flex-col items-center justify-center" style={{ background: "var(--surface)" }}>
+              <Trophy size={18} style={{ color: getScoreColor(avgScore) }} />
+              <span className="text-2xl font-bold" style={{ color: getScoreColor(avgScore) }}>{avgScore}</span>
+              <span className="text-[9px] text-muted uppercase">out of 100</span>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted mt-2 text-center">Overall skill score</p>
+        </div>
+
+        {/* Radar Chart */}
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <RadarChart data={normalised} cx="50%" cy="50%" outerRadius="70%">
+              <PolarGrid stroke="var(--border)" />
+              <PolarAngleAxis dataKey="dimension" tick={{ fontSize: 10, fill: "var(--muted)" }} />
+              <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 9 }} />
+              <Radar name="Score" dataKey="normalised" stroke="var(--primary)" fill="var(--primary)" fillOpacity={0.2} strokeWidth={2} />
+            </RadarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* Bar Chart */}
+      <div className="h-48 mt-4">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={normalised} layout="vertical" barSize={16} margin={{ left: 80 }}>
+            <XAxis type="number" domain={[0, 100]} tick={{ fontSize: 10 }} />
+            <YAxis type="category" dataKey="dimension" tick={{ fontSize: 10 }} width={80} />
+            <Tooltip formatter={(v) => `${v}/100`} />
+            <Bar dataKey="normalised" radius={[0, 4, 4, 0]}>
+              {normalised.map((d, i) => (
+                <Cell key={i} fill={getScoreColor(d.normalised)} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Scale Legend */}
+      <div className="flex items-center justify-center gap-4 mt-2">
+        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded" style={{ background: "var(--rag-red)" }} /><span className="text-[10px] text-muted">0-49 Needs work</span></div>
+        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded" style={{ background: "var(--rag-amber)" }} /><span className="text-[10px] text-muted">50-69 Good</span></div>
+        <div className="flex items-center gap-1"><div className="w-3 h-3 rounded" style={{ background: "var(--rag-green)" }} /><span className="text-[10px] text-muted">70-100 Excellent</span></div>
+      </div>
+    </Section>
   );
 }

@@ -152,6 +152,6 @@ EXPIRED_MESSAGE = (
 
 RECORDING_TOO_LATE_MESSAGE = (
     "This recording arrived too long after the assessment ended to be part "
-    "of it. It has not been deleted -- ask your trainer if you believe it "
+    "of it. It has not been deleted -- ask your admin if you believe it "
     "should count."
 )

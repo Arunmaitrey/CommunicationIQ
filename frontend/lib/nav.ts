@@ -1,7 +1,7 @@
 import {
   Activity, BarChart3, Building2, BookOpen,
   Home, Layers, LineChart, Mic, PenLine,
-  ScrollText, Settings, ShieldCheck, Target, Trophy, Users,
+  ScrollText, Settings, ShieldCheck, Star, Target, Trophy, Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { Role } from "@/lib/api";
@@ -56,6 +56,7 @@ export const NAV: NavSection[] = [
       { href: "/tenant/users", label: "People", icon: Users, roles: TENANT, tint: TINT.cyan },
       { href: "/tenant/profiles", label: "Assessments", icon: Layers, roles: TENANT, tint: TINT.violet },
       { href: "/tenant/results", label: "Exam results", icon: Trophy, roles: TENANT, tint: TINT.rose },
+      { href: "/tenant/reviews", label: "Reviews", icon: Star, roles: TENANT, tint: TINT.amber },
       { href: "/tenant/readiness", label: "Readiness", icon: BarChart3, roles: TENANT, tint: TINT.emerald },
     ],
   },
@@ -66,6 +67,7 @@ export const NAV: NavSection[] = [
       { href: "/platform/tenants", label: "Institutions", icon: Building2, roles: PLATFORM, tint: TINT.cyan },
       { href: "/platform/content", label: "Question Bank", icon: BookOpen, roles: PLATFORM, tint: TINT.emerald },
       { href: "/platform/results", label: "Exam results", icon: Trophy, roles: PLATFORM, tint: TINT.rose },
+      { href: "/platform/reviews", label: "Reviews", icon: Star, roles: PLATFORM, tint: TINT.amber },
       { href: "/platform/audit", label: "Audit log", icon: ScrollText, roles: PLATFORM, tint: TINT.slate },
     ],
   },

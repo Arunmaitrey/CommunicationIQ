@@ -218,7 +218,7 @@ class ConsentRequest(BaseModel):
 
 
 # --------------------------------------------------------------------------
-# Trainer / tenant admin
+# admin / tenant admin
 # --------------------------------------------------------------------------
 
 class CohortReadiness(BaseModel):
@@ -315,10 +315,6 @@ class TenantProfile(BaseModel):
     # Placement season, accreditation, anything else worth recording.
     accreditation: str = Field(default="", max_length=120)
     notes: str = Field(default="", max_length=2000)
-
-    # Billing paperwork. India-specific and genuinely needed on an invoice.
-    # (gst_number and billing_email removed — plans/subscriptions/billing removed)
-    # Kept as comment for context; actual fields deleted.
 
 
 class TenantOut(BaseModel):

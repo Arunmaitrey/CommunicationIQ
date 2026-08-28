@@ -5,7 +5,7 @@ import { IDENTITY_EVENT } from "@/components/ThemeProvider";
 /** Whether the navigation rail is collapsed, remembered per account.
  *
  *  Per account for the same reason the theme is: a placement lab is a room of
- *  shared machines, and a trainer who collapsed the rail must not hand a
+ *  shared machines, and a admin who collapsed the rail must not hand a
  *  collapsed rail to the student who signs in next. Same storage convention,
  *  same identity event, so the two stay consistent.
  *

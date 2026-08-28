@@ -12,6 +12,9 @@ import {
   type WritingPromptRow, type WritingResult,
 } from "@/lib/api";
 import { useData } from "@/lib/useData";
+import { FullscreenPrompt } from "@/components/FullscreenPrompt";
+import { useProctoring } from "@/lib/proctoring";
+import { CameraPreview } from "@/components/proctoring/CameraPreview";
 
 export default function WritingPage() {
   return (
@@ -21,7 +24,7 @@ export default function WritingPage() {
   );
 }
 
-type Stage = "browse" | "write" | "marked";
+type Stage = "intro" | "browse" | "write" | "marked";
 
 const KIND_LABEL: Record<string, string> = {
   email: "Email", report: "Report", essay: "Essay",
@@ -39,8 +42,9 @@ const MEASURE_LABEL: Record<string, string> = {
 function Writing() {
   const { toast } = useToast();
   const { data, loading, error, reload } = useData(() => writingApi.prompts());
+  const proctoring = useProctoring();
 
-  const [stage, setStage] = useState<Stage>("browse");
+  const [stage, setStage] = useState<Stage>("intro");
   const [prompt, setPrompt] = useState<WritingPromptRow | null>(null);
   const [text, setText] = useState("");
   const [result, setResult] = useState<WritingResult | null>(null);
@@ -95,6 +99,26 @@ function Writing() {
     }
   }
 
+  // Auto-start with a random prompt after fullscreen prompt
+  useEffect(() => {
+    if (data && data.length > 0 && stage === "browse" && !prompt && !busy) {
+      setBusy(true);
+      const random = data[Math.floor(Math.random() * data.length)];
+      begin(random);
+    }
+  }, [data, stage, prompt, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Request camera when practice starts
+  useEffect(() => {
+    if (stage !== "intro" && !proctoring.state.cameraActive) {
+      proctoring.requestCamera();
+    }
+  }, [stage]);
+
+  if (stage === "intro") {
+    return <FullscreenPrompt onStart={() => setStage("browse")} />;
+  }
+
   if (loading) return <Skeleton rows={5} />;
   if (error) return <ErrorNote message={error} />;
 
@@ -103,6 +127,12 @@ function Writing() {
     const short = words < prompt.min_words;
     return (
       <>
+        <CameraPreview
+          videoRef={proctoring.videoRef}
+          faceCount={proctoring.state.faceCount}
+          strikes={proctoring.state.strikes}
+          isFocused={proctoring.state.isFocused}
+        />
         <PageHeader
           title={prompt.title}
           sub={`${KIND_LABEL[prompt.kind] ?? prompt.kind} · about ${prompt.suggested_minutes} minutes · at least ${prompt.min_words} words`}

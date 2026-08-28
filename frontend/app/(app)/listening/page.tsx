@@ -11,13 +11,14 @@ import { useToast } from "@/components/Toast";
 import { ChoiceOption,
   Badge, EmptyState, ErrorNote, GapMeter, PageHeader, Section, Skeleton,
 } from "@/components/ui";
-import { speak } from "@/lib/audio";
-import {
-  ApiError, listeningApi,
+import { speak } from "@/lib/audio";import { ApiError, listeningApi,
   type ListeningPassageRow, type ListeningQuestion,
   type ListeningResult, type ListeningStart,
 } from "@/lib/api";
 import { useData } from "@/lib/useData";
+import { FullscreenPrompt } from "@/components/FullscreenPrompt";
+import { useProctoring } from "@/lib/proctoring";
+import { CameraPreview } from "@/components/proctoring/CameraPreview";
 
 export default function ListeningPage() {
   return (
@@ -27,7 +28,7 @@ export default function ListeningPage() {
   );
 }
 
-type Stage = "browse" | "listen" | "answer" | "marked";
+type Stage = "intro" | "browse" | "listen" | "answer" | "marked";
 
 const KIND_LABEL: Record<string, string> = {
   announcement: "Announcement",
@@ -47,8 +48,9 @@ const KIND_LABEL: Record<string, string> = {
 function Listening() {
   const { toast } = useToast();
   const { data, loading, error, reload } = useData(() => listeningApi.passages());
+  const proctoring = useProctoring();
 
-  const [stage, setStage] = useState<Stage>("browse");
+  const [stage, setStage] = useState<Stage>("intro");
   const [session, setSession] = useState<ListeningStart | null>(null);
   const [questions, setQuestions] = useState<ListeningQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, number | null>>({});
@@ -137,6 +139,26 @@ function Listening() {
     setResult(null);
   }
 
+  // Auto-start with a random passage after fullscreen prompt
+  useEffect(() => {
+    if (data && data.length > 0 && stage === "browse" && !session && !busy) {
+      setBusy(true);
+      const random = data[Math.floor(Math.random() * data.length)];
+      begin(random);
+    }
+  }, [data, stage, session, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Request camera when practice starts
+  useEffect(() => {
+    if (stage !== "intro" && !proctoring.state.cameraActive) {
+      proctoring.requestCamera();
+    }
+  }, [stage]);
+
+  if (stage === "intro") {
+    return <FullscreenPrompt onStart={() => setStage("browse")} />;
+  }
+
   if (loading) return <Skeleton rows={5} />;
   if (error) return <ErrorNote message={error} />;
 
@@ -145,6 +167,12 @@ function Listening() {
     const playsLeft = session.plays_allowed - playsUsed;
     return (
       <>
+        <CameraPreview
+          videoRef={proctoring.videoRef}
+          faceCount={proctoring.state.faceCount}
+          strikes={proctoring.state.strikes}
+          isFocused={proctoring.state.isFocused}
+        />
         <PageHeader
           title={session.title}
           sub={`${KIND_LABEL[session.kind] ?? session.kind} · ${session.question_count} questions after the audio`}

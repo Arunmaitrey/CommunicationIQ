@@ -9,7 +9,5 @@ because they constrain what may ever be added to this package:
 
 * The ledger is append-only and server-authoritative. No endpoint accepts an
   XP amount from a client (NFR-15).
-* There is no payment hook. Streak freezes and repairs are earned or free —
-  never purchasable — and the way that is guaranteed is that the code to
-  charge for them does not exist (GAM-21).
+
 """

@@ -19,6 +19,9 @@ import {
   beep, levelToFraction, MicPermissionError, MicRecorder, MicUnavailableError,
   playAudioUrl, primeSpeech, speak, TARGET_SAMPLE_RATE,
 } from "@/lib/audio";
+import { useProctoring } from "@/lib/proctoring";
+import { CameraPreview } from "@/components/proctoring/CameraPreview";
+import { ProctorWarning } from "@/components/proctoring/ProctorWarning";
 
 export default function RunPage() {
   return (
@@ -29,7 +32,7 @@ export default function RunPage() {
 }
 
 type Phase =
-  | "loading" | "section" | "prep" | "prompt" | "answer"
+  | "loading" | "intro" | "section" | "prep" | "prompt" | "answer"
   // Manual gates (section flags): "armed" waits for Start Recording,
   // "listen" waits for Play Audio before a heard passage, "ack" waits for the
   // typed "Okay" after a clip (clip-level acknowledgement).
@@ -173,6 +176,42 @@ function Runner() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [okayText, setOkayText] = useState("");
   const [uploadNote, setUploadNote] = useState("");
+
+  // ── Proctoring ──────────────────────────────────────────────────────
+  const proctoring = useProctoring();
+  const [showProctorWarning, setShowProctorWarning] = useState(false);
+  const [proctorMessage, setProctorMessage] = useState("");
+  // Auto-submit after 3 strikes
+  useEffect(() => {
+    if (proctoring.state.strikes >= 3 && phase !== "submitting" && phase !== "saving" && phase !== "failed") {
+      setProctorMessage("Too many violations. The exam is being auto-submitted.");
+      setShowProctorWarning(true);
+      setTimeout(async () => {
+        try {
+          setPhase("submitting");
+          proctoring.stopCamera();
+          await attemptApi.submit(id);
+          router.replace(`/results/${id}`);
+        } catch { /* ignore - already showing error */ }
+      }, 1500);
+    }
+  }, [proctoring.state.strikes, phase]);
+  // Show warning on tab blur
+  useEffect(() => {
+    if (proctoring.state.events.length > 0) {
+      const last = proctoring.state.events[proctoring.state.events.length - 1];
+      if (last.flag === "tab_blur" || last.flag === "screenshot_attempt" || last.flag === "devtools_open") {
+        setProctorMessage(last.detail || "Suspicious activity detected");
+        setShowProctorWarning(true);
+      }
+    }
+  }, [proctoring.state.events.length]);
+  // Request camera when exam starts
+  useEffect(() => {
+    if (phase !== "loading" && phase !== "failed" && !proctoring.state.cameraActive) {
+      proctoring.requestCamera();
+    }
+  }, [phase, proctoring.state.cameraActive]);
   // Seconds left in the whole sitting, or null before it has started. Counted
   // against the server's clock, not the device's.
   const [sittingLeft, setSittingLeft] = useState<number | null>(null);
@@ -273,6 +312,24 @@ function Runner() {
     return () => document.removeEventListener("keydown", block);
   }, [phase]);
 
+  // Connectivity check: warn students when internet drops during exam
+  useEffect(() => {
+    if (phase === "loading" || phase === "submitting" || phase === "failed") return;
+    const onOffline = () => {
+      setNotice("⚠️ Internet connection lost. Your answers are saved locally. Reconnect before submitting.");
+    };
+    const onOnline = () => {
+      setNotice("✅ Internet connection restored.");
+      setTimeout(() => setNotice(""), 3000);
+    };
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("online", onOnline);
+    return () => {
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("online", onOnline);
+    };
+  }, [phase]);
+
   useEffect(() => () => recorder.current?.close(), []);
 
   /** Send anything this browser is still holding for this attempt. */
@@ -335,9 +392,18 @@ function Runner() {
       try {
         const data = await attemptApi.runner(id);
         if (!data.items.length) {
-          setError("This simulation has no items configured.");
-          setPhase("failed");
-          return;
+          // Old attempt with 0 items — auto-start a new exam with same profile
+          try {
+            const newAttempt = await attemptApi.start(data.profile_id, "practice");
+            router.replace(`/attempt/${newAttempt.attempt_id}/run`);
+            return;
+          } catch {
+            // Fallback: show error with link to tests page
+            setError("This attempt has no questions. Redirecting to start a new exam...");
+            setPhase("failed");
+            setTimeout(() => router.push("/tests"), 2000);
+            return;
+          }
         }
         setPayload(data);
         // Open the microphone up front when any item speaks, so the permission
@@ -376,7 +442,7 @@ function Runner() {
             }
           } });
         }
-        setPhase(resumeToSubmit.current ? "submitting" : "section");
+        setPhase(resumeToSubmit.current ? "submitting" : "intro");
         if (resumeToSubmit.current) void finishResumed();
       } catch (err) {
         // A microphone failure and an API failure need different words: one is
@@ -911,28 +977,59 @@ function Runner() {
     return <Centered><Loader2 size={22} className="animate-spin text-muted" /></Centered>;
   }
 
-  if (phase === "failed") {
-    // Where "try again" actually leads depends on who stopped.
-    //
-    // A student can walk away and start another simulation whenever they
-    // like. An invited candidate cannot: an invitation is one sitting, the
-    // server refuses a second attempt, and /simulate is a student page that
-    // would eject them to a login screen they have no account for. What they
-    // need is the runner for *this* attempt -- it resumes the same one, and
-    // everything already recorded is already uploaded.
+  if (phase === "intro") {
+    return (
+      <Centered>
+        <div className="max-w-sm text-center space-y-4">
+          <div className="w-12 h-12 rounded-full mx-auto flex items-center justify-center" style={{ background: "color-mix(in srgb, var(--primary) 12%, transparent)" }}>
+            <Mic size={24} style={{ color: "var(--primary)" }} />
+          </div>
+          <h2 className="text-base font-bold">Ready to begin</h2>
+          <p className="text-xs text-muted leading-relaxed">
+            This exam works best in fullscreen mode. It hides browser tabs and
+            distractions so you can focus on the test.
+          </p>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={() => {
+                document.documentElement.requestFullscreen()
+                  .then(() => setIsFullscreen(true))
+                  .catch(() => {});
+                setPhase("section");
+              }}
+              className="btn btn-primary w-full ds-focus">
+              <Maximize2 size={15} />
+              Enter fullscreen and start
+            </button>
+            <button
+              onClick={() => setPhase("section")}
+              className="btn btn-ghost w-full ds-focus text-muted">
+              Start without fullscreen
+            </button>
+          </div>
+          <p className="text-[10px] text-muted">
+            You can toggle fullscreen at any time during the exam.
+          </p>
+        </div>
+      </Centered>
+    );
+  }  if (phase === "failed") {
+    const noItems = error?.includes("no questions") || error?.includes("no items");
     return (
       <Centered>
         <div className="max-w-sm text-center">
-          <div className="text-sm font-bold mb-2">This attempt stopped</div>
+          <div className="text-sm font-bold mb-2">{noItems ? "Cannot resume this attempt" : "This attempt stopped"}</div>
           <p className="text-xs text-muted mb-4">{error}</p>
           <p className="text-[11px] text-muted mb-4 leading-relaxed">
-            Nothing you have already answered is lost. Carry on from where you
-            stopped.
+            {noItems
+              ? "This attempt was started before the exam was properly configured."
+              : "Nothing you have already answered is lost. Carry on from where you stopped."}
           </p>
           <button
-            onClick={() => router.push(`/attempt/${id}/run`)}
-            className="btn btn-primary ds-focus">
-            Resume and carry on
+            onClick={() => router.push("/tests")}
+            className="btn btn-primary ds-focus"
+          >
+            Start a new exam
           </button>
         </div>
       </Centered>
@@ -1004,6 +1101,25 @@ function Runner() {
 
   return (
     <div className={`runner${skin ? ` ${skin.theme}` : ""}`}>
+      {/* Proctoring camera preview */}
+      <CameraPreview
+        videoRef={proctoring.videoRef}
+        faceCount={proctoring.state.faceCount}
+        strikes={proctoring.state.strikes}
+        isFocused={proctoring.state.isFocused}
+      />
+
+      {/* Proctoring warning popup */}
+      {showProctorWarning && (
+        <ProctorWarning
+          strikes={proctoring.state.strikes}
+          maxStrikes={3}
+          message={proctorMessage}
+          onDismiss={() => setShowProctorWarning(false)}
+          isFocused={proctoring.state.isFocused}
+        />
+      )}
+
       <div className="text-center text-[10px] font-bold uppercase tracking-wider py-1 bg-amber-50 text-amber-800 border-b border-amber-200" style={{ background: "color-mix(in srgb, var(--rag-amber) 12%, transparent)", color: "var(--rag-amber)" }}>
         This exam is monitored. Copying, screenshots, and tab switching are recorded.
       </div>
@@ -1149,7 +1265,7 @@ function Runner() {
           practice tool that copies that teaches nothing and punishes the
           student whose hostel wifi dropped. It pauses, says what it saw, and
           asks whether now is still a good time -- and records the
-          interruption either way, so a trainer sees a disturbed attempt
+          interruption either way, so a admin sees a disturbed attempt
           rather than an unexplained dip. */}
       {away && (
         <div className="modal-scrim" role="presentation"

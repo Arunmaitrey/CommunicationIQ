@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpen, Check, Flame, Gauge, X, Zap } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StepGuide } from "@/components/StepGuide";
@@ -13,6 +13,9 @@ import {
   type ReadingResult, type ReadingStart,
 } from "@/lib/api";
 import { useData } from "@/lib/useData";
+import { FullscreenPrompt } from "@/components/FullscreenPrompt";
+import { useProctoring } from "@/lib/proctoring";
+import { CameraPreview } from "@/components/proctoring/CameraPreview";
 
 export default function ReadingPage() {
   return (
@@ -22,7 +25,7 @@ export default function ReadingPage() {
   );
 }
 
-type Stage = "browse" | "read" | "answer" | "marked";
+type Stage = "intro" | "browse" | "read" | "answer" | "marked";
 
 const KIND_LABEL: Record<string, string> = {
   email: "Email",
@@ -42,8 +45,9 @@ const KIND_LABEL: Record<string, string> = {
 function Reading() {
   const { toast } = useToast();
   const { data, loading, error, reload } = useData(() => readingApi.passages());
+  const proctoring = useProctoring();
 
-  const [stage, setStage] = useState<Stage>("browse");
+  const [stage, setStage] = useState<Stage>("intro");
   const [session, setSession] = useState<ReadingStart | null>(null);
   const [questions, setQuestions] = useState<ReadingQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, number | null>>({});
@@ -111,6 +115,26 @@ function Reading() {
     }
   }
 
+  // Auto-start with a random passage after fullscreen prompt
+  useEffect(() => {
+    if (data && data.length > 0 && stage === "browse" && !session && !busy) {
+      setBusy(true);
+      const random = data[Math.floor(Math.random() * data.length)];
+      begin(random);
+    }
+  }, [data, stage, session, busy]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Request camera when practice starts
+  useEffect(() => {
+    if (stage !== "intro" && !proctoring.state.cameraActive) {
+      proctoring.requestCamera();
+    }
+  }, [stage]);
+
+  if (stage === "intro") {
+    return <FullscreenPrompt onStart={() => setStage("browse")} />;
+  }
+
   if (loading) return <Skeleton rows={5} />;
   if (error) return <ErrorNote message={error} />;
 
@@ -146,6 +170,12 @@ function Reading() {
     const answered = questions.filter((q) => answers[q.id] != null).length;
     return (
       <>
+        <CameraPreview
+          videoRef={proctoring.videoRef}
+          faceCount={proctoring.state.faceCount}
+          strikes={proctoring.state.strikes}
+          isFocused={proctoring.state.isFocused}
+        />
         <PageHeader title={session.title}
                     sub="Choose one answer for each question. The passage is no longer available." />
 

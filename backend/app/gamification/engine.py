@@ -10,8 +10,6 @@ Four properties are structural, not policy:
   ledger is append-only; nothing in the codebase updates or deletes a row.
 * **Effort and mastery never mix.** Level comes from the ledger and always
   rises. The gap meter comes from SkillMastery and is allowed to stall.
-* **Freezes are earned or free, never bought.** No price, no currency, no
-  payment hook — the only version of that promise that cannot quietly change.
 * **Quizzes cannot replace speaking.** Quiz XP is capped as a share of the
   week, and when the cap bites the ledger records that it did.
 

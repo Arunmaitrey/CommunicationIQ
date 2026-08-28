@@ -11,6 +11,9 @@ import {
 import {
   ApiError, practiceApi, type QuizItem, type QuizResult,
 } from "@/lib/api";
+import { FullscreenPrompt } from "@/components/FullscreenPrompt";
+import { useProctoring } from "@/lib/proctoring";
+import { CameraPreview } from "@/components/proctoring/CameraPreview";
 
 export default function QuizPage() {
   return (
@@ -20,7 +23,7 @@ export default function QuizPage() {
   );
 }
 
-type Stage = "idle" | "loading" | "playing" | "marked";
+type Stage = "intro" | "idle" | "loading" | "playing" | "marked";
 
 /** The fast loop (QUIZ-01/03).
  *
@@ -31,7 +34,8 @@ type Stage = "idle" | "loading" | "playing" | "marked";
  */
 function Quiz() {
   const { toast } = useToast();
-  const [stage, setStage] = useState<Stage>("idle");
+  const proctoring = useProctoring();
+  const [stage, setStage] = useState<Stage>("intro");
   const [items, setItems] = useState<QuizItem[]>([]);
   const [index, setIndex] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number | null>>({});
@@ -63,6 +67,24 @@ function Quiz() {
       toast("error", msg);
       setStage("idle");
     }
+  }
+
+  // Auto-start quiz after fullscreen prompt
+  useEffect(() => {
+    if (stage === "idle") {
+      void start();
+    }
+  }, [stage]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Request camera when quiz starts
+  useEffect(() => {
+    if (stage !== "intro" && !proctoring.state.cameraActive) {
+      proctoring.requestCamera();
+    }
+  }, [stage]);
+
+  if (stage === "intro") {
+    return <FullscreenPrompt onStart={() => setStage("idle")} />;
   }
 
   // The shot clock. Running out is an unanswered item, not a wrong one.
@@ -127,6 +149,12 @@ function Quiz() {
   if (stage === "playing" && item) {
     return (
       <>
+        <CameraPreview
+          videoRef={proctoring.videoRef}
+          faceCount={proctoring.state.faceCount}
+          strikes={proctoring.state.strikes}
+          isFocused={proctoring.state.isFocused}
+        />
         <div className="flex items-center gap-3 mb-4">
           <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
             {item.category.replace(/_/g, " ")}

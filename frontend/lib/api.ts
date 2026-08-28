@@ -44,11 +44,10 @@ export function sessionExpired(forToken?: string | null) {
   if (typeof window === "undefined") return;
   if (forToken !== undefined && forToken !== getToken()) return;
   if (expiring) return;
-  if (window.location.pathname === "/login") return;
+  if (window.location.pathname === "/" || window.location.pathname === "/login") return;
   expiring = true;
   setToken(null);
-  const back = window.location.pathname + window.location.search;
-  window.location.replace(`/login?expired=1&next=${encodeURIComponent(back)}`);
+  window.location.replace("/");
 }
 
 /** Called on a successful sign-in so a later genuine expiry can redirect again. */
@@ -463,6 +462,12 @@ export interface AuditRow {
   action: string; entity: string; entity_id: string; at: string;
 }
 
+export interface ReviewRow {
+  id: string; attempt_id: string; user_id: string; user_name: string;
+  user_email: string; tenant_id?: string; profile_name: string;
+  rating: number; difficulty: string; comment: string; created_at: string;
+}
+
 export interface GamificationConfig {
   tenant_id: string | null;
   xp_table: Record<string, number>;
@@ -502,7 +507,7 @@ export const api = {
    *
    *  The employer who commissioned the assessment could not see its result:
    *  the candidate's own report is scoped to the person who sat it, and every
-   *  trainer route is cohort-scoped, which a candidate is not in. */
+   *  admin route is cohort-scoped, which a candidate is not in. */
   invitationResult: (invitationId: string) =>
     get<AttemptResult>(`/tenant/invitations/${invitationId}/result`),
 
@@ -513,6 +518,14 @@ export const api = {
    *  the student themselves. */
   tenantStudentAttempts: (userId: string) =>
     get<Attempt[]>(`/tenant/students/${userId}/attempts`),
+
+  tenantExportResults: async (): Promise<Blob> => {
+    const res = await fetch(`${API_BASE}/tenant/export-results`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+    });
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`);
+    return res.blob();
+  },
 
   tenantProfiles: (includeRetired = false) =>
     get<SimulationProfile[]>(
@@ -533,6 +546,7 @@ export const api = {
   setProfileStatus: (id: string, status: string) =>
     post<SimulationProfile>(`/tenant/profiles/${id}/status`, { status }),
   tenantSeason: () => get<SeasonRow[]>("/tenant/season"),
+  tenantReviews: () => get<ReviewRow[]>("/tenant/reviews"),
 
   platformOverview: () => get<PlatformOverview>("/platform/overview"),
   platformTenants: () => get<TenantRow[]>("/platform/tenants"),
@@ -566,6 +580,7 @@ export const api = {
 
   platformCapabilities: () => get<CapabilityRow[]>("/platform/capabilities"),
   platformAudit: () => get<AuditRow[]>("/platform/audit"),
+  platformReviews: () => get<ReviewRow[]>("/platform/reviews"),
   platformGamification: () => get<GamificationConfig>("/platform/gamification"),
   narrationSettings: () => get<NarrationSettings>("/platform/narration/settings"),
 };
@@ -1189,7 +1204,7 @@ export const attemptApi = {
 };
 
 // --------------------------------------------------------------------------
-// Institution administration, trainer ops, game and practice (M3-M6)
+// Institution administration, admin ops, game and practice (M3-M6)
 // --------------------------------------------------------------------------
 
 export interface SeatUsage {
@@ -1213,19 +1228,6 @@ export interface Assignment {
   id: string; cohort_id: string; cohort_name: string; profile_id: string;
   profile_name: string; mandatory: boolean; opens_at: string | null;
   due_at: string | null; max_attempts: number; completed: number; total: number;
-}
-
-export interface Flag {
-  id: string; user_id: string; student_name: string; reason: string;
-  note: string; auto_suggested: boolean; resolved: boolean;
-  raised_by_name: string; created_at: string;
-}
-
-export interface MomentumRow {
-  user_id: string; full_name: string; cohort_name: string;
-  days_since_activity: number | null; attempts: number; current_streak: number;
-  days_to_drive: number | null; overall_score: number | null;
-  suggest_flag: boolean; suggestion: string; flagged: boolean;
 }
 
 export interface BadgeRow {

@@ -202,14 +202,37 @@ function Practise() {
  *  something you sit deliberately, not something a quick-start should pick
  *  for you.
  */
+
+/** Maps each task_type to its skill. Mirrors backend app/sections.py SKILL_OF_TASK. */
+const SKILL_OF_TASK: Record<string, string> = {
+  read_aloud: "speaking", repeat_sentence: "speaking", spoken_completion: "speaking",
+  spoken_correction: "speaking", sentence_build: "speaking", short_answer: "speaking",
+  story_retell: "speaking", open_response: "speaking", conversation_question: "speaking",
+  passage_question: "speaking", read_words: "speaking",
+  listening_comprehension: "listening", dictation: "listening",
+  response_selection: "listening", audio_comprehension: "listening",
+  reading_comprehension: "reading", vocabulary_in_context: "reading",
+  vocabulary: "reading", grammar: "reading", voice_change: "reading",
+  email: "writing", email_writing: "writing", sentence_completion: "writing",
+  passage_reconstruction: "writing", typing: "writing",
+};
+
+function isSpeakingOnlyProfile(p: SimulationProfile): boolean {
+  if (!p.sections || p.sections.length === 0) return false;
+  return p.sections.every((s) => SKILL_OF_TASK[s.task_type] === "speaking");
+}
+
 function pickSpeakingProfile(profiles: SimulationProfile[],
                              baselineDone: boolean): SimulationProfile | undefined {
+  const speakingOnly = profiles.filter((p) => isSpeakingOnlyProfile(p));
+  if (speakingOnly.length === 0) return undefined;
+
   if (!baselineDone) {
-    const b = profiles.find((p) => p.is_baseline);
+    const b = speakingOnly.find((p) => p.is_baseline);
     if (b) return b;
   }
-  const practice = profiles.filter((p) => !p.is_baseline && !p.company);
-  const pool = practice.length > 0 ? practice : profiles;
+  const practice = speakingOnly.filter((p) => !p.is_baseline && !p.company);
+  const pool = practice.length > 0 ? practice : speakingOnly;
   return [...pool].sort((a, b) => a.estimated_minutes - b.estimated_minutes)[0];
 }
 

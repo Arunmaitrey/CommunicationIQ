@@ -1,0 +1,25 @@
+# Tier 1: Speech engine (heavy, multi-GB downloads)
+torch==2.5.1
+torchaudio==2.5.1
+faster-whisper==1.1.1
+transformers==4.45.2
+accelerate==0.34.2
+librosa==0.11.0
+soundfile==0.13.1
+numpy==2.5.2
+scipy==1.14.1
+sentencepiece==0.2.0
+tokenizers==0.20.3
+huggingface-hub==0.25.2
+
+# ONNX runtime for faster inference
+onnxruntime==1.19.2
+
+# VAD
+webrtcvad-wheels==2.0.10
+
+# Pronunciation assessment
+pronunciation-assessment==0.1.0
+
+# Grammar/Content
+language-tool-python==2.7.1

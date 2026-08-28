@@ -109,7 +109,7 @@ def _advice_for(dimension: str) -> str:
     if written:
         return written
     return ("We have not written practice advice for this one yet. Your "
-            "trainer can suggest something specific.")
+            "admin can suggest something specific.")
 
 
 # Said in the student's own words. Ordered from lowest to highest.

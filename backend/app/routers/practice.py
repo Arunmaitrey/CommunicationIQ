@@ -62,7 +62,9 @@ async def next_quiz(principal: Principal, models: TenantModels,
     count = max(1, min(count, 25))
     weakest = await game.weakest_skills(models, principal.user_id, 2)
 
-    query = models.QuizItem.find(models.QuizItem.status == "published")
+    # Practice shows all published quiz items so students always have content.
+    query = models.QuizItem.find(
+        models.QuizItem.status == "published")
     if category:
         query = query.find(models.QuizItem.category == category)
     pool = await query.to_list()

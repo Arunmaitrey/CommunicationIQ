@@ -6,6 +6,10 @@ import { Badge, EmptyState, ErrorNote, PageHeader, Section, Skeleton, Table, Tab
 import { api, attemptApi, type Attempt, type UserRow, type AttemptResult } from "@/lib/api";
 import { useData } from "@/lib/useData";
 import { useToast } from "@/components/Toast";
+import {
+  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  BarChart, Bar, Cell, PieChart, Pie, Legend,
+} from "recharts";
 
 export default function TenantResultsPage() {
   return (
@@ -45,6 +49,27 @@ function Results() {
       <PageHeader
         title="Exam Results"
         sub="Select a student to view their exam history, scores, and downloadable reports."
+        action={
+          <button
+            onClick={() => void (async () => {
+              try {
+                const blob = await api.tenantExportResults();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = url;
+                a.download = "student-results.csv";
+                a.click();
+                URL.revokeObjectURL(url);
+                toast("success", "Results exported");
+              } catch (e: any) {
+                toast(e.message || "Export failed", "error");
+              }
+            })()}
+            className="btn btn-primary text-[12px] px-3 py-1.5"
+          >
+            <Download size={13} /> Export All Results
+          </button>
+        }
       />
 
       {/* Summary stats */}
@@ -200,6 +225,69 @@ function StudentAttemptHistory({ studentId, student }: { studentId: string; stud
               <Badge tone={student.active ? "var(--rag-green)" : "var(--muted)"}>
                 {student.active ? "Active" : "Inactive"}
               </Badge>
+            </div>
+          )}
+
+          {/* Score trend chart */}
+          {scoredAttempts.length >= 2 && (
+            <div className="mb-4">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Score growth</div>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart
+                    data={scoredAttempts
+                      .slice()
+                      .sort((a, b) => new Date(a.started_at || 0).getTime() - new Date(b.started_at || 0).getTime())
+                      .map((a, i) => ({
+                        name: `#${i + 1}`,
+                        score: (a.overall_score as number) ?? 0,
+                        profile: a.profile_name || "",
+                      }))}
+                  >
+                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                    <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      formatter={(v) => typeof v === "number" ? v.toFixed(1) : v}
+                      labelFormatter={(l, data) => data?.[0]?.payload?.profile || l}
+                    />
+                    <Line type="monotone" dataKey="score" stroke="var(--primary)" strokeWidth={2} dot={{ r: 4, fill: "var(--primary)" }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
+
+          {/* Score distribution pie chart */}
+          {scoredAttempts.length >= 3 && (
+            <div className="mb-4">
+              <div className="text-[11px] font-bold uppercase tracking-wide text-muted mb-2">Score distribution</div>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={[
+                        { name: "Excellent (70+)", value: scoredAttempts.filter((a) => (a.overall_score ?? 0) >= 70).length },
+                        { name: "Good (50-69)", value: scoredAttempts.filter((a) => (a.overall_score ?? 0) >= 50 && (a.overall_score ?? 0) < 70).length },
+                        { name: "Needs work (<50)", value: scoredAttempts.filter((a) => (a.overall_score ?? 0) < 50).length },
+                      ].filter((d) => d.value > 0)}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={30}
+                      outerRadius={60}
+                      paddingAngle={3}
+                      dataKey="value"
+                      label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                      labelLine={false}
+                    >
+                      <Cell fill="var(--rag-green)" />
+                      <Cell fill="var(--rag-amber)" />
+                      <Cell fill="var(--rag-red)" />
+                    </Pie>
+                    <Tooltip />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
             </div>
           )}
 

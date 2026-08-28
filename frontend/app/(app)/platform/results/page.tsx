@@ -6,6 +6,10 @@ import { Badge, EmptyState, ErrorNote, PageHeader, Section, Skeleton } from "@/c
 import { api, attemptApi, type Attempt, type TenantRow, type UserRow } from "@/lib/api";
 import { PLATFORM_ROLES } from "@/lib/roles";
 import { useData } from "@/lib/useData";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  PieChart, Pie, Legend,
+} from "recharts";
 
 export default function PlatformResultsPage() {
   return (
@@ -148,7 +152,7 @@ function Results() {
       )}
 
       {/* Quick stats */}
-      <div className="grid sm:grid-cols-3 gap-3 mt-4">
+      <div className="grid sm:grid-cols-3 gap-3 mb-4">
         <div className="ds-card p-4">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-muted">Total institutions</div>
           <div className="text-2xl font-bold mt-2" style={{ color: "var(--primary)" }}>
@@ -168,6 +172,63 @@ function Results() {
           </div>
         </div>
       </div>
+
+      {/* Institution comparison chart */}
+      {(tenants.data ?? []).length > 0 && (
+        <div className="grid md:grid-cols-2 gap-4 mb-4">
+          <Section title="Seat usage by institution">
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={(tenants.data ?? []).map((t) => ({
+                    name: t.name.length > 12 ? t.name.slice(0, 12) + '...' : t.name,
+                    used: t.seats_used ?? 0,
+                    limit: t.seat_limit,
+                  }))}
+                  barSize={20}
+                >
+                  <XAxis dataKey="name" tick={{ fontSize: 9 }} interval={0} angle={-30} textAnchor="end" height={50} />
+                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="used" name="Seats used" fill="var(--primary)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="limit" name="Seat limit" fill="var(--surface-2)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </Section>
+
+          <Section title="Institution status">
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: "Active", value: (tenants.data ?? []).filter((t) => t.status === "active").length },
+                      { name: "Trial", value: (tenants.data ?? []).filter((t) => t.status === "trial").length },
+                      { name: "Other", value: (tenants.data ?? []).filter((t) => t.status !== "active" && t.status !== "trial").length },
+                    ].filter((d) => d.value > 0)}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={40}
+                    outerRadius={75}
+                    paddingAngle={3}
+                    dataKey="value"
+                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
+                    labelLine={false}
+                  >
+                    <Cell fill="var(--rag-green)" />
+                    <Cell fill="var(--rag-amber)" />
+                    <Cell fill="var(--muted)" />
+                  </Pie>
+                  <Tooltip />
+                  <Legend />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </Section>
+        </div>
+      )}
     </>
   );
 }

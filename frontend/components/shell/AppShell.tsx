@@ -109,7 +109,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <footer className="border-t border-border bg-surface/50 px-4 py-3 flex items-center justify-between text-[11px] text-muted shrink-0">
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-foreground/70">CommunicationIQ</span>
+            <span className="font-semibold text-foreground/70"><Link href="/" className="hover:text-foreground transition-colors">CommunicationIQ</Link></span>
             <span>&copy; {new Date().getFullYear()} Fluenzee. All rights reserved.</span>
           </div>
         </footer>
@@ -370,11 +370,13 @@ function RailContent({ sections, pathname, onNavigate, brand, collapsed = false 
                  onError={(e) => { e.currentTarget.style.display = "none"; }} />
           ) : <BrandMark />
         ) : (
-          <TenantLockup
-            logoUrl={brand?.logoUrl}
-            displayName={brand?.displayName}
-            fallbackName={brand?.tenantName}
-          />
+          <Link href="/" className="hover:opacity-80 transition-opacity">
+            <TenantLockup
+              logoUrl={brand?.logoUrl}
+              displayName={brand?.displayName}
+              fallbackName={brand?.tenantName}
+            />
+          </Link>
         )}
         {onNavigate && (
           <button onClick={onNavigate} className="btn btn-icon ds-focus" aria-label="Close navigation"

@@ -1,6 +1,6 @@
 """Readiness banding.
 
-One definition, used by the trainer view, the cohort dashboard and every
+One definition, used by the admin view, the cohort dashboard and every
 export, so a student is never "placement ready" on one screen and "needs
 training" on another.
 

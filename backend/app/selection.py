@@ -3,7 +3,7 @@
 Selection was ``task_type`` and ``status``. That is the right pool for a
 diagnostic and the wrong one for a company round: an employer hiring for a
 banking back-office wants the workplace material to be banking's, and a
-trainer running a hard retake wants the hard half of the bank rather than a
+admin running a hard retake wants the hard half of the bank rather than a
 fresh random third of all of it.
 
 Everything here is **optional**. A section that configures nothing selects

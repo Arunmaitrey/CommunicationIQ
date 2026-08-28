@@ -149,14 +149,13 @@ export default function Index() {
         {/* Who signs in */}
         <section id="roles" className="py-14">
           <div className="mx-auto w-full px-6 lg:px-16" style={{ maxWidth: 1280 }}>
-            <h2 className="text-lg font-bold mb-2 text-center">One product, four consoles</h2>
+            <h2 className="text-lg font-bold mb-2 text-center">One product, three consoles</h2>
             <p className="text-xs text-center mb-6" style={{ color: "var(--muted)" }}>Different roles, different views, one shared question bank.</p>
             <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
                 { icon: Users, title: "Students", body: "Practise, take tests, watch the needle move. Track progress across every skill.", href: "/signup", link: "Create account" },
                 { icon: Shield, title: "Institution Admin", body: "Manage people, assessments, cohorts, and results. Export reports.", href: "/login", link: "Sign in" },
                 { icon: Target, title: "Platform", body: "All institutions, question bank, audit trail. Full control.", href: "/login", link: "Sign in" },
-                { icon: LineChart, title: "Trainer", body: "Cohort readiness, student mastery, intervention flags.", href: "/login", link: "Sign in" },
               ].map(({ icon: Icon, title, body, href, link }) => (
                 <div key={title} className="rounded-ds p-5 border" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
                   <Icon size={18} style={{ color: "var(--primary)" }} className="mb-3" />

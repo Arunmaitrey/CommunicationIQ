@@ -542,7 +542,7 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
    ---------------------------------------------------------------------------
    Collapsed means an icon rail, not a hidden one. Hiding navigation entirely
    trades a little width for a click every time somebody wants to move, and
-   the people who collapse it are the ones moving around most -- a trainer
+   the people who collapse it are the ones moving around most -- a admin
    flicking between cohorts and flags all afternoon. At 3.5rem every
    destination is still one click away and still in the same vertical order,
    so muscle memory survives the toggle.

@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
  *  this; a practice tool that does the same teaches nothing and punishes the
  *  student whose hostel wifi dropped or whose mother walked in. What it does
  *  instead is pause, say what it saw, and ask whether now is still a good
- *  time — the interruption is recorded either way, so a trainer can see that
+ *  time — the interruption is recorded either way, so a admin can see that
  *  an attempt was disturbed rather than wondering why the score dipped.
  *
  *  Three signals, because one is not enough on a phone:

@@ -133,35 +133,35 @@ Login is determined by email domain:
 |-----------|-------|-------------|
 | tenants | 2 | stmarys, vignan |
 | platform_users | 3 | Super admins |
-| users | 9 | 2 admins + 7 students |
-| tenant_user_directory | 9 | Email → institution mapping |
-| simulation_profiles | 12 | 6 per institution |
-| profile_sections | varies | Sections per profile |
-| reading_passages | 54 | 44 shared + 10 company-specific |
-| writing_prompts | 50 | 40 shared + 10 company-specific |
-| listening_passages | 15 | 10 shared + 5 company-specific |
-| quiz_items | 237 | 206 shared + 31 company-specific |
-| task_items | 186 | 156 shared + 30 company-specific |
-| audit_log | 50+ | Login and action tracking |
+| users | 10 | 2 admins + 8 students |
+| simulation_profiles | 6 | Base + VERSANT + company rounds |
+| profile_sections | 33 | 4-6 sections per profile |
+| reading_passages | 6 | 4 general + 2 Accenture |
+| writing_prompts | 15 | General practice prompts |
+| listening_passages | 4 | General practice passages |
+| quiz_items | 110+ | grammar, vocabulary, reading, listening |
+| task_items | 90 | Speaking tasks (6 types × 15 each) |
+| exam_reviews | 6 | Student exam feedback |
+| writing_submission_row | 3 | Writing practice submissions |
+| skill_mastery | 4 | Per-student skill tracking |
 
 ### Question Categories
 
 | Category | Items | Used In |
 |----------|-------|---------|
-| Reading Comprehension | 110 | Reading sections |
-| Audio Comprehension | 45 | Listening sections |
-| Grammar | 30 | Quiz practice |
-| Vocabulary | 30 | Quiz practice |
-| Speaking (Quiz) | 12 | Speaking quiz sections |
-| Read Aloud | 10 | Speaking sections |
-| Repeat Sentence | 8 | Speaking sections |
-| Short Answer | 12 | Speaking sections |
-| Sentence Build | 6 | Speaking sections |
-| Story Retell | 2 | Speaking sections |
-| Open Response | 118 | Speaking sections |
-| Reading Passages | 44 | Reading sections |
-| Writing Prompts | 40 | Writing sections |
-| Listening Passages | 10 | Listening sections |
+| Reading Comprehension | 34 | Reading practice + exams |
+| Audio Comprehension | 27 | Listening practice + exams |
+| Grammar | 15 | Quiz practice |
+| Vocabulary | 15 | Quiz practice |
+| Read Aloud | 15 | Speaking sections |
+| Repeat Sentence | 15 | Speaking sections |
+| Short Answer | 15 | Speaking sections |
+| Sentence Build | 15 | Speaking sections |
+| Story Retell | 15 | Speaking sections |
+| Open Response | 15 | Speaking sections |
+| Writing Prompts | 15 | Writing practice + exams |
+| Reading Passages | 6 | Reading practice (4 general + 2 company) |
+| Listening Passages | 4 | Listening practice (general) |
 
 ## Features
 
@@ -198,12 +198,13 @@ Login is determined by email domain:
 
 ### Student Features
 - Home dashboard with next action, streak, skill progress
-- Practice sessions (speaking, listening, reading, writing)
-- Grammar & vocabulary quizzes
+- Practice sessions (speaking, listening, reading, writing) with fullscreen prompt
+- Grammar & vocabulary quizzes with auto-start
 - Attempt history and detailed results
 - Profile editing (name, roll number, branch, year)
 - 17 theme options
-- Writing reviews
+- Writing submissions and scores
+- Connectivity monitoring during exams
 
 ### Institution Admin Features
 - User management (create, edit, deactivate, password reset)
@@ -299,7 +300,7 @@ CommunicationIQ/
         tenant_writes.py   # User/cohort/profile CRUD
         platform_admin.py  # Platform console, questions, audit
         platform_writes.py # Tenant/provider management
-        trainer.py         # Cohort readiness, student results
+        admin.py         # Cohort readiness, student results
         game.py            # Gamification state
         practice.py        # Quiz, drills, mistakes
         listening.py       # Listening practice
@@ -361,3 +362,109 @@ CommunicationIQ/
 - Rate limiting on login attempts
 - Password hashing with bcrypt
 - CORS configured to specific origins
+
+# CommunicationIQ Frontend Requirements
+
+## Tech Stack
+- Next.js 14 (App Router)
+- TypeScript
+- Tailwind CSS with theme token system (17 themes)
+- recharts for charts
+- Lucide React for icons
+
+## Roles
+| Role | Description |
+|------|-------------|
+| student | Takes exams, practices, views results |
+| tenant_admin | Manages institution users, cohorts, readiness |
+| super_admin | Manages all institutions, question bank, audit |
+
+## Pages (31 total)
+
+### Public
+| Route | File | Description |
+|-------|------|-------------|
+| `/` | `app/page.tsx` | Marketing landing page |
+| `/login` | `app/login/page.tsx` | Sign in |
+| `/signup` | `app/signup/page.tsx` | Student self-registration |
+| `/invite/[token]` | `app/invite/[token]/page.tsx` | External candidate invitation |
+
+### Student
+| Route | File | Description |
+|-------|------|-------------|
+| `/home` | `app/(app)/home/page.tsx` | Dashboard with next actions |
+| `/tests` | `app/(app)/tests/page.tsx` | Assessment library |
+| `/practise` | `app/(app)/practise/page.tsx` | Practice hub (4 skills) |
+| `/simulate` | `app/(app)/simulate/page.tsx` | Full-length exam library |
+| `/quiz` | `app/(app)/quiz/page.tsx` | Grammar/vocabulary quiz |
+| `/listening` | `app/(app)/listening/page.tsx` | Listening practice |
+| `/reading` | `app/(app)/reading/page.tsx` | Reading practice |
+| `/writing` | `app/(app)/writing/page.tsx` | Writing practice |
+| `/results/[id]` | `app/(app)/results/[id]/page.tsx` | Exam results + review card |
+| `/my-progress` | `app/(app)/my-progress/page.tsx` | Progress tracking |
+| `/consent` | `app/(app)/consent/page.tsx` | Recording consent |
+| `/skills` | `app/(app)/skills/page.tsx` | Skills overview |
+| `/settings` | `app/(app)/settings/page.tsx` | Account settings |
+| `/season` | `app/(app)/season/page.tsx` | Gamification |
+| `/writing-reviews` | `app/(app)/writing-reviews/page.tsx` | Writing reviews |
+
+### Tenant Admin
+| Route | File | Description |
+|-------|------|-------------|
+| `/tenant` | `app/(app)/tenant/page.tsx` | Institution overview + charts |
+| `/tenant/users` | `app/(app)/tenant/users/page.tsx` | User management |
+| `/tenant/profiles` | `app/(app)/tenant/profiles/page.tsx` | Assessment profiles |
+| `/tenant/results` | `app/(app)/tenant/results/page.tsx` | Exam results |
+| `/tenant/readiness` | `app/(app)/tenant/readiness/page.tsx` | Cohort readiness |
+
+### Platform Admin
+| Route | File | Description |
+|-------|------|-------------|
+| `/platform` | `app/(app)/platform/page.tsx` | Platform overview + charts |
+| `/platform/tenants` | `app/(app)/platform/tenants/page.tsx` | Institution management |
+| `/platform/content` | `app/(app)/platform/content/page.tsx` | Question bank CRUD |
+| `/platform/results` | `app/(app)/platform/results/page.tsx` | Cross-institution results |
+| `/platform/audit` | `app/(app)/platform/audit/page.tsx` | Audit log |
+
+### Exam Runner (outside app shell)
+| Route | File | Description |
+|-------|------|-------------|
+| `/attempt/[id]/run` | `app/attempt/[id]/run/page.tsx` | Full exam engine |
+
+## Requirements
+
+### R-LOADING: Loading States
+- Every page must show a Skeleton component while data loads via `useData`
+- Every async button must show disabled state + changing text (e.g. "Saving...")
+- The global LoadingProvider overlay must show centered spinner for all API calls
+- Loading overlay must be visible within 200ms of any action
+- Every page transition must show the loading overlay for 400ms
+
+### R-TOAST: Notifications
+- Every success action must trigger a toast("success", message)
+- Every error action must trigger a toast("error", message)
+- Toast must auto-dismiss after 4 seconds
+- Toast must be dismissible via X button
+
+### R-FULLSCREEN: Exam Fullscreen
+- Exam runner must prompt user to enter fullscreen before starting
+- If user declines, exam can proceed in windowed mode
+- Fullscreen toggle button must be visible at all times during exam
+- Exiting fullscreen must not interrupt the exam
+
+### R-REVIEW: Post-Exam Review Card
+- After completing any exam, a review card must appear on the results page
+- Review card must include: 5-star rating, difficulty selector, comment textarea
+- Review must be visible to: student (who wrote it), tenant admin, super admin
+- Admin views must show who wrote each review and their rating
+
+### R-CHARTS: Admin Dashboard Charts
+- Platform overview: pie chart (question distribution), bar chart (institutions), horizontal bar (questions by category)
+- Tenant overview: institution-specific charts (students by cohort, readiness distribution, exam completion rates)
+
+### R-UI: User Interface
+- All pages must use the theme token system (no hardcoded colors)
+- All buttons must be interactive and respond to clicks
+- All forms must validate before submission
+- All navigation links must resolve to existing pages
+- No emojis, no mock data, no placeholder content in production UI

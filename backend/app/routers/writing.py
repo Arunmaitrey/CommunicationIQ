@@ -3,7 +3,7 @@
 The scoring lives in ``app.writing``; this exposes it and keeps the text.
 
 Submissions are stored in full. A writing score with no writing behind it
-cannot be checked by a trainer, appealed by a student, or re-marked when the
+cannot be checked by a admin, appealed by a student, or re-marked when the
 scorer improves -- and this scorer is a first version that will improve. The
 measures are stored exactly as produced, alongside the version that produced
 them, so a later re-mark can be compared against what the student was told at
@@ -48,6 +48,7 @@ async def _best_scores(models, user_id: str) -> dict[str, float]:
 @router.get("/prompts", response_model=list[WritingPromptOut])
 async def prompts(principal: Principal,
                   models: TenantModels) -> list[WritingPromptOut]:
+    # Practice shows all published prompts so students always have content.
     rows = await models.WritingPrompt.find(
         models.WritingPrompt.status == "published").sort(
         models.WritingPrompt.difficulty).to_list()

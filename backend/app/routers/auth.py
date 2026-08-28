@@ -213,7 +213,7 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
         principal = TokenPrincipal(
             user_id=staff_id, email=staff_doc.get("email", email),
             full_name=staff_doc.get("full_name", ""),
-            role=staff_doc.get("role", "platform_admin"), scope="platform",
+            role=staff_doc.get("role", "super_admin"), scope="platform",
         )
         await _db["platform_users"].update_one(
             {"_id": staff_doc["_id"]}, {"$set": {"last_login_at": datetime.now(timezone.utc).isoformat()}})
@@ -223,7 +223,7 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
             user=SessionUser(
                 id=staff_id, email=staff_doc.get("email", email),
                 full_name=staff_doc.get("full_name", ""),
-                role=staff_doc.get("role", "platform_admin"), scope="platform",
+                role=staff_doc.get("role", "super_admin"), scope="platform",
             ),
         )
 
@@ -290,7 +290,7 @@ async def me(principal: Principal) -> SessionUser:
         return SessionUser(
             id=str(staff["_id"]), email=staff.get("email", ""),
             full_name=staff.get("full_name", ""),
-            role=staff.get("role", "platform_admin"), scope="platform",
+            role=staff.get("role", "super_admin"), scope="platform",
         )
 
     if not principal.tenant_slug:

@@ -5,7 +5,7 @@ import { ArrowRight, Check, Flame } from "lucide-react";
 /**
  *  The steps a role works through, and which one they are on.
  *
- *  Every console had numbers on it and no shape: a trainer landed on a list of
+ *  Every console had numbers on it and no shape: a admin landed on a list of
  *  cohorts, an institution admin on four counters, and neither screen said
  *  what to do first or what came after it. The counters answer "how much";
  *  nobody had answered "in what order".

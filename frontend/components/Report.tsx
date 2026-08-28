@@ -179,7 +179,7 @@ function HighlightList({ title, tone, icon, rows, empty }: {
  *
  *  Rendered from the result's primary diagnosis and its priorities -- the
  *  same objects the student's result card, the practice buttons and the AI
- *  narration consume -- so a trainer or employer reading this view sees the
+ *  narration consume -- so a admin or employer reading this view sees the
  *  same first answer the student saw. It used to rank by the composite's
  *  weighted gain, which on a level result named a different area from the
  *  summary sentence above it.

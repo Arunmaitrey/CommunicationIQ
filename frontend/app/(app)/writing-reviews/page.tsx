@@ -1,24 +1,13 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Clock, MessageSquare, Star, ThumbsDown, ThumbsUp, Minus } from "lucide-react";
+import { Clock, MessageSquare, Star, ThumbsDown, ThumbsUp, Minus, FileText, ExternalLink } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
-import { PageHeader, Section, Skeleton, Badge } from "@/components/ui";
+import { PageHeader, Section, Skeleton, Badge, ErrorNote, EmptyState } from "@/components/ui";
 import { SITTING_ROLES } from "@/lib/nav";
-
-interface Review {
-  attempt_id: string;
-  rating: number;
-  comment: string;
-  difficulty: string;
-  submitted_at: string;
-}
-
-const DIFF_ICONS: Record<string, typeof Star> = {
-  easy: ThumbsUp,
-  just_right: Minus,
-  hard: ThumbsDown,
-};
+import { API_BASE, getToken } from "@/lib/api";
+import { useData } from "@/lib/useData";
+import { api, attemptApi } from "@/lib/api";
 
 const DIFF_LABELS: Record<string, string> = {
   easy: "Easy",
@@ -35,88 +24,141 @@ export default function WritingReviewsPage() {
 }
 
 function WritingReviews() {
-  const [reviews, setReviews] = useState<Review[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Fetch the student's home data which includes recent attempts with scores
+  const home = useData(() => api.studentHome());
+  // Fetch writing submissions
+  const writingSubmissions = useData(() => {
+    const token = getToken();
+    return fetch(`${API_BASE}/student/writing/submissions`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }).then((r) => r.ok ? r.json() : []);
+  });
+  // Fetch all reviews (student reviews on exam results)
+  const reviews = useData(() => {
+    const token = getToken();
+    return fetch(`${API_BASE}/student/writing/submissions`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    }).then((r) => r.ok ? r.json() : []);
+  });
 
-  useEffect(() => {
-    const found: Review[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (key?.startsWith("commiq.reviews.")) {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw) found.push(JSON.parse(raw));
-        } catch { /* skip corrupt */ }
-      }
-    }
-    found.sort((a, b) => new Date(b.submitted_at).getTime() - new Date(a.submitted_at).getTime());
-    setReviews(found);
-    setLoading(false);
-  }, []);
+  if (home.loading || writingSubmissions.loading) return <Skeleton rows={4} />;
+  if (home.error) return <ErrorNote message={home.error} />;
 
-  if (loading) return <Skeleton rows={4} />;
+  const submissions = (writingSubmissions.data ?? []) as any[];
+  const attempts = (home.data?.recent_attempts ?? []);
 
   return (
     <>
       <PageHeader
         title="Writing Reviews"
-        sub="Your feedback on past writing exams"
+        sub="Your writing submissions, scores and feedback"
       />
 
-      {reviews.length === 0 ? (
-        <Section>
-          <div className="text-center py-12 text-muted">
-            <Star size={32} className="mx-auto mb-3 opacity-30" />
-            <div className="text-sm font-medium mb-1">No reviews yet</div>
-            <div className="text-xs">Complete a writing exam and leave a review to see it here.</div>
-            <Link href="/tests" className="btn btn-primary btn-sm mt-4">
-              Take a test
-            </Link>
-          </div>
-        </Section>
-      ) : (
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {reviews.map((review) => {
-            const DiffIcon = DIFF_ICONS[review.difficulty] || Minus;
-            return (
+      {/* Writing submissions with scores */}
+      {submissions.length > 0 ? (
+        <Section title="Writing submissions" className="mb-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {submissions.map((sub: any) => (
               <div
-                key={review.attempt_id}
+                key={sub.submission_id}
                 className="ds-card p-4 flex flex-col gap-3 hover:shadow-md transition-shadow"
-                style={{ borderColor: review.rating >= 4 ? "var(--rag-green)" : review.rating <= 2 ? "var(--rag-red)" : undefined }}
               >
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1">
-                    {[1, 2, 3, 4, 5].map((s) => (
-                      <Star
-                        key={s}
-                        size={14}
-                        className={s <= review.rating ? "fill-amber-400 text-amber-400" : "text-muted/30"}
-                      />
-                    ))}
-                  </div>
-                  <Badge>
-                    {DIFF_LABELS[review.difficulty] || review.difficulty}
-                  </Badge>
+                  <div className="text-sm font-bold">{sub.title || "Writing Task"}</div>
+                  {sub.overall != null && (
+                    <div className="text-lg font-bold" style={{
+                      color: sub.overall >= 60 ? "var(--rag-green)" : sub.overall >= 40 ? "var(--rag-amber)" : "var(--rag-red)"
+                    }}>
+                      {sub.overall}
+                    </div>
+                  )}
                 </div>
 
-                {review.comment && (
-                  <div className="flex items-start gap-2 text-xs text-muted">
-                    <MessageSquare size={12} className="shrink-0 mt-0.5" />
-                    <span className="line-clamp-3">{review.comment}</span>
+                {/* Measures */}
+                {sub.measures && sub.measures.length > 0 && (
+                  <div className="space-y-1.5">
+                    {sub.measures.map((m: any) => (
+                      <div key={m.name} className="flex items-center justify-between">
+                        <span className="text-[11px] text-muted capitalize">{m.name.replace(/_/g, " ")}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-16 h-1.5 rounded-full" style={{ background: "var(--surface-2)" }}>
+                            <div className="h-full rounded-full" style={{
+                              width: `${Math.min(100, (m.score / 80) * 100)}%`,
+                              background: m.score >= 60 ? "var(--rag-green)" : m.score >= 40 ? "var(--rag-amber)" : "var(--rag-red)"
+                            }} />
+                          </div>
+                          <span className="text-[10px] font-bold w-6 text-right">{Math.round(m.score)}</span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
 
+                <div className="text-[10px] text-muted">{sub.word_count} words</div>
+
                 <div className="flex items-center gap-1.5 text-[10px] text-muted mt-auto pt-2 border-t border-border">
                   <Clock size={10} />
-                  <span>{new Date(review.submitted_at).toLocaleDateString()}</span>
-                  <span className="ml-auto font-mono text-[9px] opacity-50">
-                    {review.attempt_id.slice(0, 8)}
-                  </span>
+                  <span>Submitted</span>
                 </div>
               </div>
-            );
-          })}
-        </div>
+            ))}
+          </div>
+        </Section>
+      ) : (
+        <EmptyState
+          icon={FileText}
+          title="No writing submissions yet"
+          desc="Complete a writing practice to see your submissions and scores here."
+          action={<Link href="/writing" className="btn btn-primary btn-sm">Start writing practice</Link>}
+        />
+      )}
+
+      {/* Exam attempts with scores */}
+      {attempts.length > 0 && (
+        <Section title="Recent exam scores" className="mb-4">
+          <div className="space-y-2">
+            {attempts.map((a: any) => (
+              <div key={a.id} className="flex items-center justify-between p-3 rounded-lg" style={{ background: "var(--surface)", border: "1px solid var(--border)" }}>
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0">
+                    <div className="text-[12px] font-medium">{a.profile_name || "Exam"}</div>
+                    <div className="text-[10px] text-muted">Attempt #{a.attempt_number}</div>
+                  </div>
+                  <Badge tone={a.status === "scored" ? "var(--rag-green)" : "var(--muted)"}>{a.status}</Badge>
+                </div>
+                <div className="flex items-center gap-2">
+                  {a.overall_score != null && (
+                    <span className="text-sm font-bold" style={{
+                      color: (a.overall_score as number) >= 60 ? "var(--rag-green)" : (a.overall_score as number) >= 40 ? "var(--rag-amber)" : "var(--rag-red)"
+                    }}>
+                      {(a.overall_score as number).toFixed(1)}
+                    </span>
+                  )}
+                  {a.status === "scored" && (
+                    <a href={`/results/${a.id}`} className="btn btn-ghost text-[10px] px-2 py-1 ds-focus">
+                      <ExternalLink size={11} /> View
+                    </a>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Link to take a test if no data */}
+      {submissions.length === 0 && attempts.length === 0 && (
+        <Section>
+          <div className="text-center py-8 text-muted">
+            <Star size={32} className="mx-auto mb-3 opacity-30" />
+            <div className="text-sm font-medium mb-1">No activity yet</div>
+            <div className="text-xs">Start a practice or take a test to see your progress here.</div>
+            <div className="flex items-center justify-center gap-2 mt-4">
+              <Link href="/writing" className="btn btn-primary btn-sm">Writing practice</Link>
+              <Link href="/tests" className="btn btn-ghost btn-sm">Take a test</Link>
+            </div>
+          </div>
+        </Section>
       )}
     </>
   );
