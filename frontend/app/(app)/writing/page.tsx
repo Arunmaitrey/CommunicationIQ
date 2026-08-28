@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Flame, PenLine, Target, Zap } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StepGuide } from "@/components/StepGuide";
+import { useToast } from "@/components/Toast";
 import {
   Badge, EmptyState, ErrorNote, GapMeter, PageHeader, Section, Skeleton,
 } from "@/components/ui";
@@ -36,6 +37,7 @@ const MEASURE_LABEL: Record<string, string> = {
 };
 
 function Writing() {
+  const { toast } = useToast();
   const { data, loading, error, reload } = useData(() => writingApi.prompts());
 
   const [stage, setStage] = useState<Stage>("browse");
@@ -85,7 +87,9 @@ function Writing() {
       setStage("marked");
       reload();
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "Could not submit");
+      const msg = err instanceof ApiError ? err.detail : "Could not submit";
+      setProblem(msg);
+      toast("error", msg);
     } finally {
       setBusy(false);
     }

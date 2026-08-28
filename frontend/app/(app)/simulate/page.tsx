@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { Badge, EmptyState, ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
+import { useToast } from "@/components/Toast";
 import { api, ApiError, attemptApi, type ProfileSection, type SimulationProfile } from "@/lib/api";
 import { durationLine } from "@/lib/duration";
 import { taskLabel } from "@/lib/tasks";
@@ -74,6 +75,7 @@ function familyOf(profile: SimulationProfile): string {
 
 function Simulate() {
   const router = useRouter();
+  const { toast } = useToast();
   const { data, loading, error } = useData(() => api.studentProfiles().then((rows) => rows.filter((r) => r.style !== "drill")));
   const home = useData(() => api.studentHome());
   const [starting, setStarting] = useState("");
@@ -112,7 +114,9 @@ function Simulate() {
       // Straight into the runner — the attempt begins when it is opened.
       router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
-      setStartError(err instanceof ApiError ? err.detail : "Could not start the simulation");
+      const msg = err instanceof ApiError ? err.detail : "Could not start the simulation";
+      setStartError(msg);
+      toast("error", msg);
       setStarting("");
     }
   }
@@ -290,6 +294,7 @@ function ProfileCard({ profile, consented, starting, onStart }: {
   profile: SimulationProfile; consented: boolean; starting: boolean;
   onStart: () => void;
 }) {
+  const items = profile.sections.reduce((n, s) => n + s.item_count, 0);
   return (
     <Section
       title={profile.name}
@@ -299,9 +304,9 @@ function ProfileCard({ profile, consented, starting, onStart }: {
           {profile.company && <Badge tone="var(--primary)">{profile.company}</Badge>}
           <button
             className="btn btn-primary btn-sm ds-focus"
-            disabled={!consented || starting}
+            disabled={!consented || starting || items === 0}
             onClick={onStart}
-            title={consented ? "" : "Consent is required before recording"}
+            title={items === 0 ? "No questions configured" : consented ? "" : "Consent is required before recording"}
           >
             {starting ? "Starting…" : "Start"}
           </button>
@@ -338,6 +343,18 @@ function ProfileCard({ profile, consented, starting, onStart }: {
         </div>
       )}
 
+      {items === 0 && (
+        <div className="ds-card p-3 mb-3 flex items-start gap-2"
+             style={{ borderColor: "var(--rag-red)" }}>
+          <AlertTriangle size={12} className="shrink-0 mt-0.5"
+                         style={{ color: "var(--rag-red)" }} />
+          <span className="text-[11px] leading-relaxed"
+                style={{ color: "var(--rag-red)" }}>
+            This assessment has no questions configured yet. Contact your
+            institution admin.
+          </span>
+        </div>
+      )}
       <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-2">
         {profile.sections.map((s) => <SectionCard key={s.id} section={s} />)}
       </div>

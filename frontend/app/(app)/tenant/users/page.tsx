@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { UserPlus, X, Eye, EyeOff, Pencil, Key, Power } from "lucide-react";
+import { Check, UserPlus, X, Eye, EyeOff, Pencil, Key, Power } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import {
   Avatar, Badge, ErrorNote, PageHeader, Section, Skeleton, Table, Tabs,
@@ -172,7 +172,7 @@ function CreateUserModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 <ul className="space-y-0.5">
                   {selectedRole.permissions.map((p) => (
                     <li key={p} className="text-[10px] flex items-center gap-1.5" style={{ color: "var(--rag-green)" }}>
-                      <span>✓</span> {p}
+                      <Check size={10} /> {p}
                     </li>
                   ))}
                 </ul>

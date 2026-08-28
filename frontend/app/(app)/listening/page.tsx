@@ -7,6 +7,7 @@ import { AiNarrator } from "@/components/brand/AiNarrator";
 import { VoicePicker } from "@/components/VoicePicker";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StepGuide } from "@/components/StepGuide";
+import { useToast } from "@/components/Toast";
 import { ChoiceOption,
   Badge, EmptyState, ErrorNote, GapMeter, PageHeader, Section, Skeleton,
 } from "@/components/ui";
@@ -44,6 +45,7 @@ const KIND_LABEL: Record<string, string> = {
  *  than comprehension — and it is not what any real round does.
  */
 function Listening() {
+  const { toast } = useToast();
   const { data, loading, error, reload } = useData(() => listeningApi.passages());
 
   const [stage, setStage] = useState<Stage>("browse");
@@ -98,7 +100,9 @@ function Listening() {
       setQuestions(await listeningApi.questions(session.attempt_id));
       setStage("answer");
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "Could not load the questions");
+      const msg = err instanceof ApiError ? err.detail : "Could not load the questions";
+      setProblem(msg);
+      toast("error", msg);
     } finally {
       setBusy(false);
     }
@@ -114,10 +118,13 @@ function Listening() {
         })),
         plays_used: Math.max(1, playsUsed),
       }));
+      toast("success", "Answers submitted successfully");
       setStage("marked");
       reload();
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "Could not submit");
+      const msg = err instanceof ApiError ? err.detail : "Could not submit";
+      setProblem(msg);
+      toast("error", msg);
     } finally {
       setBusy(false);
     }

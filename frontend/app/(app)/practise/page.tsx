@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StepGuide } from "@/components/StepGuide";
+import { useToast } from "@/components/Toast";
 import { ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
 import {
   api, ApiError, attemptApi, practiceApi,
@@ -46,6 +47,7 @@ const ICON: Record<string, typeof Mic> = {
  */
 function Practise() {
   const router = useRouter();
+  const { toast } = useToast();
   const home = useData(() => api.studentHome());
   const skills = useData(() => practiceApi.skills());
   const [starting, setStarting] = useState(false);
@@ -87,7 +89,9 @@ function Practise() {
       const attempt = await attemptApi.start(pick.id, "practice");
       router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
-      setStartError(err instanceof ApiError ? err.detail : "Could not start the session");
+      const msg = err instanceof ApiError ? err.detail : "Could not start the session";
+      setStartError(msg);
+      toast("error", msg);
       setStarting(false);
     }
   }

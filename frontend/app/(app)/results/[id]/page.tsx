@@ -613,6 +613,7 @@ function DeltaCard({ previous, overall }: {
  *  start sessions by different rules. */
 function usePracticeStart(attemptId: string) {
   const router = useRouter();
+  const { toast } = useToast();
   const [busy, setBusy] = useState("");
   const [problem, setProblem] = useState("");
 
@@ -622,7 +623,9 @@ function usePracticeStart(attemptId: string) {
       const attempt = await attemptApi.start(profileId, "practice", sourceAttemptId ?? attemptId);
       router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "Could not start the practice");
+      const msg = err instanceof ApiError ? err.detail : "Could not start the practice";
+      setProblem(msg);
+      toast("error", msg);
       setBusy("");
     }
   }
@@ -632,7 +635,9 @@ function usePracticeStart(attemptId: string) {
       const attempt = await attemptApi.start(profileId, "practice");
       router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "Could not start the test");
+      const msg = err instanceof ApiError ? err.detail : "Could not start the test";
+      setProblem(msg);
+      toast("error", msg);
       setBusy("");
     }
   }

@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { PLATFORM_ROLES } from "@/lib/roles";
+import { useToast } from "@/components/Toast";
 import { Badge, ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
 import {
   api, ApiError, assetUrl, operatorApi, EMPTY_TENANT_PROFILE,
@@ -242,6 +243,7 @@ function ProfileFields({ value, onChange }: {
 function Tenants() {
   const tenants = useData(() => api.platformTenants());
   const types = useData(() => api.tenantTypes());
+  const { toast } = useToast();
 
   const [creating, setCreating] = useState(false);
   const [draft, setDraft] = useState<Draft>(newDraft("engineering_college"));
@@ -263,9 +265,11 @@ function Tenants() {
     try {
       await fn();
       tenants.reload();
-      if (ok) setNote(ok);
+      if (ok) { setNote(ok); toast("success", ok); }
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "That did not work");
+      const msg = err instanceof ApiError ? err.detail : "That did not work";
+      setProblem(msg);
+      toast("error", msg);
     } finally {
       setBusy("");
     }
@@ -287,9 +291,13 @@ function Tenants() {
       tenants.reload();
       const pw = result.temp_password || "(check server logs)";
       const email = result.admin_email || draft.admin_email;
-      setNote(`Institution created. Admin credentials: Email: ${email} | Password: ${pw} | Must change password on first login.`);
+      const msg = `Institution created. Admin credentials: Email: ${email} | Password: ${pw} | Must change password on first login.`;
+      setNote(msg);
+      toast("success", "Institution created successfully");
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "That did not work");
+      const msg = err instanceof ApiError ? err.detail : "That did not work";
+      setProblem(msg);
+      toast("error", msg);
     } finally {
       setBusy("");
     }

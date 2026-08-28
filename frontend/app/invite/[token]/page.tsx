@@ -5,6 +5,7 @@ import { Clock, Mic, Video } from "lucide-react";
 import { BrandLockup } from "@/components/brand/BrandMark";
 import { PoweredByFloat } from "@/components/brand/PoweredBy";
 import { useRole } from "@/components/RoleProvider";
+import { useToast } from "@/components/Toast";
 import { ApiError, api, attemptApi, inviteApi, type InvitePreview } from "@/lib/api";
 
 /**
@@ -23,6 +24,7 @@ import { ApiError, api, attemptApi, inviteApi, type InvitePreview } from "@/lib/
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>();
   const router = useRouter();
+  const { toast } = useToast();
   const { signIn } = useRole();
 
   const [preview, setPreview] = useState<InvitePreview | null>(null);
@@ -127,9 +129,11 @@ export default function InvitePage() {
       setSession({ token: claimed.token, profile_id: claimed.profile_id });
       setStep("consent");
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail
+      const msg = err instanceof ApiError ? err.detail
         : "Something went wrong opening your assessment. Try again, and if it "
-          + "keeps happening tell whoever invited you.");
+          + "keeps happening tell whoever invited you.";
+      setError(msg);
+      toast("error", msg);
     } finally {
       setBusy("");
     }
@@ -143,12 +147,15 @@ export default function InvitePage() {
     try {
       await api.giveConsent(["recording"]);
       const attempt = await attemptApi.start(session.profile_id, "official");
+      toast("success", "Assessment started. Good luck!");
       router.replace(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
-      setBusy("");
-      setError(err instanceof ApiError ? err.detail
+      const msg = err instanceof ApiError ? err.detail
         : "Something went wrong starting your assessment. Your invitation has "
-          + "been accepted, so nothing is lost -- press the button again.");
+          + "been accepted, so nothing is lost -- press the button again.";
+      setBusy("");
+      setError(msg);
+      toast("error", msg);
     }
   }
 

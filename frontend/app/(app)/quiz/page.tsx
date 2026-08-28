@@ -4,6 +4,7 @@ import {
   AlertCircle, Check, ChevronRight, Loader2, RotateCcw, X, Zap,
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
+import { useToast } from "@/components/Toast";
 import {
   Badge, EmptyState, ErrorNote, PageHeader, Section,
 } from "@/components/ui";
@@ -29,6 +30,7 @@ type Stage = "idle" | "loading" | "playing" | "marked";
  *  wrong; those are different facts and the report keeps them apart.
  */
 function Quiz() {
+  const { toast } = useToast();
   const [stage, setStage] = useState<Stage>("idle");
   const [items, setItems] = useState<QuizItem[]>([]);
   const [index, setIndex] = useState(0);
@@ -56,7 +58,9 @@ function Quiz() {
       setSeconds(next[0].seconds_allowed);
       setStage("playing");
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not load a quiz");
+      const msg = err instanceof ApiError ? err.detail : "Could not load a quiz";
+      setError(msg);
+      toast("error", msg);
       setStage("idle");
     }
   }
@@ -91,9 +95,12 @@ function Quiz() {
     try {
       setResult(await practiceApi.submitQuiz(
         items.map((i) => ({ item_id: i.id, selected_index: final[i.id] ?? null }))));
+      toast("success", "Quiz submitted successfully");
       setStage("marked");
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not mark the quiz");
+      const msg = err instanceof ApiError ? err.detail : "Could not mark the quiz";
+      setError(msg);
+      toast("error", msg);
       setStage("idle");
     }
   }

@@ -84,6 +84,7 @@ export default function SettingsPage() {
 }
 
 function ChangePasswordForm() {
+  const { toast } = useToast();
   const [form, setForm] = useState({ current: "", newPass: "", confirm: "" });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -124,9 +125,12 @@ function ChangePasswordForm() {
         throw new ApiError(res.status, detail);
       }
       setOk(true);
+      toast("success", "Password changed successfully");
       setForm({ current: "", newPass: "", confirm: "" });
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not change password");
+      const msg = err instanceof ApiError ? err.message : "Could not change password";
+      setError(msg);
+      toast("error", msg);
     } finally {
       setBusy(false);
     }

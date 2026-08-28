@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { BookOpen, Check, Flame, Gauge, X, Zap } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StepGuide } from "@/components/StepGuide";
+import { useToast } from "@/components/Toast";
 import { ChoiceOption,
   Badge, EmptyState, ErrorNote, GapMeter, PageHeader, Section, Skeleton,
 } from "@/components/ui";
@@ -39,6 +40,7 @@ const KIND_LABEL: Record<string, string> = {
  *  rate measure meaningless because nobody would need to finish reading.
  */
 function Reading() {
+  const { toast } = useToast();
   const { data, loading, error, reload } = useData(() => readingApi.passages());
 
   const [stage, setStage] = useState<Stage>("browse");
@@ -79,7 +81,9 @@ function Reading() {
       setQuestions(await readingApi.questions(session.attempt_id));
       setStage("answer");
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "Could not load the questions");
+      const msg = err instanceof ApiError ? err.detail : "Could not load the questions";
+      setProblem(msg);
+      toast("error", msg);
     } finally {
       setBusy(false);
     }
@@ -95,10 +99,13 @@ function Reading() {
         })),
         read_ms: readMs.current,
       }));
+      toast("success", "Answers submitted successfully");
       setStage("marked");
       reload();
     } catch (err) {
-      setProblem(err instanceof ApiError ? err.detail : "Could not submit");
+      const msg = err instanceof ApiError ? err.detail : "Could not submit";
+      setProblem(msg);
+      toast("error", msg);
     } finally {
       setBusy(false);
     }

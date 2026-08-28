@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { BookOpen, Mic, Headphones, PenLine, FileText, Plus, X, Trash2, Building2 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
+import { useToast } from "@/components/Toast";
 import { ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
 import { PLATFORM_ROLES } from "@/lib/roles";
 import { API_BASE, getToken } from "@/lib/api";
@@ -25,6 +26,7 @@ export default function QuestionBankPage() {
 }
 
 function QuestionBank() {
+  const { toast } = useToast();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -32,6 +34,7 @@ function QuestionBank() {
   const [companyFilter, setCompanyFilter] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [addType, setAddType] = useState("");
+  const [deleting, setDeleting] = useState("");
 
   const loadData = () => {
     setLoading(true);
@@ -50,12 +53,20 @@ function QuestionBank() {
 
   const handleDelete = async (collection: string, itemId: string) => {
     if (!confirm("Delete this question?")) return;
+    setDeleting(itemId);
     const token = getToken();
-    await fetch(`${API_BASE}/platform/questions/${collection}/${itemId}`, {
-      method: "DELETE",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-    loadData();
+    try {
+      await fetch(`${API_BASE}/platform/questions/${collection}/${itemId}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      toast("success", "Question deleted");
+      loadData();
+    } catch {
+      toast("error", "Failed to delete question");
+    } finally {
+      setDeleting("");
+    }
   };
 
   if (loading && !data) return <Skeleton rows={5} />;
@@ -191,7 +202,8 @@ function QuestionBank() {
                       <td className="p-2 text-right">
                         <button
                           onClick={() => handleDelete(item._collection, item.id)}
-                          className="text-muted hover:text-red-500 transition-colors"
+                          disabled={deleting === item.id}
+                          className="text-muted hover:text-red-500 transition-colors disabled:opacity-50"
                           title="Delete"
                         >
                           <Trash2 size={12} />
@@ -226,6 +238,7 @@ function QuestionBank() {
 function AddQuestionModal({ type, onTypeChange, onClose, onCreated }: {
   type: string; onTypeChange: (t: string) => void; onClose: () => void; onCreated: () => void;
 }) {
+  const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState<any>({
@@ -306,8 +319,10 @@ function AddQuestionModal({ type, onTypeChange, onClose, onCreated }: {
         throw new Error(err.detail || "Failed");
       }
       onCreated();
+      toast("success", "Question created successfully");
     } catch (e: any) {
       setError(e.message);
+      toast("error", e.message || "Failed to create question");
     } finally {
       setLoading(false);
     }

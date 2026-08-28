@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { Building2, ScrollText, Users, BookOpen } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ErrorNote, PageHeader, Section, Skeleton, StatCard } from "@/components/ui";
@@ -89,7 +90,7 @@ function Overview() {
                     outerRadius={90}
                     paddingAngle={3}
                     dataKey="value"
-                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    label={({ name, percent }) => `${name} ${((percent ?? 0) * 100).toFixed(0)}%`}
                     labelLine={false}
                   >
                     {questionDistribution.map((_: any, i: number) => (
@@ -160,34 +161,34 @@ function Overview() {
 
       <Section title="Quick actions">
         <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          <a href="/platform/tenants" className="ds-card p-4 hover:bg-surface2 transition-colors block">
+          <Link href="/platform/tenants" className="ds-card p-4 hover:bg-surface2 transition-colors block">
             <div className="flex items-center gap-2">
               <Building2 size={16} style={{ color: "var(--primary)" }} />
               <span className="text-sm font-bold">Institutions</span>
             </div>
             <p className="text-[11px] text-muted mt-1">Create and manage institutions.</p>
-          </a>
-          <a href="/platform/content" className="ds-card p-4 hover:bg-surface2 transition-colors block">
+          </Link>
+          <Link href="/platform/content" className="ds-card p-4 hover:bg-surface2 transition-colors block">
             <div className="flex items-center gap-2">
               <BookOpen size={16} style={{ color: "var(--secondary)" }} />
               <span className="text-sm font-bold">Question Bank</span>
             </div>
             <p className="text-[11px] text-muted mt-1">Manage questions across all banks.</p>
-          </a>
-          <a href="/platform/results" className="ds-card p-4 hover:bg-surface2 transition-colors block">
+          </Link>
+          <Link href="/platform/results" className="ds-card p-4 hover:bg-surface2 transition-colors block">
             <div className="flex items-center gap-2">
               <Users size={16} style={{ color: "var(--rag-green)" }} />
               <span className="text-sm font-bold">Exam results</span>
             </div>
             <p className="text-[11px] text-muted mt-1">View results across all institutions.</p>
-          </a>
-          <a href="/platform/audit" className="ds-card p-4 hover:bg-surface2 transition-colors block">
+          </Link>
+          <Link href="/platform/audit" className="ds-card p-4 hover:bg-surface2 transition-colors block">
             <div className="flex items-center gap-2">
               <ScrollText size={16} style={{ color: "var(--accent)" }} />
               <span className="text-sm font-bold">Audit log</span>
             </div>
             <p className="text-[11px] text-muted mt-1">Track all platform actions.</p>
-          </a>
+          </Link>
         </div>
       </Section>
     </>

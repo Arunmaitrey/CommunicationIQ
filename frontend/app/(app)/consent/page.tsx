@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { Check, Mic, ShieldCheck, Trash2 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ErrorNote, PageHeader, Section } from "@/components/ui";
+import { useToast } from "@/components/Toast";
 import { api, ApiError } from "@/lib/api";
 
 export default function ConsentPage() {
@@ -23,6 +24,7 @@ export default function ConsentPage() {
  */
 function Consent() {
   const router = useRouter();
+  const { toast } = useToast();
   const [recording, setRecording] = useState(false);
   const [training, setTraining] = useState(false);
   const [outcome, setOutcome] = useState(false);
@@ -41,9 +43,12 @@ function Consent() {
     ];
     try {
       await api.giveConsent(scopes);
+      toast("success", "Consent saved successfully");
       router.push("/simulate");
     } catch (err) {
-      setError(err instanceof ApiError ? err.detail : "Could not save your choices");
+      const msg = err instanceof ApiError ? err.detail : "Could not save your choices";
+      setError(msg);
+      toast("error", msg);
       setBusy(false);
     }
   }
