@@ -1,4 +1,4 @@
-"""Operator console Ã¢â‚¬â€ the control plane.
+"""Operator console ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â the control plane.
 
 Platform staff never read student data from here. What they see is the shape
 of the business (tenants, seats) and the shape of the system
@@ -11,7 +11,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from beanie.operators import GTE
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import Response as HttpResponse
 
 from app.deps import require_platform, Principal
@@ -71,7 +71,7 @@ async def tenants() -> list[TenantOut]:
 async def capabilities() -> list[CapabilityOut]:
     """Every pluggable capability, its contract, and what currently serves it.
 
-    Capabilities with no configured provider are listed too Ã¢â‚¬â€ an unconfigured
+    Capabilities with no configured provider are listed too ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â an unconfigured
     capability is a fact worth seeing, not a row to hide.
     """
     registry = await ProviderRegistry.find_all().sort(
@@ -129,7 +129,7 @@ async def capabilities() -> list[CapabilityOut]:
 
         out.append(CapabilityOut(
             capability=cap.value,
-            contract_version=getattr(contract, "contract_version", "Ã¢â‚¬â€"),
+            contract_version=getattr(contract, "contract_version", "ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â"),
             configured=config is not None,
             mode=config.mode if config else "",
             primary=names.get(config.primary_provider_id, "") if config else "",
@@ -164,7 +164,7 @@ async def narration_settings() -> dict:
 
 @router.get("/narration/metrics")
 async def narration_metrics() -> dict:
-    """Operational health of the AI narrator Ã¢â‚¬â€ counts, failures, cost.
+    """Operational health of the AI narrator ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â counts, failures, cost.
 
     Platform staff only (the router dependency). Reads the job table across
     tenants; carries no student content. Answers pending/processing/ready/
@@ -251,7 +251,7 @@ async def branding_asset(key: str) -> HttpResponse:
 
 @router.get("/tenants/{tenant_id}/users")
 async def tenant_users(tenant_id: str) -> list[dict]:
-    """List users for a specific tenant Ã¢â‚¬â€ super admin visibility."""
+    """List users for a specific tenant ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â super admin visibility."""
     from app.db import ensure_tenant_models
     from app.models.platform import Tenant
 
@@ -259,9 +259,9 @@ async def tenant_users(tenant_id: str) -> list[dict]:
     if tenant is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
 
-    from app.db import client as _client, tenant_db_name as _tdb_name
-    _coll = _client[_tdb_name(tenant.slug)]['users']
-    raw_users = await _coll.find().to_list()
+    from app.db import client as _client, CONTROL_DB_NAME as _cdb
+    _coll = _client[_cdb]["users"]
+    raw_users = await _coll.find({"tenant_id": tenant_id}).to_list()
 
     def _iso(value):
         if value is None:
@@ -282,7 +282,7 @@ async def tenant_users(tenant_id: str) -> list[dict]:
 
 @router.get("/students/{user_id}/attempts")
 async def student_attempts(user_id: str, tenant_id: str) -> list[dict]:
-    """List attempts for a specific student — super admin visibility."""
+    """List attempts for a specific student â€” super admin visibility."""
     from app.db import ensure_tenant_models
     from app.models.platform import Tenant
 
@@ -315,146 +315,18 @@ async def student_attempts(user_id: str, tenant_id: str) -> list[dict]:
     ]
 
 
-@router.get("/questions/items")
-async def list_question_items(tenant_id: str, category: str = "reading",
-                             page: int = 1, page_size: int = 10) -> dict:
-    """Return actual question items for a specific tenant and category (paginated)."""
-    from app.db import ensure_tenant_models
-    from app.models.platform import Tenant
-
-    tenant = await Tenant.get(tenant_id)
-    if tenant is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
-
-    models = await ensure_tenant_models(tenant.slug)
-    items = []
-    total = 0
-    skip = (page - 1) * page_size
-
-    if category == "reading":
-        total = await models.ReadingPassage.find(
-            models.ReadingPassage.status == "published").count()
-        passages = await models.ReadingPassage.find(
-            models.ReadingPassage.status == "published").sort("title").skip(skip).limit(page_size).to_list()
-        for p in passages:
-            items.append({"id": str(p.id), "title": p.title, "kind": p.kind,
-                          "company": getattr(p, "company", ""),
-                          "word_count": p.word_count, "difficulty": p.difficulty})
-    elif category == "writing":
-        total = await models.WritingPrompt.find(
-            models.WritingPrompt.status == "published").count()
-        prompts = await models.WritingPrompt.find(
-            models.WritingPrompt.status == "published").sort("title").skip(skip).limit(page_size).to_list()
-        for p in prompts:
-            items.append({"id": str(p.id), "title": p.title, "kind": p.kind,
-                          "company": getattr(p, "company", ""),
-                          "min_words": p.min_words, "prompt": p.prompt})
-    elif category == "listening":
-        total = await models.ListeningPassage.find(
-            models.ListeningPassage.status == "published").count()
-        passages = await models.ListeningPassage.find(
-            models.ListeningPassage.status == "published").sort("title").skip(skip).limit(page_size).to_list()
-        for p in passages:
-            items.append({"id": str(p.id), "title": p.title, "kind": p.kind,
-                          "company": getattr(p, "company", ""),
-                          "approx_seconds": p.approx_seconds, "transcript": p.transcript})
-    elif category == "speaking":
-        total = await models.TaskItem.find(
-            models.TaskItem.status == "published").count()
-        tasks = await models.TaskItem.find(
-            models.TaskItem.status == "published").sort("task_type").skip(skip).limit(page_size).to_list()
-        for t in tasks:
-            items.append({"id": str(t.id), "task_type": t.task_type,
-                          "company": getattr(t, "company", ""),
-                          "prompt_text": t.prompt_text, "difficulty": t.difficulty})
-    elif category == "grammar":
-        total = await models.QuizItem.find(
-            models.QuizItem.category == "grammar",
-            models.QuizItem.status == "published").count()
-        qi = await models.QuizItem.find(
-            models.QuizItem.category == "grammar",
-            models.QuizItem.status == "published").sort("stem").skip(skip).limit(page_size).to_list()
-        for q in qi:
-            items.append({"id": str(q.id), "stem": q.stem, "options": q.options,
-                          "company": getattr(q, "company", ""),
-                          "correct_index": q.correct_index, "explanation": q.explanation})
-    elif category == "vocabulary":
-        total = await models.QuizItem.find(
-            models.QuizItem.category == "vocabulary",
-            models.QuizItem.status == "published").count()
-        qi = await models.QuizItem.find(
-            models.QuizItem.category == "vocabulary",
-            models.QuizItem.status == "published").sort("stem").skip(skip).limit(page_size).to_list()
-        for q in qi:
-            items.append({"id": str(q.id), "stem": q.stem, "options": q.options,
-                          "company": getattr(q, "company", ""),
-                          "correct_index": q.correct_index, "explanation": q.explanation})
-
-    return {"items": items, "total": total, "page": page, "page_size": page_size,
-            "total_pages": max(1, -(-total // page_size))}
 
 
-@router.get("/questions")
-async def list_questions(tenant_id: str | None = None,
-                         category: str | None = None) -> dict:
-    """List questions across tenants. Filters by tenant and/or category."""
-    from app.db import ensure_tenant_models
-    from app.models.platform import Tenant
-
-    tenants = []
-    if tenant_id:
-        t = await Tenant.get(tenant_id)
-        if t:
-            tenants = [t]
-        else:
-            return {"tenants": [], "total": 0}
-    else:
-        tenants = await Tenant.find_all().to_list()
-
-    result = {"tenants": [], "total": 0}
-    for t in tenants:
-        try:
-            models = await ensure_tenant_models(t.slug)
-            # Count by category
-            pipeline = [{"$group": {"_id": "$category", "count": {"$sum": 1}}}]
-            if category:
-                pipeline.insert(0, {"$match": {"category": category, "status": "published"}})
-            else:
-                pipeline.insert(0, {"$match": {"status": "published"}})
-            cats = await models.QuizItem.get_motor_collection().aggregate(pipeline).to_list(None)
-            cat_counts = {c["_id"]: c["count"] for c in cats}
-            total = sum(cat_counts.values())
-
-            # Count other collections
-            reading = await models.ReadingPassage.find(models.ReadingPassage.status == "published").count()
-            writing = await models.WritingPrompt.find(models.WritingPrompt.status == "published").count()
-            listening = await models.ListeningPassage.find(models.ListeningPassage.status == "published").count()
-            speaking = await models.TaskItem.find_all().count()
-
-            result["tenants"].append({
-                "tenant_id": t.id, "tenant_name": t.name, "tenant_slug": t.slug,
-                "quiz_items": cat_counts, "total_questions": total,
-                "reading_passages": reading, "writing_prompts": writing,
-                "listening_passages": listening, "speaking_items": speaking,
-            })
-            result["total"] += total
-        except Exception:
-            pass
-
-    return result
 
 
-async def _propagate_reading(tenant, body, passage_id, questions_created):
-    """Copy a reading passage + its quiz items to a tenant."""
-    from app.db import ensure_tenant_models
+
+
+async def _create_reading(passage_id, body):
+    from app.db import ensure_shared_models
     import uuid
-    models = await ensure_tenant_models(tenant.slug)
-    # Use the caller's shared id, not a fresh one: the id returned to the
-    # console has to address the same content in every institution, or delete
-    # and cross-references silently miss.
-    local_id = passage_id
+    models = await ensure_shared_models()
     passage = models.ReadingPassage(
-        id=local_id, title=body.get("title", ""),
+        id=passage_id, title=body.get("title", ""),
         kind=body.get("kind", "article"), body=body.get("body", ""),
         company=body.get("company", ""),
         word_count=len(body.get("body", "").split()),
@@ -466,7 +338,7 @@ async def _propagate_reading(tenant, body, passage_id, questions_created):
             id=str(uuid.uuid4()), category="reading_comprehension",
             stem=q.get("stem", ""), options=q.get("options", []),
             correct_index=q.get("correct_index", 0),
-            explanation=q.get("explanation", ""), passage_id=local_id,
+            explanation=q.get("explanation", ""), passage_id=passage_id,
             company=body.get("company", ""),
             seconds_allowed=q.get("seconds_allowed", 30),
             difficulty=q.get("difficulty", 0.0), status="published",
@@ -474,36 +346,12 @@ async def _propagate_reading(tenant, body, passage_id, questions_created):
         await qi.create()
 
 
-@router.post("/questions/reading")
-async def create_reading_question(tenant_id: str, body: dict,
-                                  principal: Principal) -> dict:
-    """Create a reading passage with MCQ questions Ã¢â‚¬â€ saved to ALL tenants."""
-    from app.models.platform import Tenant
+
+
+async def _create_writing(body):
+    from app.db import ensure_shared_models
     import uuid
-
-    tenants = await Tenant.find_all().to_list()
-    if not tenants:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No tenants found")
-
-    passage_id = str(uuid.uuid4())
-    created_count = 0
-    for t in tenants:
-        try:
-            await _propagate_reading(t, body, passage_id, 0)
-            created_count += 1
-        except Exception:
-            pass
-
-    await audit_log.record(principal, "question.reading_created", entity="ReadingPassage",
-                       entity_id=passage_id, tenant_id=tenant_id,
-                       after={"title": body.get("title", ""), "tenants": created_count})
-    return {"passage_id": passage_id, "tenants_updated": created_count}
-
-
-async def _propagate_writing(tenant, body):
-    from app.db import ensure_tenant_models
-    import uuid
-    models = await ensure_tenant_models(tenant.slug)
+    models = await ensure_shared_models()
     prompt_id = str(uuid.uuid4())
     prompt = models.WritingPrompt(
         id=prompt_id, title=body.get("title", ""),
@@ -519,34 +367,12 @@ async def _propagate_writing(tenant, body):
     return prompt_id
 
 
-@router.post("/questions/writing")
-async def create_writing_question(tenant_id: str, body: dict,
-                                  principal: Principal) -> dict:
-    """Create a writing prompt (essay or email) Ã¢â‚¬â€ saved to ALL tenants."""
-    from app.models.platform import Tenant
-
-    tenants = await Tenant.find_all().to_list()
-    created_count = 0
-    prompt_id = ""
-    for t in tenants:
-        try:
-            pid = await _propagate_writing(t, body)
-            if not prompt_id:
-                prompt_id = pid
-            created_count += 1
-        except Exception:
-            pass
-
-    await audit_log.record(principal, "question.writing_created", entity="WritingPrompt",
-                       entity_id=prompt_id, tenant_id=tenant_id,
-                       after={"title": body.get("title", ""), "tenants": created_count})
-    return {"prompt_id": prompt_id, "tenants_updated": created_count}
 
 
-async def _propagate_listening(tenant, body):
-    from app.db import ensure_tenant_models
+async def _create_listening(body):
+    from app.db import ensure_shared_models
     import uuid
-    models = await ensure_tenant_models(tenant.slug)
+    models = await ensure_shared_models()
     passage_id = str(uuid.uuid4())
     passage = models.ListeningPassage(
         id=passage_id, title=body.get("title", ""),
@@ -574,67 +400,14 @@ async def _propagate_listening(tenant, body):
     return passage_id
 
 
-@router.post("/questions/listening")
-async def create_listening_question(tenant_id: str, body: dict,
-                                    principal: Principal) -> dict:
-    """Create a listening passage Ã¢â‚¬â€ saved to ALL tenants."""
-    from app.models.platform import Tenant
-
-    tenants = await Tenant.find_all().to_list()
-    created_count = 0
-    passage_id = ""
-    for t in tenants:
-        try:
-            pid = await _propagate_listening(t, body)
-            if not passage_id:
-                passage_id = pid
-            created_count += 1
-        except Exception:
-            pass
-
-    await audit_log.record(principal, "question.listening_created", entity="ListeningPassage",
-                       entity_id=passage_id, tenant_id=tenant_id,
-                       after={"title": body.get("title", ""), "tenants": created_count})
-    return {"passage_id": passage_id, "tenants_updated": created_count}
 
 
-@router.delete("/questions/{collection}/{item_id}")
-async def delete_question(collection: str, item_id: str, tenant_id: str,
-                          principal: Principal) -> dict:
-    """Delete a question item from any collection."""
-    from app.db import ensure_tenant_models
-    from app.models.platform import Tenant
-
-    ALLOWED = {"reading_passages", "quiz_items", "writing_prompts", "listening_passages"}
-    if collection not in ALLOWED:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown collection: {collection}")
-
-    tenant = await Tenant.get(tenant_id)
-    if tenant is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Tenant not found")
-
-    models = await ensure_tenant_models(tenant.slug)
-    MODEL_MAP = {
-        "reading_passages": models.ReadingPassage,
-        "quiz_items": models.QuizItem,
-        "writing_prompts": models.WritingPrompt,
-        "listening_passages": models.ListeningPassage,
-    }
-    model = MODEL_MAP[collection]
-    item = await model.get(item_id)
-    if item is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Not found")
-    await item.delete()
-
-    await audit_log.record(principal, f"question.{collection}_deleted", entity=collection,
-                       entity_id=item_id, tenant_id=tenant.id)
-    return {"deleted": True}
 
 
-async def _propagate_quiz(tenant, category, body):
-    from app.db import ensure_tenant_models
+async def _create_quiz(category, body):
+    from app.db import ensure_shared_models
     import uuid
-    models = await ensure_tenant_models(tenant.slug)
+    models = await ensure_shared_models()
     item_id = str(uuid.uuid4())
     qi = models.QuizItem(
         id=item_id, category=category, stem=body.get("stem", ""),
@@ -647,10 +420,10 @@ async def _propagate_quiz(tenant, category, body):
     return item_id
 
 
-async def _propagate_speaking(tenant, body):
-    from app.db import ensure_tenant_models
+async def _create_speaking(body):
+    from app.db import ensure_shared_models
     import uuid
-    models = await ensure_tenant_models(tenant.slug)
+    models = await ensure_shared_models()
     item_id = str(uuid.uuid4())
     ti = models.TaskItem(
         id=item_id, task_type=body.get("task_type", "open_response"),
@@ -663,73 +436,10 @@ async def _propagate_speaking(tenant, body):
     return item_id
 
 
-@router.post("/questions/grammar")
-async def create_grammar_question(tenant_id: str, body: dict,
-                                  principal: Principal) -> dict:
-    """Create a grammar quiz item Ã¢â‚¬â€ saved to ALL tenants."""
-    from app.models.platform import Tenant
-
-    tenants = await Tenant.find_all().to_list()
-    created_count = 0
-    first_id = ""
-    for t in tenants:
-        try:
-            iid = await _propagate_quiz(t, "grammar", body)
-            if not first_id:
-                first_id = iid
-            created_count += 1
-        except Exception:
-            pass
-    await audit_log.record(principal, "question.grammar_created", entity="QuizItem",
-                       entity_id=first_id, tenant_id=tenant_id,
-                       after={"tenants": created_count})
-    return {"id": first_id, "tenants_updated": created_count}
 
 
-@router.post("/questions/vocabulary")
-async def create_vocabulary_question(tenant_id: str, body: dict,
-                                     principal: Principal) -> dict:
-    """Create a vocabulary quiz item Ã¢â‚¬â€ saved to ALL tenants."""
-    from app.models.platform import Tenant
-
-    tenants = await Tenant.find_all().to_list()
-    created_count = 0
-    first_id = ""
-    for t in tenants:
-        try:
-            iid = await _propagate_quiz(t, "vocabulary", body)
-            if not first_id:
-                first_id = iid
-            created_count += 1
-        except Exception:
-            pass
-    await audit_log.record(principal, "question.vocabulary_created", entity="QuizItem",
-                       entity_id=first_id, tenant_id=tenant_id,
-                       after={"tenants": created_count})
-    return {"id": first_id, "tenants_updated": created_count}
 
 
-@router.post("/questions/speaking")
-async def create_speaking_question(tenant_id: str, body: dict,
-                                   principal: Principal) -> dict:
-    """Create a speaking task item Ã¢â‚¬â€ saved to ALL tenants."""
-    from app.models.platform import Tenant
-
-    tenants = await Tenant.find_all().to_list()
-    created_count = 0
-    first_id = ""
-    for t in tenants:
-        try:
-            iid = await _propagate_speaking(t, body)
-            if not first_id:
-                first_id = iid
-            created_count += 1
-        except Exception:
-            pass
-    await audit_log.record(principal, "question.speaking_created", entity="TaskItem",
-                       entity_id=first_id, tenant_id=tenant_id,
-                       after={"tenants": created_count})
-    return {"id": first_id, "tenants_updated": created_count}
 
 
 # --------------------------------------------------------------------------
@@ -781,7 +491,7 @@ async def export_db() -> HttpResponse:
 
     content = json.dumps(export, default=serialize, ensure_ascii=False)
 
-    await audit_log.record(None, "platform.export_db", entity="database")
+    await audit_log.record_system("platform.export_db", entity="database")
 
     return HttpResponse(
         content=content,
@@ -790,3 +500,159 @@ async def export_db() -> HttpResponse:
             "Content-Disposition": f'attachment; filename="fluenzee-db-export.json"',
         },
     )
+
+
+@router.get("/reviews")
+async def platform_reviews(limit: int = 100) -> list[dict]:
+    """All reviews across all tenants, for superadmin visibility."""
+    from app.models.tenant import ExamReview, User, SimulationProfile
+    reviews = await ExamReview.find_all().sort("created_at", "DESC").limit(limit).to_list()
+    if not reviews:
+        return []
+    user_ids = list({r.user_id for r in reviews})
+    profile_ids = list({r.profile_id for r in reviews})
+    users = {u.id: u for u in await User.find({"_id": {"$in": user_ids}}).to_list()} if user_ids else {}
+    profiles = {p.id: p for p in await SimulationProfile.find(
+        {"_id": {"$in": profile_ids}}).to_list()} if profile_ids else {}
+    return [
+        {
+            "id": r.id, "attempt_id": r.attempt_id,
+            "user_id": r.user_id,
+            "user_name": getattr(users.get(r.user_id), 'full_name', ''),
+            "user_email": getattr(users.get(r.user_id), 'email', ''),
+            "tenant_id": r.tenant_id,
+            "profile_name": getattr(profiles.get(r.profile_id), 'name', ''),
+            "rating": r.rating, "difficulty": r.difficulty,
+            "comment": r.comment, "created_at": r.created_at,
+        }
+        for r in reviews
+    ]
+
+
+@router.get("/questions")
+async def platform_questions(category: str = "", company: str = "",
+                             limit: int = 200) -> dict:
+    """Question bank overview for the platform admin console."""
+    from app.models.tenant import QuizItem, TaskItem, WritingPrompt, ListeningPassage, ReadingPassage
+
+    quiz_filter = {"status": "published"}
+    if category:
+        quiz_filter["category"] = category
+    if company:
+        quiz_filter["company"] = company
+    quiz_items = await QuizItem.find(quiz_filter).limit(limit).to_list()
+
+    task_filter = {"status": "published"}
+    if company:
+        task_filter["company"] = company
+    task_items = await TaskItem.find(task_filter).limit(limit).to_list()
+
+    writing_filter = {"status": "published"}
+    if company:
+        writing_filter["company"] = company
+    writing_prompts = await WritingPrompt.find(writing_filter).limit(limit).to_list()
+
+    listening = await ListeningPassage.find({"status": "published"}).limit(limit).to_list()
+    reading = await ReadingPassage.find({"status": "published"}).limit(limit).to_list()
+
+    def _item_out(item, kind):
+        return {
+            "id": item.id,
+            "kind": kind,
+            "title": getattr(item, "stem", None) or getattr(item, "prompt_text", None)
+                     or getattr(item, "title", None) or getattr(item, "prompt", "")[:80],
+            "category": getattr(item, "category", "") or getattr(item, "task_type", "")
+                        or getattr(item, "kind", ""),
+            "company": getattr(item, "company", ""),
+            "difficulty": getattr(item, "difficulty", 0),
+            "status": getattr(item, "status", "published"),
+        }
+
+    return {
+        "quiz_items": [_item_out(i, "quiz") for i in quiz_items],
+        "task_items": [_item_out(i, "task") for i in task_items],
+        "writing_prompts": [_item_out(i, "writing") for i in writing_prompts],
+        "listening_passages": [_item_out(i, "listening") for i in listening],
+        "reading_passages": [_item_out(i, "reading") for i in reading],
+        "counts": {
+            "quiz_items": len(quiz_items),
+            "task_items": len(task_items),
+            "writing_prompts": len(writing_prompts),
+            "listening_passages": len(listening),
+            "reading_passages": len(reading),
+        },
+    }
+
+
+# --------------------------------------------------------------------------
+# Question creation endpoints
+# --------------------------------------------------------------------------
+
+@router.post("/questions/quiz")
+async def create_quiz_item(body: dict) -> dict:
+    item_id = await _create_quiz(body.get("category", "reading_comprehension"), body)
+    await audit_log.record_system("platform.create_question", entity="quiz_item")
+    return {"id": item_id, "ok": True}
+
+
+@router.post("/questions/speaking")
+async def create_speaking_item(body: dict) -> dict:
+    item_id = await _create_speaking(body)
+    await audit_log.record_system("platform.create_question", entity="task_item")
+    return {"id": item_id, "ok": True}
+
+
+@router.post("/questions/reading")
+async def create_reading_passage(body: dict) -> dict:
+    import uuid
+    passage_id = str(uuid.uuid4())
+    await _create_reading(passage_id, body)
+    await audit_log.record_system("platform.create_question", entity="reading_passage")
+    return {"passage_id": passage_id, "ok": True}
+
+
+@router.post("/questions/writing")
+async def create_writing_prompt(body: dict) -> dict:
+    prompt_id = await _create_writing(body)
+    await audit_log.record_system("platform.create_question", entity="writing_prompt")
+    return {"prompt_id": prompt_id, "ok": True}
+
+
+@router.post("/questions/listening")
+async def create_listening_passage(body: dict) -> dict:
+    passage_id = await _create_listening(body)
+    await audit_log.record_system("platform.create_question", entity="listening_passage")
+    return {"passage_id": passage_id, "ok": True}
+
+
+@router.delete("/questions/{collection}/{item_id}")
+async def delete_question(collection: str, item_id: str) -> dict:
+    from app.models.tenant import QuizItem, TaskItem, WritingPrompt, ListeningPassage, ReadingPassage
+    model_map = {
+        "quiz": QuizItem, "task": TaskItem, "writing": WritingPrompt,
+        "listening": ListeningPassage, "reading": ReadingPassage,
+    }
+    model = model_map.get(collection)
+    if not model:
+        raise HTTPException(400, f"Unknown collection: {collection}")
+    doc = await model.get(item_id)
+    if doc:
+        await doc.delete()
+    await audit_log.record_system("platform.delete_question", entity=f"{collection}:{item_id}")
+    return {"ok": True}
+
+
+@router.post("/questions/audio")
+async def upload_audio(file: "UploadFile") -> dict:
+    """Upload an audio file (WAV, M4A, MP3) for listening passages or prompts."""
+    import uuid, os
+    ext = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
+    key = f"audio/{uuid.uuid4().hex}{ext}"
+    upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "audio")
+    os.makedirs(upload_dir, exist_ok=True)
+    dest = os.path.join(upload_dir, key.replace("audio/", ""))
+    content = await file.read()
+    with open(dest, "wb") as f:
+        f.write(content)
+    await audit_log.record_system("platform.upload_audio", entity=key)
+    return {"key": key, "size": len(content), "ok": True}

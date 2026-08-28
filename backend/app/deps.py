@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.db import Session, ensure_tenant_models, ensure_platform_models, tenant_db_name
+from app.db import Session, ensure_tenant_models, ensure_platform_models
 from app.models.platform import Tenant
 from app.security import TokenPrincipal, decode_token
 

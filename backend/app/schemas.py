@@ -43,7 +43,6 @@ class SessionUser(BaseModel):
     tenant_logo_url: str | None = None
     tenant_primary_color: str | None = None
     must_change_password: bool = False
-    ui_language: str = "en"
     preferred_theme: str = ""
 
 
@@ -80,8 +79,6 @@ class CohortOut(BaseModel):
     branch: str
     year_of_study: int | None
     section: str
-    trainer_id: str | None
-    trainer_name: str = ""
     drive_start: datetime | None
     drive_end: datetime | None
     member_count: int = 0
@@ -320,8 +317,8 @@ class TenantProfile(BaseModel):
     notes: str = Field(default="", max_length=2000)
 
     # Billing paperwork. India-specific and genuinely needed on an invoice.
-    gst_number: str = Field(default="", max_length=20)
-    billing_email: str = Field(default="", max_length=200)
+    # (gst_number and billing_email removed — plans/subscriptions/billing removed)
+    # Kept as comment for context; actual fields deleted.
 
 
 class TenantOut(BaseModel):
@@ -416,27 +413,7 @@ class StartAttemptRequest(BaseModel):
     source_attempt_id: str | None = None
 
 
-class EnvCheckRequest(BaseModel):
-    """What the browser measured before the first item (SIM-04)."""
 
-    mic_ok: bool
-    playback_ok: bool = False
-    headphones: bool = False
-    noise_dbfs: float | None = None
-    # The room's 90th-percentile level on the same stream: what the runner's
-    # speech floor must clear (hardware UAT, D1).
-    noise_ceiling_dbfs: float | None = None
-    input_peak_dbfs: float | None = None
-    device_label: str = ""
-    user_agent: str = ""
-    # Capture path, sample rate, secure-context flag. Stored so a field
-    # failure arrives with the facts attached instead of a description.
-    diagnostics: dict = {}
-    # Whether a working camera was found, for assessments whose client asks
-    # for one. Recorded, never a recording: this product captures no video and
-    # scores none. The check confirms a camera exists and is permitted, which
-    # is what a proctoring requirement actually asks, and nothing more.
-    camera_ok: bool | None = None
 
 
 class RunnerItem(BaseModel):
@@ -527,19 +504,12 @@ class RunnerPayload(BaseModel):
     status: str
     mode: str
     is_baseline: bool
-    env_check_done: bool
-    # The room's measured noise floor from the environment check, dBFS. The
-    # runner's speech gates are relative to it: a fixed -55 dBFS floor in a
-    # -50 dBFS room hears the room as speech, so an item never advances on
-    # silence and an empty recording is never caught (hardware UAT, D1).
-    noise_dbfs: float | None = None
-    noise_ceiling_dbfs: float | None = None
     items: list[RunnerItem]
 
     # -- the whole-sitting clock -------------------------------------------
     #
-    # Null until the environment check has been done: the clock starts when
-    # the candidate is ready, not when they opened the page and went to find
+    # Null until the attempt has started: the clock starts when the
+    # candidate is ready, not when they opened the page and went to find
     # headphones.
     #
     # `server_now` is sent alongside deliberately. A browser clock can be
@@ -1287,7 +1257,6 @@ class CohortRequest(BaseModel):
     branch: str = ""
     year_of_study: int | None = None
     section: str = ""
-    trainer_id: str | None = None
     drive_start: datetime | None = None
     drive_end: datetime | None = None
 
@@ -1324,47 +1293,8 @@ class SeatUsage(BaseModel):
     used: int
     limit: int
     students: int
-    trainers: int
     admins: int
     remaining: int
-
-
-# --------------------------------------------------------------------------
-# Trainer (M3)
-# --------------------------------------------------------------------------
-
-class FlagRequest(BaseModel):
-    user_id: str
-    reason: str = "at_risk"
-    note: str = ""
-
-
-class FlagOut(BaseModel):
-    id: str
-    user_id: str
-    student_name: str
-    reason: str
-    note: str
-    auto_suggested: bool
-    resolved: bool
-    raised_by_name: str = ""
-    created_at: datetime
-
-
-class MomentumRow(BaseModel):
-    user_id: str
-    full_name: str
-    cohort_name: str
-    days_since_activity: int | None
-    attempts: int
-    current_streak: int
-    days_to_drive: int | None
-    overall_score: float | None
-    # Set when the pattern warrants a trainer's attention. A suggestion to the
-    # trainer — never a message to the student (TRN-06).
-    suggest_flag: bool = False
-    suggestion: str = ""
-    flagged: bool = False
 
 
 # --------------------------------------------------------------------------
@@ -1894,10 +1824,6 @@ class TenantTypeOut(BaseModel):
     label: str
 
 
-# The one list. The model documents these, the console labels these, and the
-# validator accepts exactly these.
-BILLING_MODELS = frozenset({"per_seat", "flat", "usage", "pilot"})
-
 
 class LogoByUrlRequest(BaseModel):
     url: str = Field(min_length=1, max_length=500)
@@ -1912,3 +1838,26 @@ class GamificationConfigRequest(BaseModel):
     quiz_xp_cap_percent: int = 40
     leagues_enabled: bool = True
     max_engagement_notifications_per_day: int = 1
+
+
+# --------------------------------------------------------------------------
+# Exam Reviews
+# --------------------------------------------------------------------------
+
+class ReviewRequest(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    difficulty: str = Field(default="just_right")
+    comment: str = Field(default="", max_length=2000)
+
+
+class ReviewOut(BaseModel):
+    id: str
+    attempt_id: str
+    user_id: str
+    user_name: str = ""
+    user_email: str = ""
+    profile_name: str = ""
+    rating: int
+    difficulty: str
+    comment: str
+    created_at: datetime | None = None

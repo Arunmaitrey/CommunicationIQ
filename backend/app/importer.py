@@ -155,7 +155,7 @@ def parse(text: str) -> ImportPlan:
         role = (values.get("role") or "student").lower().replace(" ", "_")
         if role not in VALID_ROLES:
             plan.problems.append(ImportProblem(
-                offset, "role", f"{role} is not a role — use student, trainer or tenant_admin"))
+                offset, "role", f"{role} is not a role — use student or tenant_admin"))
             continue
 
         year: int | None = None

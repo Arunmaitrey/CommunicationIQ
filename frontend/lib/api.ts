@@ -65,6 +65,12 @@ export function resetSessionExpiry() {
  */
 const DEFAULT_TIMEOUT_MS = 12_000;
 
+// Loading event system — LoadingProvider listens to these
+export const LOADING_SHOW = "commiq:loading:show";
+export const LOADING_HIDE = "commiq:loading:hide";
+function showLoading() { if (typeof window !== "undefined") window.dispatchEvent(new Event(LOADING_SHOW)); }
+function hideLoading() { if (typeof window !== "undefined") window.dispatchEvent(new Event(LOADING_HIDE)); }
+
 function withTimeout<T>(promise: Promise<T>, ms = DEFAULT_TIMEOUT_MS): Promise<T> {
   if (typeof window === "undefined") return promise;
   let timer: ReturnType<typeof setTimeout>;
@@ -78,6 +84,7 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
   const token = getToken();
   const controller = typeof window !== "undefined" ? new AbortController() : null;
   const id = setTimeout(() => controller?.abort(), DEFAULT_TIMEOUT_MS);
+  showLoading();
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "POST",
@@ -103,6 +110,7 @@ async function upload<T>(path: string, form: FormData): Promise<T> {
     return res.json() as Promise<T>;
   } finally {
     clearTimeout(id);
+    hideLoading();
   }
 }
 
@@ -110,6 +118,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const token = getToken();
   const controller = typeof window !== "undefined" ? new AbortController() : null;
   const id = setTimeout(() => controller?.abort(), DEFAULT_TIMEOUT_MS);
+  showLoading();
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       ...init,
@@ -141,6 +150,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     return (await res.json()) as T;
   } finally {
     clearTimeout(id);
+    hideLoading();
   }
 }
 
@@ -184,7 +194,6 @@ export interface SessionUser {
   tenant_logo_url: string | null;
   tenant_primary_color: string | null;
   must_change_password: boolean;
-  ui_language: string;
   preferred_theme: string;
   roll_number?: string;
   branch?: string;
@@ -361,7 +370,7 @@ export interface UserRow {
 
 export interface Cohort {
   id: string; name: string; branch: string; year_of_study: number | null;
-  section: string; trainer_id: string | null; trainer_name: string;
+  section: string;
   drive_start: string | null; drive_end: string | null;
   member_count: number; active: boolean;
 }
@@ -412,7 +421,6 @@ export interface TenantProfile {
   affiliated_to: string; established_year: number | null;
   student_strength: number | null; courses: string[];
   accreditation: string; notes: string;
-  gst_number: string; billing_email: string;
 }
 
 export const EMPTY_TENANT_PROFILE: TenantProfile = {
@@ -422,7 +430,6 @@ export const EMPTY_TENANT_PROFILE: TenantProfile = {
   affiliated_to: "", established_year: null,
   student_strength: null, courses: [],
   accreditation: "", notes: "",
-  gst_number: "", billing_email: "",
 };
 
 export interface TenantRow {
@@ -483,14 +490,11 @@ export const api = {
   studentAttempts: () => get<Attempt[]>("/student/attempts"),
   giveConsent: (scopes: string[]) => post<unknown>("/student/consent", { scopes }),
 
-  trainerCohorts: () => get<Cohort[]>("/trainer/cohorts"),
-  cohortReadiness: (id: string) => get<CohortReadiness>(`/trainer/cohorts/${id}/readiness`),
-  cohortStudents: (id: string) => get<StudentSummary[]>(`/trainer/cohorts/${id}/students`),
-  studentMastery: (id: string) => get<Mastery[]>(`/trainer/students/${id}/mastery`),
-
   tenantOverview: () => get<TenantOverview>("/tenant/overview"),
   tenantUsers: (role?: string) => get<UserRow[]>(`/tenant/users${role ? `?role=${role}` : ""}`),
   tenantCohorts: () => get<Cohort[]>("/tenant/cohorts"),
+  tenantCohortReadiness: (id: string) => get<CohortReadiness>(`/tenant/cohorts/${id}/readiness`),
+  tenantCohortStudents: (id: string) => get<StudentSummary[]>(`/tenant/cohorts/${id}/students`),
   /** The assessment library. Retired ones are left out unless asked for --
    *  they accumulate forever, because retiring is how an assessment leaves
    *  circulation and deleting one would orphan the results that name it. */
@@ -507,13 +511,8 @@ export const api = {
    *  Named for the cohort rather than the student, because `studentAttempts`
    *  above is a different question: that one is "what have *I* sat", asked by
    *  the student themselves. */
-  cohortStudentAttempts: (userId: string) =>
-    get<Attempt[]>(`/trainer/students/${userId}/attempts`),
-
-  /** One student's report, for the trainer coaching them. Cohort-scoped:
-   *  the attempt is authorised through its owner, not through its id. */
-  studentResult: (attemptId: string) =>
-    get<AttemptResult>(`/trainer/attempts/${attemptId}/result`),
+  tenantStudentAttempts: (userId: string) =>
+    get<Attempt[]>(`/tenant/students/${userId}/attempts`),
 
   tenantProfiles: (includeRetired = false) =>
     get<SimulationProfile[]>(
@@ -538,7 +537,7 @@ export const api = {
   platformOverview: () => get<PlatformOverview>("/platform/overview"),
   platformTenants: () => get<TenantRow[]>("/platform/tenants"),
   platformQuestions: (tenantId: string) =>
-    get<{ tenants: Record<string, Record<string, number>>[] }>(`/platform/questions?tenant_id=${tenantId}`),
+    get<{ total_questions: number; quiz_items: Record<string, number>; reading_passages: number; writing_prompts: number; listening_passages: number; speaking_items: number }>(`/platform/questions?tenant_id=${tenantId}`),
   platformQuestionItems: (tenantId: string, category: string, page = 1, pageSize = 10) =>
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     get<{items: Record<string, any>[]; total: number; page: number; page_size: number; total_pages: number}>(
@@ -554,6 +553,12 @@ export const api = {
   platformCreateQuestion: (category: string, tenantId: string, body: Record<string, unknown>) =>
     post<{ id?: string; passage_id?: string; prompt_id?: string; questions?: number }>(
       `/platform/questions/${category}?tenant_id=${tenantId}`, body),
+  platformCompanyCounts: (tenantId: string) =>
+    get<Record<string, Record<string, number>>>(
+      `/platform/questions/company-counts?tenant_id=${tenantId}`),
+  platformQuestionItemsFiltered: (tenantId: string, category: string, page = 1, pageSize = 10, company = "") =>
+    get<{items: Record<string, any>[]; total: number; page: number; page_size: number; total_pages: number}>(
+      `/platform/questions/items?tenant_id=${tenantId}&category=${category}&page=${page}&page_size=${pageSize}${company ? `&company=${encodeURIComponent(company)}` : ""}`),
   platformTenantUsers: (tenantId: string) => get<UserRow[]>(`/platform/tenants/${tenantId}/users`),
   platformStudentAttempts: (userId: string, tenantId: string) =>
     get<Attempt[]>(`/platform/students/${userId}/attempts?tenant_id=${tenantId}`),
@@ -659,17 +664,10 @@ export interface RunnerPayload {
   seconds_remaining: number | null;
   /** Which test this imitates — drives the runner's chrome. */
   style: string;
-  /** The setup check's measured room noise (dBFS), or null. The speech
-   *  gates sit NOISE_MARGIN_DB above it (lib/speech.ts). */
-  noise_dbfs: number | null;
-  /** The room's 90th-percentile level from the setup check, or null. This
-   *  is what the speech floor is set above (lib/speech.ts). */
-  noise_ceiling_dbfs: number | null;
   company: string;
   status: string;
   mode: string;
   is_baseline: boolean;
-  env_check_done: boolean;
   items: RunnerItem[];
 }
 
@@ -967,19 +965,6 @@ export interface Narration {
   generated_at: string | null;
 }
 
-export interface EnvCheckPayload {
-  mic_ok: boolean;
-  playback_ok?: boolean;
-  headphones?: boolean;
-  noise_dbfs?: number | null;
-  /** The room's 90th-percentile level; the speech floor sits above it. */
-  noise_ceiling_dbfs?: number | null;
-  input_peak_dbfs?: number | null;
-  device_label?: string;
-  user_agent?: string;
-  diagnostics?: Record<string, string | number | boolean>;
-}
-
 const ATTEMPTS = "/student/attempts";
 
 /** What a candidate sees before deciding to start. Consumes nothing. */
@@ -1035,9 +1020,6 @@ export interface CandidateResume {
 }
 
 export const attemptApi = {
-  /** Unauthenticated: describes the server, not the person asking. */
-  capability: () => get<Capability>("/meta/capability"),
-
   /** Where this candidate left off, or null if they are not one.
    *
    *  A candidate's invitation link works once, so it cannot tell them
@@ -1076,10 +1058,6 @@ export const attemptApi = {
                                     source_attempt_id: sourceAttemptId ?? null }),
 
   runner: (attemptId: string) => get<RunnerPayload>(`${ATTEMPTS}/${attemptId}/runner`),
-
-
-  envCheck: (attemptId: string, body: EnvCheckPayload) =>
-    post<{ ok: boolean; warning: string }>(`${ATTEMPTS}/${attemptId}/env-check`, body),
 
   /** Ask for a prompt. The server counts this — asking twice is a 409. */
   prompt: (attemptId: string, responseId: string) =>
@@ -1215,7 +1193,7 @@ export const attemptApi = {
 // --------------------------------------------------------------------------
 
 export interface SeatUsage {
-  used: number; limit: number; students: number; trainers: number;
+  used: number; limit: number; students: number;
   admins: number; remaining: number;
 }
 
@@ -1300,15 +1278,6 @@ export interface Mistake {
 }
 
 
-
-/** What this deployment can measure. See /meta/capability on the server. */
-export interface Capability {
-  tier: number;
-  full_scoring: boolean;
-  measures: string[];
-  /** Empty on a full install; a plain-English warning otherwise. */
-  note: string;
-}
 
 /** One of the four language skills. See app/skills.py on the server. */
 export interface SkillModule {

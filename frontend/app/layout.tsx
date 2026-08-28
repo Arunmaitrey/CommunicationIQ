@@ -3,6 +3,7 @@ import "./globals.css";
 import { RoleProvider } from "@/components/RoleProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ToastProvider } from "@/components/Toast";
+import { LoadingProvider } from "@/components/LoadingProvider";
 
 /* Typefaces for the Campus theme.
  *
@@ -32,7 +33,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <ThemeProvider>
           <ToastProvider>
-            <RoleProvider>{children}</RoleProvider>
+            <RoleProvider>
+              <LoadingProvider>{children}</LoadingProvider>
+            </RoleProvider>
           </ToastProvider>
         </ThemeProvider>
       </body>

@@ -21,7 +21,7 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcept
                      Request, Response as HttpResponse, UploadFile, status)
 from app.config import settings
 from app.invitations import CANDIDATE_ROLE
-from app.db import ensure_tenant_models, func, select
+from app.db import ensure_platform_models, ensure_tenant_models, func, select, Session
 from app import formats
 from app.deps import Principal, PlatformSession, TenantSession, require_roles
 from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
@@ -40,13 +40,13 @@ from app.engine.pipeline import (NO_TRANSCRIPT, SCALE_MAX, SCALE_MIN,
 from app.engine.psychometrics import irt
 from app.engine.registry import Providers
 from app.gamification import engine as game
-from app.models.tenant import (Attempt, ConsentRecord, FeatureRecord,
-                               Invitation, ProfileSection, Response,
-                               ResponseAudio, ScoreRecord, SimulationProfile,
-                               TaskItem)
+from app.models.tenant import (Attempt, ConsentRecord, ExamReview, FeatureRecord,
+                                Invitation, ProfileSection, Response,
+                                ResponseAudio, ScoreRecord, SimulationProfile,
+                                TaskItem)
 from app.schemas import (AnswerSubmission, AttemptResult, CandidateResume,
-                         EnvCheckRequest, NarrationOut, PromptResponse,
-                         ResponseMetrics, RunnerItem, RunnerPayload,
+                         NarrationOut, PromptResponse, ResponseMetrics,
+                         ReviewRequest, ReviewOut, RunnerItem, RunnerPayload,
                          StartAttemptRequest, WordTimingOut)
 from app.storage import get_storage, recording_key
 
@@ -79,7 +79,7 @@ router = APIRouter(prefix="/student/attempts", tags=["attempt"],
 # has to be visible or the candidate cannot perform the task at all. It is not
 # withheld the way Repeat Sentence / Dictation are, where hearing (not seeing)
 # the sentence is the whole measurement.
-VISIBLE_PROMPT_TASKS = {"read_aloud", "sentence_build", "open_response"}
+VISIBLE_PROMPT_TASKS = {"read_aloud", "sentence_build", "open_response", "short_answer"}
 
 # Which field carries the words to be spoken aloud. For Repeat Sentence and
 # Story Retell the reference *is* the prompt — the sentence to repeat, the
@@ -109,7 +109,11 @@ async def _score_in_background(slug: str, tenant_id: str | None,
     """
     try:
         models = await ensure_tenant_models(slug)
-        await score_response(models, None, tenant_id, response_id)
+        session = Session(models)
+        platform_models = await ensure_platform_models()
+        platform_session = Session(platform_models)
+        providers = Providers(platform_session)
+        await score_response(session, providers, tenant_id, response_id)
     except Exception as exc:  # noqa: BLE001
         # Recoverable: submit retries anything still pending, and
         # score_response is idempotent so the retry is safe.
@@ -243,19 +247,13 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
         .where(Attempt.user_id == principal.user_id, Attempt.profile_id == profile.id)
     )).scalar_one()
 
-    # An invitation buys one sitting.
-    #
-    # A student may attempt a simulation as often as they like -- that is what
-    # practice is. An invited candidate is a different arrangement: an
-    # employer sent one link for one assessment, and the result is a hiring
-    # decision. Nothing enforced that. The link was correctly single-use, and
-    # the session it minted could POST a fresh attempt at the same profile as
-    # often as the candidate wanted, so anybody who did not like their score
-    # could sit it again until they did.
-    #
-    # Checked by role rather than by counting invitations, so it holds for
-    # every candidate however they were admitted.
-    if principal.role == CANDIDATE_ROLE and prior:
+    # Students may attempt a simulation as often as they like -- that is what
+    # practice is. Only invited candidates (with an active invitation) are
+    # limited to one sitting.
+    has_invitation = False
+    if body.source_attempt_id:
+        has_invitation = True
+    if principal.role == CANDIDATE_ROLE and prior and has_invitation:
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             "You have already sat this assessment. An invitation is for one "
@@ -407,6 +405,13 @@ def _deduplicate(pool: list, used: set[str], key: str = "id") -> list:
     return [i for i in pool if getattr(i, key, None) not in used]
 
 
+# The most questions any single exam section will ever serve, whatever the
+# profile asks for. The question banks (superadmin) hold far more than one
+# sitting needs; a cap keeps every exam legible and answerable (Option B),
+# while still drawing from the shared bank first.
+MAX_QUESTIONS_PER_SECTION = 10
+
+
 async def _pick_writing_prompts(session: TenantSession,
                                 section: ProfileSection,
                                 kind: str = "",
@@ -432,7 +437,7 @@ async def _pick_writing_prompts(session: TenantSession,
     # Prefer company-tagged prompts, fall back to general pool.
     if company:
         company_pool = [i for i in pool if getattr(i, "company", "") == company]
-        general_pool = [i for i in pool if not getattr(i, "company", "")]
+        general_pool = [i for i in pool if getattr(i, "company", "") != company]
         pool = company_pool + general_pool
     pool = app_selection.eligible(pool, _pool_of(section), "writing_prompt")
 
@@ -443,7 +448,8 @@ async def _pick_writing_prompts(session: TenantSession,
 
     if not pool:
         return []
-    return app_selection.draw(pool, section.item_count, _pool_of(section)).items
+    target = min(section.item_count, MAX_QUESTIONS_PER_SECTION)
+    return app_selection.draw(pool, target, _pool_of(section)).items
 
 
 async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
@@ -478,7 +484,7 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
     # Prefer company-tagged questions, fall back to general pool.
     if company:
         company_pool = [i for i in pool if getattr(i, "company", "") == company]
-        general_pool = [i for i in pool if not getattr(i, "company", "")]
+        general_pool = [i for i in pool if getattr(i, "company", "") != company]
         pool = company_pool + general_pool
 
     # Cross-exam deduplication: avoid questions already used by this user.
@@ -495,7 +501,8 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
         pool = app_selection.eligible(pool, _pool_of(section), "quiz")
         if not pool:
             return []
-        return app_selection.draw(pool, section.item_count, _pool_of(section)).items
+        target = min(section.item_count, MAX_QUESTIONS_PER_SECTION)
+        return app_selection.draw(pool, target, _pool_of(section)).items
 
     # Grouped categories filter whole passages, never individual questions.
     #
@@ -528,7 +535,8 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
     # only misfires on certain shuffles, which is how the greedy version it
     # replaced survived a passing test.
     best = app_sections.fill_from_passages(
-        {pid: len(by_passage[pid]) for pid in passages}, section.item_count)
+        {pid: len(by_passage[pid]) for pid in passages},
+        min(section.item_count, MAX_QUESTIONS_PER_SECTION))
 
     chosen: list = []
     for pid in best:
@@ -559,7 +567,7 @@ async def _pick_items(session: TenantSession, section: ProfileSection,
     # to general pool so the section is never empty.
     if company:
         company_pool = [i for i in pool if getattr(i, "company", "") == company]
-        general_pool = [i for i in pool if not getattr(i, "company", "")]
+        general_pool = [i for i in pool if getattr(i, "company", "") != company]
         pool = company_pool + general_pool
 
     # Narrow before choosing, never after. Choosing adaptively and then
@@ -575,7 +583,8 @@ async def _pick_items(session: TenantSession, section: ProfileSection,
     if not pool:
         return []
 
-    count = min(section.item_count, len(pool))
+    count = min(section.item_count, len(pool),
+                    MAX_QUESTIONS_PER_SECTION)
 
     # An explicit difficulty mix beats adaptive selection.
     #
@@ -708,6 +717,14 @@ async def runner(attempt_id: str, principal: Principal,
     )).scalars().first()
     if profile is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Simulation not found")
+    # The attempt starts when the runner is opened, not against a separate
+    # screen. A standalone environment check used to be that boundary; with it
+    # gone, opening the runner is what starts the sitting and its clock. A
+    # created-but-never-opened attempt (deep link, abandoned tab) stays idle.
+    if attempt.status == "created" and attempt.started_at is None:
+        attempt.status = "in_progress"
+        attempt.started_at = datetime.now(timezone.utc)
+        await session.commit()
     return await _runner_payload(session, attempt, profile)
 
 
@@ -979,9 +996,7 @@ async def _runner_payload(session: TenantSession, attempt: Attempt,
         attempt_id=attempt.id, profile_id=profile.id, profile_name=profile.name,
         style=profile.style, company=profile.company,
         status=attempt.status, mode=attempt.mode, is_baseline=attempt.is_baseline,
-        env_check_done=bool(attempt.env_check), items=payload_items,
-        noise_dbfs=(attempt.env_check or {}).get("noise_dbfs"),
-        noise_ceiling_dbfs=(attempt.env_check or {}).get("noise_ceiling_dbfs"),
+        items=payload_items,
         deadline_at=clock.deadline_at, server_now=clock.server_now,
         seconds_remaining=clock.seconds_remaining,
     )
@@ -1030,63 +1045,6 @@ def _prewarm_prompt_audio(texts: list[tuple[str, str]]) -> None:
             tts.synthesize(text, accent)
         except Exception:  # noqa: BLE001 - best effort, never surfaces
             continue
-
-
-@router.post("/{attempt_id}/env-check", status_code=status.HTTP_200_OK)
-async def env_check(attempt_id: str, body: EnvCheckRequest, principal: Principal,
-                    session: TenantSession) -> dict:
-    """Record what the room sounded like before the test started (SIM-04).
-
-    Kept because it is the evidence behind DIAG-07: a bad score in a noisy
-    room should be attributable to the room, and that claim needs a
-    measurement taken before the student spoke.
-    """
-    attempt = await _own_attempt(session, principal, attempt_id)
-    if not body.mic_ok:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "The microphone check must pass before starting")
-
-    # A camera, only where the assessment asks for one.
-    #
-    # Per assessment rather than globally, because it is a client's
-    # requirement and not ours. Nothing here records or scores video; the
-    # check confirms a working, permitted camera, which is what a proctoring
-    # requirement actually asks for. Demanding it of every candidate --
-    # including a student practising at home on a desktop -- would be
-    # collecting a permission for no reason.
-    profile = await session.get(SimulationProfile, attempt.profile_id)
-    if profile is not None and getattr(profile, "camera_check", False):
-        if not body.camera_ok:
-            raise HTTPException(
-                status.HTTP_400_BAD_REQUEST,
-                "This assessment needs a working camera. Allow camera access "
-                "and try the check again -- nothing is recorded or watched, "
-                "the check only confirms one is there.")
-
-    attempt.env_check = {
-        "mic_ok": body.mic_ok,
-        "playback_ok": body.playback_ok,
-        "headphones": body.headphones,
-        "noise_dbfs": body.noise_dbfs,
-        "noise_ceiling_dbfs": body.noise_ceiling_dbfs,
-        "input_peak_dbfs": body.input_peak_dbfs,
-        "device_label": body.device_label[:120],
-        "camera_ok": body.camera_ok,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-    }
-    attempt.device_info = {"user_agent": body.user_agent[:250],
-                           **{k: v for k, v in (body.diagnostics or {}).items()}}
-    attempt.status = "in_progress"
-    attempt.started_at = datetime.now(timezone.utc)
-    await session.commit()
-
-    noisy = body.noise_dbfs is not None and body.noise_dbfs > -45
-    return {
-        "ok": True,
-        "warning": ("It is noisy where you are. You can continue, and the report "
-                    "will separate the room from your English — but a quieter "
-                    "spot gives you a cleaner reading.") if noisy else "",
-    }
 
 
 @router.post("/{attempt_id}/responses/{response_id}/prompt",
@@ -1213,7 +1171,7 @@ async def upload_response_audio(attempt_id: str, response_id: str,
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "Recording consent has not been given")
 
-    if attempt.status not in {"in_progress", "env_check", "created"}:
+    if attempt.status not in {"in_progress", "created"}:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "This attempt is no longer accepting answers")
     await _recording_still_welcome(session, attempt)
@@ -1658,7 +1616,9 @@ async def submit(attempt_id: str, principal: Principal, session: TenantSession,
 
     outcome = await finalise_attempt(session, attempt_id)
     await _run_game_hook(session, platform, principal, attempt, outcome)
-    await session.refresh(attempt)
+    attempt = (await session.execute(
+        select(Attempt).where(Attempt.id == attempt_id)
+    )).scalars().first() or attempt
     await _ensure_and_kick_narration(session, background,
                                      principal.tenant_slug or "", attempt)
     return await _result(session, attempt, scoring_ms=outcome.elapsed_ms,
@@ -1706,7 +1666,6 @@ async def _run_game_hook(session, platform, principal, attempt, outcome) -> None
         )
     except Exception as exc:  # noqa: BLE001
         log.warning("gamification hook failed for attempt %s: %s", attempt.id, exc)
-        await session.rollback()
 
 
 # Dimensions that cannot exist without a transcript. Kept here rather than
@@ -2057,7 +2016,9 @@ async def result(attempt_id: str, principal: Principal,
     # Background scoring may have finished after submit gave up waiting.
     if attempt.status == "scoring" and not await pending_responses(session, attempt_id):
         await finalise_attempt(session, attempt_id)
-        await session.refresh(attempt)
+        attempt = (await session.execute(
+            select(Attempt).where(Attempt.id == attempt_id)
+        )).scalars().first() or attempt
 
     await _ensure_and_kick_narration(session, background,
                                      principal.tenant_slug or "", attempt)
@@ -2609,4 +2570,72 @@ async def _result(session: TenantSession, attempt: Attempt,
                          # no recording to reassure anybody about.
                          any(r.has_audio for r in rows),
                          primary=primary),
+    )
+
+
+# --------------------------------------------------------------------------
+# Exam Reviews
+# --------------------------------------------------------------------------
+
+@router.post("/{attempt_id}/review", response_model=ReviewOut,
+             status_code=status.HTTP_201_CREATED)
+async def submit_review(attempt_id: str, body: ReviewRequest,
+                        principal: Principal, session: TenantSession) -> ReviewOut:
+    """Submit a review for an attempt. One review per student per attempt."""
+    attempt = await _own_attempt(session, principal, attempt_id)
+
+    existing = (await session.execute(
+        select(ExamReview).where(
+            ExamReview.attempt_id == attempt_id,
+            ExamReview.user_id == principal.user_id)
+    )).scalars().first()
+    if existing is not None:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "You have already reviewed this attempt.")
+
+    review = ExamReview(
+        attempt_id=attempt_id,
+        user_id=principal.user_id,
+        tenant_id=principal.tenant_id or "",
+        profile_id=attempt.profile_id or "",
+        rating=body.rating,
+        difficulty=body.difficulty,
+        comment=body.comment,
+    )
+    session.add(review)
+    await session.commit()
+
+    profile = await session.get(SimulationProfile, attempt.profile_id)
+    return ReviewOut(
+        id=review.id, attempt_id=review.attempt_id,
+        user_id=review.user_id,
+        user_name=principal.full_name,
+        user_email=principal.email,
+        profile_name=profile.name if profile else "",
+        rating=review.rating, difficulty=review.difficulty,
+        comment=review.comment, created_at=review.created_at,
+    )
+
+
+@router.get("/{attempt_id}/review", response_model=ReviewOut | None)
+async def get_my_review(attempt_id: str, principal: Principal,
+                        session: TenantSession) -> ReviewOut | None:
+    """Get the current user's review for an attempt, if any."""
+    await _own_attempt(session, principal, attempt_id)
+    review = (await session.execute(
+        select(ExamReview).where(
+            ExamReview.attempt_id == attempt_id,
+            ExamReview.user_id == principal.user_id)
+    )).scalars().first()
+    if review is None:
+        return None
+    profile = await session.get(SimulationProfile, review.profile_id)
+    return ReviewOut(
+        id=review.id, attempt_id=review.attempt_id,
+        user_id=review.user_id,
+        user_name=principal.full_name,
+        user_email=principal.email,
+        profile_name=profile.name if profile else "",
+        rating=review.rating, difficulty=review.difficulty,
+        comment=review.comment, created_at=review.created_at,
     )

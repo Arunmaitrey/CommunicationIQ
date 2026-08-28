@@ -97,16 +97,7 @@ class Settings(BaseSettings):
     # DPDP: recordings are not kept forever. The sweeper reads this.
     recording_retention_days: int = 30
 
-    # Tier-1 speech engine (local, CPU by default — no audio leaves the host).
-    # small.en is the default because accented English is the whole job here
-    # and it is measurably better on it than base; base.en is roughly three
-    # times faster if a deployment needs the headroom.
-    whisper_model: str = "small.en"
-    whisper_device: str = "cpu"
-    whisper_compute_type: str = "int8"
-    whisper_cpu_threads: int = 0          # 0 = all cores
-    # Load the model at startup so the first student does not pay for it.
-    whisper_warm_on_startup: bool = True
+
 
     # --- AI Feedback Narrator (explains the frozen scores; never computes one) ---
     #

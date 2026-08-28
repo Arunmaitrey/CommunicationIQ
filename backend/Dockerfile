@@ -25,8 +25,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # and offline-capable, instead of racing a several-hundred-MB Hugging Face
 # download — and whatever that host's own TLS/network setup does to it —
 # the moment the first student answer needs scoring.
-RUN python -c "from faster_whisper import WhisperModel; WhisperModel('small.en', device='cpu', compute_type='int8')" \
-    && python -c "from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC; Wav2Vec2Processor.from_pretrained('facebook/wav2vec2-base-960h'); Wav2Vec2ForCTC.from_pretrained('facebook/wav2vec2-base-960h')"
+RUN python -c "from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC; Wav2Vec2Processor.from_pretrained('facebook/wav2vec2-base-960h'); Wav2Vec2ForCTC.from_pretrained('facebook/wav2vec2-base-960h')"
 
 # Copy application code
 COPY app/ app/

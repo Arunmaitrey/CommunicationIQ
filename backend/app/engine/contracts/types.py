@@ -28,7 +28,6 @@ class Capability(str, Enum):
     TTS = "tts"
     STORAGE = "storage"
     NOTIFICATION = "notification"
-    PAYMENT = "payment"
 
 
 @dataclass(frozen=True)

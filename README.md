@@ -1,6 +1,6 @@
 # CommunicationIQ
 
-Communication assessment and training platform for placement readiness. AI-powered scoring of pronunciation, fluency, grammar, content, and listening comprehension with institution-level tenant isolation on MongoDB Atlas.
+Communication assessment and training platform for placement readiness. AI-powered scoring of pronunciation, fluency, grammar, content, and listening comprehension. Multi-tenant SaaS with data isolation by `tenant_id` on MongoDB Atlas.
 
 ## Architecture
 
@@ -14,27 +14,29 @@ Frontend (Next.js 14)       Backend (FastAPI)           MongoDB Atlas
      └── API layer ────────> deps.py (auth) ─────────> MongoDB
                                  |                    Motor + Beanie
                              routers/                  |
-                                 |                     |
-                             services/                 |
-                             security.py               |
                              gamification/             |
-                                 |                     |
+                             engine/                   |
                            ┌─────┴─────┐               |
                            │ db.py     │──────────────>│
                            │ Session   │   Beanie ODM  │
                            │ .find()   │──────────────>│
-                           │ .execute()│               │
                            └───────────┘               |
-                                                       │
+                                                       |
                       ┌────────────────────────────────┤
-                      │ CommunicationIQ (control plane) │
-                      │   tenants, users, providers,    │
-                      │   audit, gamification           │
-                      └────────────────────────────────┘
-                      ┌────────────────────────────────┐
-                      │ tenant_stmarys (institution DB) │
-                      │   users, attempts, scores,      │
-                      │   profiles, gamification        │
+                      │ CommunicationIQ (single DB)    │
+                      │                                │
+                      │  Control plane:                 │
+                      │    tenants, platform_users,     │
+                      │    provider_registry, audit     │
+                      │                                │
+                      │  Tenant data (tenant_id):      │
+                      │    users, attempts, scores,     │
+                      │    profiles, gamification       │
+                      │                                │
+                      │  Shared question bank:          │
+                      │    reading_passages, writing_   │
+                      │    prompts, listening_passages,  │
+                      │    quiz_items, task_items       │
                       └────────────────────────────────┘
 ```
 
@@ -45,16 +47,9 @@ Frontend (Next.js 14)       Backend (FastAPI)           MongoDB Atlas
 | Frontend | Next.js 14, React 18, TypeScript, Tailwind CSS |
 | Backend | Python 3.14+, FastAPI, uvicorn |
 | Database | MongoDB Atlas (Beanie ODM + Motor) |
-| Auth | JWT (python-jose) |
+| Auth | JWT (python-jose), bcrypt |
 | Speech | faster-whisper, wav2vec2 (optional Tier 1) |
-
-## Roles (3)
-
-| Role | Scope | Access |
-|------|-------|--------|
-| `super_admin` | Platform-wide | All institutions, users, audit logs, question bank management |
-| `tenant_admin` | Single institution | Own institution's users, cohorts, profiles, results. Cannot see other institutions |
-| `student` | Own account | Take assessments, view own results and progress |
+| AI Narration | Anthropic Claude / OpenAI-compatible / NVIDIA NIM |
 
 ## Quick Start
 
@@ -64,7 +59,6 @@ cd backend
 python -m venv .venv
 .venv/Scripts/activate  # Windows
 pip install -r requirements.txt
-# Set MONGO_URI in .env to your Atlas connection string
 uvicorn app.main:app --host 0.0.0.0 --port 8010
 ```
 
@@ -75,115 +69,210 @@ npm install
 npm run dev  # Runs on port 3010
 ```
 
-### Login Credentials
+### Environment Variables
 
-All passwords: `password123`
+Copy `backend/.env.example` to `backend/.env` and configure:
 
-**Platform:**
+| Variable | Description |
+|----------|-------------|
+| `MONGO_URI` | MongoDB Atlas connection string |
+| `JWT_SECRET` | Secret for signing JWT tokens |
+| `APP_URL` | Frontend URL (default: http://localhost:3010) |
+| `CORS_ORIGINS` | Comma-separated allowed origins |
+| `WHISPER_MODEL` | Speech model: `small.en` (default) |
 
-| Email | Role |
-|-------|------|
-| admin@saashx.ai | super_admin |
+## Login Credentials
 
-**St Mary's Institute (stmarys):**
+All passwords: `Password123!`
 
-| Email | Role |
-|-------|------|
-| admin@stmarys.edu | tenant_admin |
-| aarav.reddy1@stmarys.edu | student |
-| (30 students total) | student |
+### Platform Super Admin
 
-**Vignan University (vignan):**
+| Email | Password | Role |
+|-------|----------|------|
+| admin@saashx.ai | Password123! | super_admin |
+| super@platform.com | Password123! | super_admin |
+| superadmin@fluenzee.com | Password123! | super_admin |
 
-| Email | Role |
-|-------|------|
-| admin@vignan.edu | tenant_admin |
-| aarav.reddy1@vignan.edu | student |
-| (12 students total) | student |
+### St. Mary's Engineering College (stmarys.edu)
 
-## Features
+| Email | Password | Role |
+|-------|----------|------|
+| admin@stmarys.edu | Password123! | tenant_admin |
+| aarav.reddy@stmarys.edu | Password123! | student |
+| priya.sharma@stmarys.edu | Password123! | student |
+| rahul.verma@stmarys.edu | Password123! | student |
+| meera.patel@stmarys.edu | Password123! | student |
 
-### Exam Types (LSRW)
-- **Listening** — Audio played once, comprehension MCQs
-- **Speaking** — Read Aloud, Repeat Sentence, Short Answer, Open Response, Story Retell, Sentence Build
-- **Reading** — Timed passages with MCQs
-- **Writing** — Essay and email prompts with 5-dimension scoring
+### Vignan's Institute of Engineering (vignan.ac.in)
 
-### Company-Specific Rounds
-- Accenture-style Communication Round
-- Cognizant-style Communication Assessment
-- Infosys-style Communication Practice
-- TCS-family Communication Practice
-- Wipro-style Voice Round
+| Email | Password | Role |
+|-------|----------|------|
+| admin@vignan.ac.in | Password123! | tenant_admin |
+| ananya.nair@vignan.ac.in | Password123! | student |
+| vikram.singh@vignan.ac.in | Password123! | student |
+| deepa.reddy@vignan.ac.in | Password123! | student |
 
-### Anti-Proctoring
-- Right-click disabled during exams
-- Copy/paste/cut blocked
-- Screenshot shortcuts blocked (PrintScreen, Ctrl+P/S/U, F12)
-- Text selection disabled
-- Visual proctoring notice banner
-- Browser navigation warning (beforeunload)
-- Presence detection
+### Domain-Based Login
 
-### Exam Resume
-- In-progress attempts detected on tests page
-- Resume button with "In Progress" badge
-- Runner recovers from any interruption (page reload, network, crash)
-- IndexedDB audio queue survives browser restarts
-
-### Student Review/Rating
-- 5-star rating after every exam
-- Optional comment and difficulty feedback
-- Read-only view if already submitted
-
-### Question Bank Management
-- Full CRUD (add/edit/delete) for 6 categories: Reading, Writing, Listening, Speaking, Grammar, Vocabulary
-- Company-specific questions (TCS, Infosys, Wipro, Accenture, Cognizant)
-- Questions visible to all tenants via question bank API
-
-### User Management (Tenant Admin)
-- Create/edit/deactivate students
-- Reset passwords
-- View user list with status
-
-### Profile & Settings
-- Student profile editing (Full Name, Roll Number, Branch, Year, L1 Language)
-- Notification preferences (Practice Reminders, Exam Deadline Alerts)
-- Password change with visibility toggle
-
-### Home Page
-- Quick Actions grid (6 cards)
-- Recent Activity (last 3 attempts)
-- Improvement Tips
-
-### Gamification
-- XP system with daily streaks
-- Badge earning and display
-- Daily quests and challenges
-- Season/league system
+Login is determined by email domain:
+- `@stmarys.edu` → St. Mary's Engineering College
+- `@vignan.ac.in` → Vignan's Institute of Engineering
+- `@saashx.ai` / `@platform.com` / `@fluenzee.com` → Platform admin
 
 ## Database
 
 ### Architecture
-- **Database-per-tenant**: each institution has its own MongoDB database (`tenant_<slug>`)
-- **Control plane**: `CommunicationIQ` database holds platform-wide data
-- **Beanie ODM**: document models in `app/models/platform.py` and `app/models/tenant.py`
-- **SQL bridge**: `app/sqlbridge.py` translates SQLAlchemy-shaped queries to Beanie
+- **Single database**: All data lives in `CommunicationIQ` on MongoDB Atlas
+- **Tenant isolation**: Every document carries `tenant_id`; queries always filter by it
+- **Question bank**: Shared across all institutions (reading, writing, listening, quiz, task items)
+- **Control plane**: Tenants, platform users, provider registry, audit log
 
-### Data Counts
+### Current Data (MongoDB Atlas)
 
-| Collection | stmarys | vignan |
-|-----------|---------|--------|
-| users | 31 | 13 |
-| simulation_profiles | 21 | 21 |
-| reading_passages | 119 | 102 |
-| listening_passages | 19 | 14 |
-| writing_prompts | 104 | 100 |
-| quiz_items | 643 | 570 |
-| task_items | 180 | 162 |
-| attempts | 34 | 8 |
-| consent_records | 30 | 12 |
-| cohorts | 3 | 1 |
+| Collection | Count | Description |
+|-----------|-------|-------------|
+| tenants | 2 | stmarys, vignan |
+| platform_users | 3 | Super admins |
+| users | 9 | 2 admins + 7 students |
+| tenant_user_directory | 9 | Email → institution mapping |
+| simulation_profiles | 12 | 6 per institution |
+| profile_sections | varies | Sections per profile |
+| reading_passages | 54 | 44 shared + 10 company-specific |
+| writing_prompts | 50 | 40 shared + 10 company-specific |
+| listening_passages | 15 | 10 shared + 5 company-specific |
+| quiz_items | 237 | 206 shared + 31 company-specific |
+| task_items | 186 | 156 shared + 30 company-specific |
+| audit_log | 50+ | Login and action tracking |
+
+### Question Categories
+
+| Category | Items | Used In |
+|----------|-------|---------|
+| Reading Comprehension | 110 | Reading sections |
+| Audio Comprehension | 45 | Listening sections |
+| Grammar | 30 | Quiz practice |
+| Vocabulary | 30 | Quiz practice |
+| Speaking (Quiz) | 12 | Speaking quiz sections |
+| Read Aloud | 10 | Speaking sections |
+| Repeat Sentence | 8 | Speaking sections |
+| Short Answer | 12 | Speaking sections |
+| Sentence Build | 6 | Speaking sections |
+| Story Retell | 2 | Speaking sections |
+| Open Response | 118 | Speaking sections |
+| Reading Passages | 44 | Reading sections |
+| Writing Prompts | 40 | Writing sections |
+| Listening Passages | 10 | Listening sections |
+
+## Features
+
+### Exam System (LSRW + Grammar/Vocabulary)
+- **Listening** — Audio played once, comprehension MCQs
+- **Speaking** — Read Aloud, Repeat Sentence, Short Answer, Open Response, Story Retell, Sentence Build
+- **Reading** — Timed passages with comprehension MCQs
+- **Writing** — Essay and email prompts with scoring
+- **Grammar** — Multiple-choice grammar exercises
+- **Vocabulary** — Context-based vocabulary questions
+
+### Company-Specific Rounds
+- Accenture-style Communication Round
+- TCS-family Communication Practice
+- (More can be added via Platform Admin → Question Bank)
+
+### Exam Flow
+1. Student selects a test from the library
+2. Microphone check (environment validation)
+3. Timed assessment with one-shot audio prompts
+4. Automatic scoring (speech engine or Tier 0 timing)
+5. Detailed results with diagnosis and recommendations
+6. AI-generated explanation (optional)
+
+### Anti-Proctoring
+- Right-click, copy/paste, screenshot shortcuts disabled
+- Text selection blocked during exams
+- Browser navigation warning
+
+### Question Bank (Platform Admin)
+- Full CRUD for: Reading, Writing, Listening, Speaking, Grammar, Vocabulary
+- Company-specific questions
+- Questions shared across all institutions
+
+### Student Features
+- Home dashboard with next action, streak, skill progress
+- Practice sessions (speaking, listening, reading, writing)
+- Grammar & vocabulary quizzes
+- Attempt history and detailed results
+- Profile editing (name, roll number, branch, year)
+- 17 theme options
+- Writing reviews
+
+### Institution Admin Features
+- User management (create, edit, deactivate, password reset)
+- Cohort management with drive dates
+- Assessment profile builder (create, clone, publish, retire)
+- Student readiness overview
+- Exam results tracking
+- Invitation system for external candidates
+
+### Platform Admin Features
+- Multi-tenant overview (seats, activity, providers)
+- Institution management (create, configure, suspend)
+- Provider registry and capability configuration
+- Audit log viewer
+- Gamification configuration
+- AI narration settings
+- Database export
+
+### Gamification
+- XP system with daily streaks
+- Badge earning and display
+- Daily quests based on weakest skills
+
+## API Endpoints
+
+### Auth
+- `POST /api/v1/auth/login` — Sign in (email + password)
+- `POST /api/v1/auth/signup` — Student self-registration
+- `GET /api/v1/auth/me` — Current session user
+- `POST /api/v1/auth/change-password` — Change password
+- `POST /api/v1/auth/preferences` — Save preferences
+
+### Student
+- `GET /api/v1/student/home` — Dashboard data
+- `GET /api/v1/student/profiles` — Available assessments
+- `GET /api/v1/student/attempts` — My attempts
+- `POST /api/v1/student/consent` — Give recording consent
+
+### Attempts
+- `POST /api/v1/student/attempts` — Start attempt
+- `GET /api/v1/student/attempts/{id}/runner` — Get runner payload (starts the sitting)
+- `POST /api/v1/student/attempts/{id}/responses/{rid}/prompt` — Play prompt
+- `POST /api/v1/student/attempts/{id}/responses/{rid}/audio` — Upload recording
+- `POST /api/v1/student/attempts/{id}/responses/{rid}/answer` — Submit answer
+- `POST /api/v1/student/attempts/{id}/responses/{rid}/skip` — Skip item
+- `POST /api/v1/student/attempts/{id}/submit` — Submit attempt
+- `GET /api/v1/student/attempts/{id}/result` — Get results
+
+### Institution Admin
+- `GET /api/v1/tenant/overview` — Institution overview
+- `GET /api/v1/tenant/users` — List users
+- `GET /api/v1/tenant/cohorts` — List cohorts
+- `GET /api/v1/tenant/profiles` — List assessment profiles
+- `POST /api/v1/tenant/profiles` — Create profile
+- `PUT /api/v1/tenant/profiles/{id}` — Update profile
+
+### Platform Admin
+- `GET /api/v1/platform/overview` — Platform overview
+- `GET /api/v1/platform/tenants` — List institutions
+- `GET /api/v1/platform/questions/items` — Question bank
+- `POST /api/v1/platform/questions/{category}` — Create question
+- `DELETE /api/v1/platform/questions/{collection}/{id}` — Delete question
+- `GET /api/v1/platform/audit` — Audit log
+
+### Practice
+- `GET /api/v1/practice/quiz/next` — Next quiz items
+- `POST /api/v1/practice/quiz/submit` — Submit quiz answers
+- `GET /api/v1/practice/mistakes` — Review mistakes
+- `GET /api/v1/practice/skills` — Skills overview
 
 ## Project Structure
 
@@ -194,33 +283,81 @@ CommunicationIQ/
       main.py              # FastAPI app + lifespan
       config.py            # Settings from env
       db.py                # MongoDB data layer (Beanie + Session bridge)
-      sqlbridge.py         # SQLAlchemy query expressions over Beanie
       deps.py              # Auth dependencies
       security.py          # JWT + password hashing
+      audit.py             # Audit logging
+      provisioning.py      # Institution management
       models/
-        _common.py         # StrId type for ObjectId tolerance
+        _common.py         # StrId type
         platform.py        # Control-plane document models
-        tenant.py          # Institution document models
+        tenant.py          # Institution document models (with tenant_id)
       routers/             # API route handlers
+        auth.py            # Login, signup, session
+        student.py         # Student home, profiles, attempts
+        attempts.py        # Assessment lifecycle
+        tenant_admin.py    # Institution overview, users, profiles
+        tenant_writes.py   # User/cohort/profile CRUD
+        platform_admin.py  # Platform console, questions, audit
+        platform_writes.py # Tenant/provider management
+        trainer.py         # Cohort readiness, student results
+        game.py            # Gamification state
+        practice.py        # Quiz, drills, mistakes
+        listening.py       # Listening practice
+        reading.py         # Reading practice
+        writing.py         # Writing practice
+        invitations.py     # External candidate invitations
+        report.py          # HTML report generation
       gamification/        # XP, quests, streaks, badges
       engine/              # Speech scoring engine
       narration/           # AI feedback narrator
+      storage/             # File storage abstraction
+    validation_baselines/  # Scoring validation baselines
     requirements.txt
     .env.example
   frontend/
-    app/                   # Next.js pages (App Router)
+    app/
+      (app)/               # Authenticated pages
+        home/              # Student dashboard
+        tests/             # Assessment library
+        practise/          # Practice sessions
+        results/           # Attempt results
+        my-progress/       # Student progress
+        settings/          # Account settings
+        platform/          # Platform admin
+        tenant/            # Institution admin
+        quiz/              # Grammar/vocabulary quiz
+        reading/           # Reading practice
+        listening/         # Listening practice
+        writing/           # Writing practice
+        consent/           # Recording consent
+        skills/            # Skills overview
+        simulate/          # Simulation library
+        season/            # Season/plan
+        writing-reviews/   # Writing feedback
+      login/               # Sign in
+      signup/              # Register
+      attempt/             # Test runner (outside shell)
+      invite/              # External candidate invite
     components/            # React components
-    lib/                   # Utilities, API client, navigation
+      shell/               # AppShell, navigation
+      brand/               # Logo, hero mic, brand
+      ui.tsx               # Shared UI primitives
+    lib/
+      api.ts               # API client (single source of truth)
+      nav.ts               # Navigation config
+      roles.ts             # Role helpers
     package.json
-  Documentation/           # Project documentation
-  README.md
+  docker-compose.yml
   .gitignore
 ```
 
 ## Security
 
-- **Never commit** `.env` or any file containing `MONGO_URI`, `JWT_SECRET`, or API keys
-- Tenant isolation is structural: each institution has its own MongoDB database
-- JWT tokens carry `scope` (platform/tenant) and `tenant_slug` — cross-tenant access is impossible by design
+- **Never commit** `.env` or files containing `MONGO_URI`, `JWT_SECRET`, or API keys
+- Tenant isolation by `tenant_id` on every document
+- JWT tokens carry `scope` (platform/tenant) and `tenant_id`
 - Audit logging on all write operations
 - Recording consent required before any exam
+- Rate limiting on login attempts
+- Password hashing with bcrypt
+- CORS configured to specific origins

@@ -85,7 +85,7 @@ function Practise() {
         return;
       }
       const attempt = await attemptApi.start(pick.id, "practice");
-      router.push(`/attempt/${attempt.attempt_id}/check`);
+      router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
       setStartError(err instanceof ApiError ? err.detail : "Could not start the session");
       setStarting(false);

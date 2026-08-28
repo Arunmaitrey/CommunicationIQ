@@ -3,10 +3,9 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
-  LogOut, Mail, Menu, PanelLeftClose, PanelLeftOpen, ShieldCheck, X,
+  Bell, LogOut, Mail, Menu, PanelLeftClose, PanelLeftOpen, ShieldCheck, Trophy, X,
 } from "lucide-react";
 import { BrandMark, TenantLockup } from "@/components/brand/BrandMark";
-import { PoweredByFloat } from "@/components/brand/PoweredBy";
 import { useRole } from "@/components/RoleProvider";
 import { ThemePicker } from "@/components/shell/ThemePicker";
 import { useRailCollapsed } from "@/components/shell/useRailCollapsed";
@@ -99,6 +98,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
           <ThemePicker />
 
+          <NotificationBell user={user} />
+
           {user && <ProfileMenu user={user} onSignOut={signOut} />}
         </header>
 
@@ -111,13 +112,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="font-semibold text-foreground/70">CommunicationIQ</span>
             <span>&copy; {new Date().getFullYear()} Fluenzee. All rights reserved.</span>
           </div>
-          <div className="flex items-center gap-3">
-            <span>Powered by Graymatter Technologies</span>
-          </div>
         </footer>
       </div>
-
-      <PoweredByFloat />
     </div>
   );
 }
@@ -125,6 +121,155 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 /** Avatar + name in the header, made clickable: opens a small card with the
  *  signed-in account's basic details and sign-out, rather than sign-out
  *  living as its own icon with nothing behind the name it sits next to. */
+/** Notification bell with red badge for recent activity. */
+function NotificationBell({ user }: { user: SessionUser | null }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const [items, setItems] = useState<{
+    id: string; title: string; body: string; read: boolean; at: string;
+  }[]>([]);
+
+  useEffect(() => {
+    if (!user) return;
+    const token = localStorage.getItem("commiq.token") ?? "";
+    const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8010/api/v1";
+    const headers = { Authorization: `Bearer ${token}` };
+
+    if (user.scope === "platform") {
+      // Platform admins see audit events
+      fetch(`${API}/platform/audit`, { headers })
+        .then(r => r.ok ? r.json() : [])
+        .then((rows: Array<{id: string; action: string; actor_label: string; entity: string; at: string}>) => {
+          setItems(rows.slice(0, 20).map((r) => ({
+            id: r.id, title: r.action.replace(/_/g, " "),
+            body: `${r.actor_label} — ${r.entity}`, read: false, at: r.at,
+          })));
+        }).catch(() => {});
+    } else if (user.role === "student") {
+      // Students see their attempts and streak
+      fetch(`${API}/student/home`, { headers })
+        .then(r => r.ok ? r.json() : null)
+        .then((home) => {
+          if (!home) return;
+          const n = [];
+          for (const a of (home.recent_attempts ?? []).slice(0, 10)) {
+            n.push({
+              id: a.id, title: `Exam: ${a.profile_name}`,
+              body: a.status === "scored" ? `Score: ${a.overall_score ?? "—"}` : a.status,
+              read: a.status === "scored", at: a.scored_at || a.started_at || "",
+            });
+          }
+          if (home.quest && !home.quest.completed) {
+            n.unshift({
+              id: "quest", title: home.quest.title,
+              body: home.quest.description, read: false, at: home.quest.for_date,
+            });
+          }
+          setItems(n);
+        }).catch(() => {});
+    } else {
+      // Tenant admins see their institution's users and recent logins
+      fetch(`${API}/tenant/users`, { headers })
+        .then(r => r.ok ? r.json() : [])
+        .then((rows: Array<{id: string; full_name: string; email: string; role: string; active: boolean}>) => {
+          const n = [];
+          for (const u of (rows ?? []).slice(0, 15)) {
+            n.push({
+              id: u.id, title: `${u.role === "student" ? "Student" : "Admin"}: ${u.full_name}`,
+              body: u.email, read: u.active, at: "",
+            });
+          }
+          setItems(n);
+        }).catch(() => {});
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [open]);
+
+  // Read/unread tracking via localStorage
+  const READ_KEY = "commiq.notifications.read";
+  const getReadSet = (): Set<string> => {
+    try {
+      const raw = localStorage.getItem(READ_KEY);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch { return new Set(); }
+  };
+  const markRead = (id: string) => {
+    const s = getReadSet();
+    s.add(id);      localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s)));
+    setItems((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
+  };
+  const markAllRead = () => {
+    const s = getReadSet();
+    items.forEach((n) => s.add(n.id));
+    localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s)));
+    setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  // Apply read state from localStorage after items load
+  const readSet = getReadSet();
+  const resolved = items.map((n) => ({ ...n, read: n.read || readSet.has(n.id) }));
+  const unread = resolved.filter((n) => !n.read).length;
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="relative btn btn-icon btn-ghost ds-focus"
+        title="Notifications"
+        aria-label="Notifications"
+      >
+        <Bell size={16} />
+        {unread > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center rounded-full text-[9px] font-bold text-white px-1"
+                style={{ background: "var(--rag-red)" }}>
+            {unread > 99 ? "99+" : unread}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto ds-card p-3 z-50 animate-fade-in">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs font-bold">Notifications</span>
+            {unread > 0 && (
+              <button onClick={markAllRead} className="text-[10px] text-primary hover:underline ds-focus">Mark all read</button>
+            )}
+          </div>
+          {resolved.length === 0 ? (
+            <p className="text-[11px] text-muted py-2">No recent activity.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {resolved.map((n) => (
+                <button
+                  key={n.id}
+                  onClick={() => markRead(n.id)}
+                  className="w-full text-left p-2 rounded-ds text-xs transition-colors hover:bg-surface2"
+                  style={{ background: n.read ? "transparent" : "color-mix(in srgb, var(--primary) 5%, transparent)" }}
+                >
+                  <div className="flex items-center gap-1.5">
+                    {!n.read && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--primary)" }} />}
+                    <span className="font-semibold capitalize flex-1">{n.title}</span>
+                  </div>
+                  <div className="text-muted mt-0.5 ml-3">{n.body}</div>
+                  {n.at && <div className="text-[10px] text-muted mt-0.5 ml-3">{new Date(n.at).toLocaleString()}</div>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileMenu({ user, onSignOut }: { user: SessionUser; onSignOut: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -290,6 +435,16 @@ function RailContent({ sections, pathname, onNavigate, brand, collapsed = false 
           </div>
         ))}
       </nav>
+
+      <div className="rail-foot shrink-0 px-4 py-3 border-t flex items-center gap-1.5"
+           style={{ borderColor: "var(--rail-line)", color: "var(--rail-muted)" }}>
+        <span className="text-[9px] font-semibold opacity-70" style={{ color: "var(--rail-muted)" }}>
+          Powered by Graymatter Technologies
+        </span>
+        <span className="text-[9px] opacity-50" style={{ color: "var(--rail-muted)" }}>
+          &copy; 2026
+        </span>
+      </div>
 
     </>
   );

@@ -620,7 +620,7 @@ function usePracticeStart(attemptId: string) {
     setBusy(key); setProblem("");
     try {
       const attempt = await attemptApi.start(profileId, "practice", sourceAttemptId ?? attemptId);
-      router.push(`/attempt/${attempt.attempt_id}/check`);
+      router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
       setProblem(err instanceof ApiError ? err.detail : "Could not start the practice");
       setBusy("");
@@ -630,7 +630,7 @@ function usePracticeStart(attemptId: string) {
     setBusy("retake"); setProblem("");
     try {
       const attempt = await attemptApi.start(profileId, "practice");
-      router.push(`/attempt/${attempt.attempt_id}/check`);
+      router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
       setProblem(err instanceof ApiError ? err.detail : "Could not start the test");
       setBusy("");
@@ -828,7 +828,7 @@ function PracticeResult({ outcome, carried }: {
     setBusy(true); setProblem("");
     try {
       const attempt = await attemptApi.start(outcome.assessment_profile_id, "practice");
-      router.push(`/attempt/${attempt.attempt_id}/check`);
+      router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
       setProblem(err instanceof ApiError ? err.detail : "Could not start the test");
       setBusy(false);
@@ -913,43 +913,64 @@ function StudentReview({ attemptId }: { attemptId: string }) {
   const [comment, setComment] = useState("");
   const [difficulty, setDifficulty] = useState("just_right");
   const [submitted, setSubmitted] = useState(false);
+  const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
-  const reviewKey = `commiq.reviews.${attemptId}`;
   const [existingReview, setExistingReview] = useState<{
-    attempt_id: string;
+    id: string;
     rating: number;
     comment: string;
     difficulty: string;
-    submitted_at: string;
+    created_at: string;
   } | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/v1/student/attempts/${attemptId}/review`, {
+          headers: { Authorization: `Bearer ${localStorage.getItem("commiq.token") || ""}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (!cancelled && data) {
+            setExistingReview(data);
+            setSubmitted(true);
+          }
+        }
+      } catch {
+        // ignore - endpoint may not exist yet
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [attemptId]);
+
+  async function handleSubmit() {
+    if (!selectedRating) return;
+    setLoading(true);
     try {
-      const raw = localStorage.getItem(reviewKey);
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        setExistingReview(parsed);
+      const res = await fetch(`/api/v1/student/attempts/${attemptId}/review`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("commiq.token") || ""}`,
+        },
+        body: JSON.stringify({ rating: selectedRating, comment, difficulty }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setExistingReview(data);
         setSubmitted(true);
+        toast("success", "Review submitted! Thank you for your feedback.");
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast("error", err.detail || "Could not submit review");
       }
     } catch {
-      // ignore
+      toast("error", "Network error. Please try again.");
+    } finally {
+      setLoading(false);
     }
-  }, [reviewKey]);
-
-  function handleSubmit() {
-    if (!selectedRating) return;
-    const review = {
-      attempt_id: attemptId,
-      rating: selectedRating,
-      comment,
-      difficulty,
-      submitted_at: new Date().toISOString(),
-    };
-    localStorage.setItem(reviewKey, JSON.stringify(review));
-    setExistingReview(review);
-    setSubmitted(true);
-    toast("success", "Review submitted! Thank you for your feedback.");
   }
 
   if (submitted || existingReview) {
@@ -1065,10 +1086,10 @@ function StudentReview({ attemptId }: { attemptId: string }) {
 
       <button
         onClick={handleSubmit}
-        disabled={selectedRating == null}
+        disabled={selectedRating == null || loading}
         className="btn btn-primary btn-sm ds-focus"
       >
-        Submit Review
+        {loading ? "Submitting..." : "Submit Review"}
       </button>
     </div>
   );

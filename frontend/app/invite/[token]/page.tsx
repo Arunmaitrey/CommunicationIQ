@@ -68,7 +68,7 @@ export default function InvitePage() {
                     || mine.attempt_status === "scored";
           router.replace(done
             ? `/results/${mine.attempt_id}`
-            : `/attempt/${mine.attempt_id}/check`);
+            : `/attempt/${mine.attempt_id}/run`);
           return true;
         }
         if (mine.profile_id && !mine.attempt_id) {
@@ -143,7 +143,7 @@ export default function InvitePage() {
     try {
       await api.giveConsent(["recording"]);
       const attempt = await attemptApi.start(session.profile_id, "official");
-      router.replace(`/attempt/${attempt.attempt_id}/check`);
+      router.replace(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
       setBusy("");
       setError(err instanceof ApiError ? err.detail

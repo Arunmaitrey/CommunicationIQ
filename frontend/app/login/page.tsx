@@ -35,7 +35,12 @@ function LoginForm() {
       const { token, user } = await api.login(email.trim(), password);
       signIn(user, token);
       toast("success", `Welcome back, ${user.full_name}!`);
-      router.replace(next && next !== "/login" ? next : landingFor(user.role));
+      if (user.must_change_password) {
+        toast("info", "Please change your password before continuing.");
+        router.replace("/settings");
+      } else {
+        router.replace(next && next !== "/login" ? next : landingFor(user.role));
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Could not reach the server");
       setBusy(false);

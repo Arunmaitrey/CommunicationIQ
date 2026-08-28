@@ -44,14 +44,6 @@
  */
 export const SILENCE_DBFS = -55;
 
-/** How far above the room's measured noise floor a frame must be to count
- *  as speech. Hardware UAT (D1): a -50.7 dBFS room -- "quiet enough" by the
- *  setup check -- sat above the fixed -55 floor, so the room itself counted
- *  as continuous speech: no item ever advanced on silence and an empty
- *  recording could not be caught. The floor is now the greater of the fixed
- *  value and noise + this margin. */
-export const NOISE_MARGIN_DB = 6;
-
 /** The opening stretch of every recording that neither gate listens to.
  *  The start tone plays through the speakers a moment before the recorder
  *  starts, and on a laptop without headphones its tail (plus the stream's
@@ -59,18 +51,6 @@ export const NOISE_MARGIN_DB = 6;
  *  milliseconds of capture -- loud enough to count as "speech" and so to
  *  defeat the nothing-heard check (hardware UAT, D1). */
 export const LEADING_GUARD_MS = 500;
-
-/** The speech floor for a room. Prefers the room's ceiling (90th-percentile
- *  level) over its floor (10th percentile): the setup check's "noise" figure
- *  is the quietest tenth of the room, and a floor set just above it still
- *  sat under most frames of a gain-controlled stream on real hardware. */
-export function speechFloorFor(noiseDbfs: number | null | undefined,
-                               noiseCeilingDbfs?: number | null): number {
-  const room = (noiseCeilingDbfs != null && Number.isFinite(noiseCeilingDbfs))
-    ? noiseCeilingDbfs : noiseDbfs;
-  if (room == null || !Number.isFinite(room)) return SILENCE_DBFS;
-  return Math.max(SILENCE_DBFS, room + NOISE_MARGIN_DB);
-}
 
 /** How much speech makes a recording an attempt rather than a cough. */
 export const MIN_SPEECH_MS = 250;

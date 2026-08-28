@@ -117,10 +117,6 @@ function ProfileFields({ value, onChange }: {
             <input className="ds-input w-full" value={value.phone}
                    onChange={(e) => set({ phone: e.target.value })} />
           </Field>
-          <Field label="Billing email" hint="Where invoices go, if not the admin.">
-            <input className="ds-input w-full" type="email" value={value.billing_email}
-                   onChange={(e) => set({ billing_email: e.target.value })} />
-          </Field>
         </div>
 
         <div className="mt-3">
@@ -216,10 +212,6 @@ function ProfileFields({ value, onChange }: {
             <input className="ds-input w-full" value={value.accreditation}
                    onChange={(e) => set({ accreditation: e.target.value })}
                    placeholder="NAAC A+" />
-          </Field>
-          <Field label="GST number">
-            <input className="ds-input w-full" value={value.gst_number}
-                   onChange={(e) => set({ gst_number: e.target.value })} />
           </Field>
           <div className="md:col-span-2">
             <Field label="Courses / streams"

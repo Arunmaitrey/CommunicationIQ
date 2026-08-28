@@ -1,8 +1,8 @@
 """Non-engine pluggable services — same abstraction pattern, same rules.
 
-Notifications and payments sit behind contracts for the same reason the ASR
-does: NOTIF-01 and BILL-01 require the channel and the gateway to be swappable
-by configuration. Razorpay is Day-1, not Day-only.
+Notifications sit behind contracts for the same reason the ASR
+does: NOTIF-01 requires the channel to be swappable
+by configuration.
 """
 from __future__ import annotations
 
@@ -16,18 +16,6 @@ class NotificationResult:
     channel: str
     provider_message_id: str = ""
     error: str = ""
-
-
-@dataclass
-class PaymentIntent:
-    intent_id: str
-    amount_paise: int
-    currency: str = "INR"
-    checkout_url: str = ""
-    # Never a card number, never a token that can be replayed. The gateway
-    # holds the instrument; we hold a reference (BILL-08).
-    provider_ref: str = ""
-    extra: dict = field(default_factory=dict)
 
 
 @runtime_checkable

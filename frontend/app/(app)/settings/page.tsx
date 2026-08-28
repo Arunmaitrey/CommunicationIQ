@@ -3,7 +3,6 @@ import { useState } from "react";
 import { Check, Lock, Eye, EyeOff } from "lucide-react";
 import { useRole } from "@/components/RoleProvider";
 import { THEMES, THEME_GROUPS, useTheme, type ThemeId } from "@/components/ThemeProvider";
-import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { PageHeader, Section } from "@/components/ui";
 import { ROLE_LABEL } from "@/lib/roles";
 import { api, API_BASE, ApiError, getToken } from "@/lib/api"
@@ -19,14 +18,6 @@ export default function SettingsPage() {
         title="Settings"
         sub="Your account and how the app looks to you. A theme is a personal preference — it follows your account on this device, not the machine."
       />
-
-      <Section title="Language" className="mb-4">
-        <p className="text-xs text-muted mb-3 leading-relaxed">
-          Choose the language for feedback messages and UI hints. Practice
-          content stays in English — only explanations switch.
-        </p>
-        <LanguageSwitcher />
-      </Section>
 
       <Section title="Account" className="mb-4">
         <dl className="grid sm:grid-cols-2 gap-3 text-xs">

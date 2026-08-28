@@ -171,7 +171,7 @@ def _importable(entrypoint: str) -> str:
     with the fallback quietly carrying the load.
     """
     if ":" not in entrypoint:
-        return "Expected module:attribute, e.g. app.engine.providers.tier1.asr:WhisperASR"
+        return "Expected module:attribute, e.g. app.engine.providers.tier1.pronunciation:Wav2VecGOP"
     module_name, _, attribute = entrypoint.partition(":")
     try:
         module = importlib.import_module(module_name)

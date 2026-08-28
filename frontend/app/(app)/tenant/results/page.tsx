@@ -136,7 +136,7 @@ function StudentAttemptHistory({ studentId, student }: { studentId: string; stud
   const { toast } = useToast();
   const [expandedAttempt, setExpandedAttempt] = useState<string | null>(null);
 
-  const attempts = useData(() => api.cohortStudentAttempts(studentId), [studentId]);
+  const attempts = useData(() => api.tenantStudentAttempts(studentId), [studentId]);
 
   const scoredAttempts = (attempts.data ?? []).filter((a) => a.status === "scored");
   const inProgressAttempts = (attempts.data ?? []).filter((a) =>
@@ -259,7 +259,7 @@ function StudentAttemptHistory({ studentId, student }: { studentId: string; stud
                   )}
                   {(a.status === "in_progress" || a.status === "created") && (
                     <a
-                      href={`/attempt/${a.id}/check`}
+                      href={`/attempt/${a.id}/run`}
                       className="btn btn-ghost text-[10px] px-2 py-1 ds-focus"
                     >
                       Resume

@@ -21,7 +21,7 @@ from app.deps import Principal, TenantModels, require_roles
 from app import formats
 
 router = APIRouter(prefix="/report", tags=["report"],
-                   dependencies=[Depends(require_roles("student", "tenant_admin", "trainer"))])
+                   dependencies=[Depends(require_roles("student", "tenant_admin", "super_admin"))])
 
 
 def _skill_bar(label: str, score: float, scale_max: float = 80, width: int = 40) -> str:
@@ -390,14 +390,16 @@ async def report_html(attempt_id: str, principal: Principal,
     if principal.role == "student" and attempt.user_id != principal.user_id:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Attempt not found")
 
-    # For trainers, check they teach this student
-    if principal.role in ("trainer", "tenant_admin"):
+    # For tenant admins and super admins, verify the student exists
+    if principal.role in ("tenant_admin", "super_admin"):
         user = await models.User.get(attempt.user_id)
         if user is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found")
 
     from app.routers.attempts import _result
-    result = await _result(models, attempt)
+    from app.db import Session
+    async with Session(models) as session:
+        result = await _result(session, attempt)
 
     # Get student info
     user = await models.User.get(attempt.user_id)

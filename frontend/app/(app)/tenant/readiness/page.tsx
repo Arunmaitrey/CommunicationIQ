@@ -25,13 +25,13 @@ function Readiness() {
   useEffect(() => {
     if (!cohorts.data) return;
     let live = true;
-    Promise.all(cohorts.data.map((c) => api.cohortReadiness(c.id).catch(() => null)))
+    Promise.all(cohorts.data.map((c) => api.tenantCohortReadiness(c.id).catch(() => null)))
       .then((res) => { if (live) setRows(res.filter(Boolean) as CohortReadiness[]); })
       .catch(() => { if (live) setError("Could not load readiness"); })
       .finally(() => { if (live) setLoading(false); });
 
     // Fetch top students across all cohorts for ranking
-    Promise.all(cohorts.data.map((c) => api.cohortStudents(c.id).catch(() => [])))
+    Promise.all(cohorts.data.map((c) => api.tenantCohortStudents(c.id).catch(() => [])))
       .then((res) => {
         if (!live) return;
         const all = res.flat().filter((s) => s.overall_score != null);

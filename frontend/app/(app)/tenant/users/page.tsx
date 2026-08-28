@@ -243,7 +243,6 @@ function EditUserModal({ user, onClose, onSaved }: { user: UserRow; onClose: () 
             <select className="ds-select" value={form.role}
               onChange={(e) => setForm({ ...form, role: e.target.value })}>
               <option value="student">Student</option>
-              <option value="trainer">Trainer</option>
               <option value="tenant_admin">Institution Admin</option>
             </select>
           </div>

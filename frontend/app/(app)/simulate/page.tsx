@@ -109,9 +109,8 @@ function Simulate() {
     setStartError("");
     try {
       const attempt = await attemptApi.start(profileId, stressMode ? "stress" : "practice");
-      // Straight into the environment check — the runner is never entered
-      // without one, because a dead microphone must not cost an attempt.
-      router.push(`/attempt/${attempt.attempt_id}/check`);
+      // Straight into the runner — the attempt begins when it is opened.
+      router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
       setStartError(err instanceof ApiError ? err.detail : "Could not start the simulation");
       setStarting("");

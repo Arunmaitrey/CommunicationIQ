@@ -1,727 +1,562 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
-import {
-  BookOpen, FileText, Headphones, Mic, Plus, Pencil, Trash2, ChevronDown, ChevronRight,
-  ChevronLeft, X, Save, Filter, Building2, Globe,
-} from "lucide-react";
+import { useEffect, useState } from "react";
+import { BookOpen, Mic, Headphones, PenLine, FileText, Plus, X, Trash2, Building2 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
+import { ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
 import { PLATFORM_ROLES } from "@/lib/roles";
-import { Badge, EmptyState, ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
-import { api, type TenantRow } from "@/lib/api";
-import { useData } from "@/lib/useData";
-import { useToast } from "@/components/Toast";
+import { API_BASE, getToken } from "@/lib/api";
 
-/* ------------------------------------------------------------------ */
-/*  Categories                                                         */
-/* ------------------------------------------------------------------ */
-
-type BaseCategory = "reading" | "writing" | "listening" | "speaking" | "grammar" | "vocabulary";
-
-type CompanyKey = "accenture" | "cognizant" | "wipro" | "tcs" | "infosys";
-
-type Category = BaseCategory | CompanyKey;
-
-const BASE_CATEGORIES: BaseCategory[] = [
-  "reading", "writing", "listening", "speaking", "grammar", "vocabulary",
+const COMPANIES = ["", "Accenture", "TCS", "Cognizant", "Wipro", "Infosys"];
+const CATEGORIES = [
+  { key: "reading_comprehension", label: "Reading Comprehension" },
+  { key: "vocabulary", label: "Vocabulary" },
+  { key: "grammar", label: "Grammar" },
+  { key: "audio_comprehension", label: "Audio Comprehension" },
+  { key: "email", label: "Email Writing" },
+  { key: "essay", label: "Essay Writing" },
 ];
 
-const COMPANY_EXAMS: { key: CompanyKey; label: string; color: string }[] = [
-  { key: "accenture", label: "Accenture-style Comm Round", color: "var(--accent)" },
-  { key: "cognizant", label: "Cognizant-style Comm Assessment", color: "#8b5cf6" },
-  { key: "wipro",     label: "Wipro-style Voice Round",      color: "#f59e0b" },
-  { key: "tcs",       label: "TCS-style Ninja",              color: "#10b981" },
-  { key: "infosys",   label: "Infosys-style",                color: "#3b82f6" },
-];
-
-const COMPANY_NAME_MAP: Record<CompanyKey, string> = {
-  accenture: "Accenture", cognizant: "Cognizant", wipro: "Wipro",
-  tcs: "TCS", infosys: "Infosys",
-};
-
-/* Sub-types within a company round (what the admin adds) */
-type CompanySubType = "reading" | "writing" | "listening" | "speaking";
-
-const SUB_ICONS: Record<CompanySubType, typeof BookOpen> = {
-  reading: BookOpen, writing: FileText, listening: Headphones, speaking: Mic,
-};
-const SUB_LABELS: Record<CompanySubType, string> = {
-  reading: "Reading", writing: "Writing", listening: "Listening", speaking: "Speaking",
-};
-
-function isCompanyKey(c: Category): c is CompanyKey {
-  return c in COMPANY_NAME_MAP;
-}
-
-const CAT_ICONS_BASE: Record<BaseCategory, typeof BookOpen> = {
-  reading: BookOpen, writing: FileText, listening: Headphones, speaking: Mic,
-  grammar: FileText, vocabulary: BookOpen,
-};
-const CAT_LABELS_BASE: Record<BaseCategory, string> = {
-  reading: "Reading Comprehension", writing: "Writing Prompts",
-  listening: "Listening Comprehension", speaking: "Speaking Tasks",
-  grammar: "Grammar", vocabulary: "Vocabulary",
-};
-
-/* ------------------------------------------------------------------ */
-/*  API helpers                                                        */
-/* ------------------------------------------------------------------ */
-
-interface QuestionItem {
-  id: string;
-  title?: string;
-  stem?: string;
-  prompt_text?: string;
-  task_type?: string;
-  kind?: string;
-  company?: string;
-  options: string[];
-  correct_index: number;
-  explanation?: string;
-  body?: string;
-  transcript?: string;
-  prompt?: string;
-  min_words?: number;
-  reference_text?: string;
-}
-
-/* ------------------------------------------------------------------ */
-/*  Page root                                                          */
-/* ------------------------------------------------------------------ */
-
-export default function ContentPage() {
+export default function QuestionBankPage() {
   return (
     <RequireAuth roles={PLATFORM_ROLES}>
-      <Content />
+      <QuestionBank />
     </RequireAuth>
   );
 }
 
-function Content() {
-  const { data: tenants, loading: tenantsLoading } = useData(() => api.platformTenants());
-  const [activeCategory, setActiveCategory] = useState<Category>("reading");
-  const [items, setItems] = useState<QuestionItem[]>([]);
-  const [totalCount, setTotalCount] = useState(0);
-  const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [counts, setCounts] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(false);
+function QuestionBank() {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
-  const [editItem, setEditItem] = useState<QuestionItem | null>(null);
+  const [tab, setTab] = useState<"all" | "quiz" | "task" | "writing" | "listening" | "reading">("all");
   const [companyFilter, setCompanyFilter] = useState("");
-  const [companySubType, setCompanySubType] = useState<CompanySubType>("reading");
-  const { toast } = useToast();
-  const PAGE_SIZE = 10;
+  const [showAdd, setShowAdd] = useState(false);
+  const [addType, setAddType] = useState("");
 
-  const COMPANIES = ["", "TCS", "Infosys", "Wipro", "Accenture", "Cognizant"];
-  const sourceTenant = tenants?.[0] as TenantRow | undefined;
-
-  /* ---- Determine which base categories to load for company rounds ---- */
-  const activeCompany = isCompanyKey(activeCategory) ? COMPANY_NAME_MAP[activeCategory] : null;
-
-  const loadItems = useCallback(async (category: Category, p: number) => {
-    if (!sourceTenant) return;
+  const loadData = () => {
     setLoading(true);
-    setError("");
-    try {
-      if (isCompanyKey(category)) {
-        const companyName = COMPANY_NAME_MAP[category];
-        const baseCat = companySubType as BaseCategory;
-        const data = await api.platformQuestionItems(sourceTenant.id, baseCat, p, PAGE_SIZE);
-        const filtered = (data.items as QuestionItem[]).filter(
-          (i) => (i.company || "").toLowerCase() === companyName.toLowerCase(),
-        );
-        setItems(filtered);
-        setTotalCount(filtered.length);
-        setPage(data.page);
-        setTotalPages(Math.max(1, Math.ceil(filtered.length / PAGE_SIZE)));
-      } else {
-        const data = await api.platformQuestionItems(sourceTenant.id, category, p, PAGE_SIZE);
-        setItems(data.items as QuestionItem[]);
-        setTotalCount(data.total);
-        setPage(data.page);
-        setTotalPages(data.total_pages);
-      }
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : "Failed to load questions";
-      setError(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [sourceTenant, companySubType]);
+    const token = getToken();
+    const params = new URLSearchParams();
+    if (companyFilter) params.set("company", companyFilter);
+    fetch(`${API_BASE}/platform/questions?${params}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => { if (!r.ok) throw new Error("Failed to load"); return r.json(); })
+      .then((d) => { setData(d); setLoading(false); })
+      .catch((e) => { setError(e?.message || "Failed"); setLoading(false); });
+  };
 
-  const loadCounts = useCallback(async () => {
-    if (!sourceTenant) return;
-    try {
-      const data = await api.platformQuestions(sourceTenant.id);
-      const t = (data as { tenants?: Record<string, unknown>[] })?.tenants?.[0];
-      if (t) {
-        const qi = t.quiz_items && typeof t.quiz_items === 'object' ? t.quiz_items as Record<string, number> : {};
-        setCounts({
-          reading_passages: Number(t.reading_passages) || 0,
-          writing_prompts: Number(t.writing_prompts) || 0,
-          listening_passages: Number(t.listening_passages) || 0,
-          speaking_items: Number(t.speaking_items) || 0,
-          grammar: Number(qi.grammar) || 0,
-          vocabulary: Number(qi.vocabulary) || 0,
-        });
-      }
-    } catch { /* ignore */ }
-  }, [sourceTenant]);
+  useEffect(() => { loadData(); }, [companyFilter]);
 
-  useEffect(() => {
-    if (sourceTenant) {
-      loadCounts();
-      loadItems(activeCategory, 1);
-      setPage(1);
-      setExpandedId(null);
-      setShowAdd(false);
-      setEditItem(null);
-      setCompanyFilter("");
-    }
-  }, [sourceTenant, activeCategory, loadCounts, loadItems, companySubType]);
+  const handleDelete = async (collection: string, itemId: string) => {
+    if (!confirm("Delete this question?")) return;
+    const token = getToken();
+    await fetch(`${API_BASE}/platform/questions/${collection}/${itemId}`, {
+      method: "DELETE",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    loadData();
+  };
 
-  function getCategoryCount(cat: Category): number {
-    if (isCompanyKey(cat)) {
-      const companyName = COMPANY_NAME_MAP[cat];
-      let total = 0;
-      for (const k of ["reading_passages", "writing_prompts", "listening_passages", "speaking_items"] as const) {
-        total += counts[k] || 0;
-      }
-      return total;
-    }
-    switch (cat) {
-      case "reading": return counts.reading_passages || 0;
-      case "writing": return counts.writing_prompts || 0;
-      case "listening": return counts.listening_passages || 0;
-      case "speaking": return counts.speaking_items || 0;
-      case "grammar": return counts.grammar || 0;
-      case "vocabulary": return counts.vocabulary || 0;
-    }
+  if (loading && !data) return <Skeleton rows={5} />;
+  if (error && !data) return <ErrorNote message={error} />;
+
+  const counts = data?.counts || {};
+  const allItems = [
+    ...(data?.quiz_items || []).map((i: any) => ({ ...i, _source: "Quiz", _collection: "quiz" })),
+    ...(data?.task_items || []).map((i: any) => ({ ...i, _source: "Task", _collection: "task" })),
+    ...(data?.writing_prompts || []).map((i: any) => ({ ...i, _source: "Writing", _collection: "writing" })),
+    ...(data?.listening_passages || []).map((i: any) => ({ ...i, _source: "Listening", _collection: "listening" })),
+    ...(data?.reading_passages || []).map((i: any) => ({ ...i, _source: "Reading", _collection: "reading" })),
+  ];
+
+  const filtered = tab === "all" ? allItems : allItems.filter((i) => {
+    if (tab === "quiz") return i._source === "Quiz";
+    if (tab === "task") return i._source === "Task";
+    if (tab === "writing") return i._source === "Writing";
+    if (tab === "listening") return i._source === "Listening";
+    if (tab === "reading") return i._source === "Reading";
+    return true;
+  });
+
+  // Group by company
+  const byCompany: Record<string, any[]> = {};
+  for (const item of filtered) {
+    const c = item.company || "General (No Company)";
+    (byCompany[c] ||= []).push(item);
   }
 
-  function getDeleteCollection(cat: BaseCategory): string {
-    switch (cat) {
-      case "reading": return "reading_passages";
-      case "writing": return "writing_prompts";
-      case "listening": return "listening_passages";
-      default: return "quiz_items";
-    }
-  }
+  const tabs = [
+    { key: "all", label: "All", count: allItems.length },
+    { key: "quiz", label: "Quiz/MCQ", count: counts.quiz_items || 0 },
+    { key: "task", label: "Speaking", count: counts.task_items || 0 },
+    { key: "writing", label: "Writing", count: counts.writing_prompts || 0 },
+    { key: "listening", label: "Listening", count: counts.listening_passages || 0 },
+    { key: "reading", label: "Reading", count: counts.reading_passages || 0 },
+  ];
 
-  async function deleteItem(collection: string, itemId: string) {
-    if (!confirm("Delete this item?")) return;
-    if (!sourceTenant) return;
-    try {
-      await api.platformDeleteQuestion(collection, itemId, sourceTenant.id);
-      setItems((prev) => prev.filter((i) => i.id !== itemId));
-      loadCounts();
-      toast("success", "Question deleted");
-    } catch { toast("error", "Failed to delete"); }
-  }
-
-  function goToPage(p: number) {
-    if (p < 1 || p > totalPages) return;
-    setPage(p);
-    loadItems(activeCategory, p);
-    setExpandedId(null);
-  }
-
-  if (tenantsLoading) return <Skeleton rows={5} />;
-  if (!sourceTenant) return <EmptyState title="No institutions found" />;
-
-  const sectionTitle = activeCompany
-    ? `${COMPANY_EXAMS.find((c) => c.key === activeCategory)?.label ?? activeCompany} (${totalCount} items)`
-    : `${CAT_LABELS_BASE[activeCategory as BaseCategory]} (${totalCount} total)`;
+  const kindIcon: Record<string, any> = {
+    Quiz: BookOpen, Task: Mic, Writing: PenLine, Listening: Headphones, Reading: FileText,
+  };
 
   return (
     <>
       <PageHeader
         title="Question Bank"
-        sub="All institutions share the same question pool. Questions added here are available to every institution."
+        sub="Manage questions for reading, writing, listening and speaking across all institutions."
       />
 
-      {/* ---- Category grid ---- */}
-      <Section title="Questions by category">
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 mb-3">
-          {(BASE_CATEGORIES).map((cat) => {
-            const Icon = CAT_ICONS_BASE[cat];
-            const isActive = !isCompanyKey(activeCategory) && activeCategory === cat;
-            return (
-              <button
-                key={cat}
-                onClick={() => setActiveCategory(cat)}
-                className={`p-3 rounded-ds border text-left transition-colors ${
-                  isActive
-                    ? "border-primary bg-primary/10"
-                    : "border-line hover:bg-surface2"
-                }`}
-                style={isActive ? { borderColor: "var(--primary)" } : {}}
-              >
-                <Icon size={16} style={{ color: isActive ? "var(--primary)" : "var(--muted)" }} />
-                <div className="text-xs font-bold mt-1.5">{CAT_LABELS_BASE[cat]}</div>
-                <div className="text-[11px] text-muted mt-0.5">{getCategoryCount(cat)} items</div>
-              </button>
-            );
-          })}
-        </div>
-      </Section>
+      {/* Summary cards */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        {[
+          { label: "Quiz/MCQ", count: counts.quiz_items, color: "var(--primary)" },
+          { label: "Speaking", count: counts.task_items, color: "var(--secondary)" },
+          { label: "Writing", count: counts.writing_prompts, color: "var(--accent)" },
+          { label: "Listening", count: counts.listening_passages, color: "var(--rag-amber)" },
+          { label: "Reading", count: counts.reading_passages, color: "var(--rag-green)" },
+        ].map((c) => (
+          <div key={c.label} className="ds-card p-3 text-center">
+            <div className="text-2xl font-bold" style={{ color: c.color }}>{c.count ?? 0}</div>
+            <div className="text-[11px] text-muted">{c.label}</div>
+          </div>
+        ))}
+      </div>
 
-      {/* ---- Company Rounds ---- */}
-      <Section title="Company Rounds">
-        <p className="text-xs text-muted mb-3 leading-relaxed">
-          Add company-specific questions for each employer's communication round.
-          These questions appear when a student sits that company's exam.
-        </p>
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
-          {COMPANY_EXAMS.map((comp) => {
-            const isActive = activeCategory === comp.key;
-            return (
-              <button
-                key={comp.key}
-                onClick={() => setActiveCategory(comp.key)}
-                className={`p-3 rounded-ds border text-left transition-colors ${
-                  isActive ? "border-primary bg-primary/10" : "border-line hover:bg-surface2"
-                }`}
-                style={isActive ? { borderColor: comp.color } : {}}
-              >
-                <Building2 size={16} style={{ color: comp.color }} />
-                <div className="text-xs font-bold mt-1.5">{comp.label}</div>
-                <div className="text-[11px] text-muted mt-0.5">Questions for {comp.label.split("-")[0].trim()}</div>
-              </button>
-            );
-          })}
-        </div>
-      </Section>
+      {/* Filters and add button */}
+      <div className="flex items-center gap-3 mb-4 flex-wrap">
+        <select
+          value={companyFilter}
+          onChange={(e) => setCompanyFilter(e.target.value)}
+          className="text-xs p-1.5 rounded border bg-transparent"
+          style={{ borderColor: "var(--border)" }}
+        >
+          <option value="">All companies</option>
+          {COMPANIES.filter(Boolean).map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => { setShowAdd(true); setAddType("quiz"); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md bg-[var(--primary)] text-white hover:opacity-90"
+        >
+          <Plus size={12} /> Add Question
+        </button>
+      </div>
 
-      {/* ---- Content section ---- */}
-      <Section
-        title={sectionTitle}
-        action={
-          <div className="flex items-center gap-2">
-            {activeCompany && (
-              <div className="flex items-center gap-1.5">
-                {Object.keys(SUB_ICONS).map((st) => {
-                  const SubIcon = SUB_ICONS[st as CompanySubType];
+      {/* Tabs */}
+      <div className="flex gap-1 mb-4 overflow-x-auto">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key as any)}
+            className={`px-3 py-1.5 text-xs rounded-md whitespace-nowrap transition-colors ${
+              tab === t.key
+                ? "bg-[var(--primary)] text-white font-medium"
+                : "bg-surface2 text-muted hover:text-foreground"
+            }`}
+          >
+            {t.label} ({t.count})
+          </button>
+        ))}
+      </div>
+
+      {/* Items grouped by company */}
+      {Object.entries(byCompany).map(([company, items]) => (
+        <Section key={company} title={`${company} (${items.length})`} className="mb-4">
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b" style={{ borderColor: "var(--border)" }}>
+                  <th className="text-left p-2 font-medium text-muted">Type</th>
+                  <th className="text-left p-2 font-medium text-muted">Category</th>
+                  <th className="text-left p-2 font-medium text-muted">Content</th>
+                  <th className="text-left p-2 font-medium text-muted">Difficulty</th>
+                  <th className="text-right p-2 font-medium text-muted">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item: any, idx: number) => {
+                  const Icon = kindIcon[item._source] || BookOpen;
                   return (
-                    <button
-                      key={st}
-                      className={`px-2 py-1 text-[11px] font-semibold rounded-ds border transition-colors ${
-                        companySubType === st
-                          ? "border-primary bg-primary/10 text-primary"
-                          : "border-line text-muted hover:bg-surface2"
-                      }`}
-                      style={companySubType === st ? { borderColor: COMPANY_EXAMS.find((c) => c.key === activeCategory)?.color } : {}}
-                      onClick={() => setCompanySubType(st as CompanySubType)}
-                    >
-                      <SubIcon size={11} className="inline mr-1" />
-                      {SUB_LABELS[st as CompanySubType]}
-                    </button>
+                    <tr key={item.id || idx} className="border-b last:border-0 hover:bg-surface2 transition-colors" style={{ borderColor: "var(--border)" }}>
+                      <td className="p-2">
+                        <div className="flex items-center gap-1.5">
+                          <Icon size={12} style={{ color: "var(--muted)" }} />
+                          <span>{item._source}</span>
+                        </div>
+                      </td>
+                      <td className="p-2 text-muted">{item.category || "—"}</td>
+                      <td className="p-2 max-w-xs truncate">{item.title || "—"}</td>
+                      <td className="p-2 text-muted">{typeof item.difficulty === "number" ? item.difficulty.toFixed(1) : "—"}</td>
+                      <td className="p-2 text-right">
+                        <button
+                          onClick={() => handleDelete(item._collection, item.id)}
+                          className="text-muted hover:text-red-500 transition-colors"
+                          title="Delete"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </td>
+                    </tr>
                   );
                 })}
-              </div>
-            )}
-            {!activeCompany && (
-              <div className="flex items-center gap-1.5">
-                <Filter size={12} className="text-muted" />
-                <select
-                  className="ds-input text-xs py-1 px-2"
-                  style={{ minWidth: 120 }}
-                  value={companyFilter}
-                  onChange={(e) => setCompanyFilter(e.target.value)}
-                >
-                  {COMPANIES.map(c => (
-                    <option key={c} value={c}>{c || "All Companies"}</option>
-                  ))}
-                </select>
-              </div>
-            )}
-            <button
-              className="btn btn-primary btn-sm ds-focus"
-              onClick={() => { setShowAdd(!showAdd); setEditItem(null); }}
-            >
-              {showAdd ? <X size={13} /> : <Plus size={13} />}
-              {showAdd ? "Cancel" : "Add Question"}
-            </button>
+              </tbody>
+            </table>
           </div>
-        }
-      >
-        {(showAdd || editItem) && (
-          <AddQuestionForm
-            category={activeCompany ? companySubType as BaseCategory : (activeCategory as BaseCategory)}
-            tenantId={sourceTenant.id}
-            editItem={editItem}
-            forceCompany={activeCompany || ""}
-            onCreated={() => { setShowAdd(false); setEditItem(null); loadItems(activeCategory, page); loadCounts(); }}
-            onCancelEdit={() => { setEditItem(null); setShowAdd(false); }}
-          />
-        )}
-        {error && <ErrorNote message={error} />}
-        {loading ? (
-          <Skeleton rows={4} />
-        ) : items.length === 0 ? (
-          <EmptyState
-            title={`No ${activeCompany ? activeCompany : CAT_LABELS_BASE[activeCategory as BaseCategory]} items yet`}
-            desc="Add one using the button above."
-          />
-        ) : (
-          <>
-            {(() => {
-              const filteredItems = (!activeCompany && companyFilter)
-                ? items.filter((i) => (i.company || "") === companyFilter)
-                : items;
-              return (
-                <>
-                  {filteredItems.length === 0 && companyFilter && (
-                    <div className="text-xs text-muted py-4 text-center">
-                      No {companyFilter} questions in this page. Try another page or clear the filter.
-                    </div>
-                  )}
-                  <div className="space-y-2 mt-3">
-                    {filteredItems.map((item) =>
-                      <div key={item.id} className="border rounded-ds p-3" style={{ borderColor: "var(--line)" }}>
-                        <div
-                          className="flex items-center gap-2 cursor-pointer"
-                          onClick={() => setExpandedId(expandedId === item.id ? null : item.id)}
-                        >
-                          {expandedId === item.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                          <span className="text-sm font-medium flex-1 truncate">
-                            {item.title || item.stem || item.prompt_text || `Item ${item.id?.slice(0, 8)}`}
-                          </span>
-                          {item.kind && <Badge>{item.kind}</Badge>}
-                          {item.task_type && <Badge>{item.task_type}</Badge>}
-                          {item.company && <Badge tone={COMPANY_EXAMS.find((c) => c.key === activeCategory)?.color}>{item.company}</Badge>}
-                          <button
-                            onClick={(e) => { e.stopPropagation(); setEditItem(item); setShowAdd(false); }}
-                            className="p-1 hover:bg-primary/10 rounded text-primary"
-                            title="Edit"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              const col = getDeleteCollection(activeCompany ? (companySubType as BaseCategory) : (activeCategory as BaseCategory));
-                              deleteItem(col, item.id);
-                            }}
-                            className="p-1 hover:bg-rag-red/10 rounded text-rag-red"
-                            title="Delete"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                        {expandedId === item.id && (
-                          <div className="mt-2 pl-6 text-xs text-muted leading-relaxed">
-                            {item.body && <p className="mb-2">{item.body}</p>}
-                            {item.transcript && <p className="mb-2 italic">"{item.transcript}"</p>}
-                            {item.prompt && <p className="mb-2">{item.prompt}</p>}
-                            {item.stem && <p className="mb-2 font-medium text-text">{item.stem}</p>}
-                            {item.prompt_text && <p className="mb-2 font-medium text-text">{item.prompt_text}</p>}
-                            {item.reference_text && <p className="mb-2 italic">Reference: {item.reference_text}</p>}
-                            {item.options && item.options.length > 0 && (
-                              <ul className="space-y-1 mt-2">
-                                {item.options.map((opt: string, i: number) => (
-                                  <li key={i} className={i === item.correct_index ? "font-bold text-rag-green" : ""}>
-                                    {String.fromCharCode(65 + i)}. {opt}
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                            {item.explanation && <p className="mt-2 italic">Explanation: {item.explanation}</p>}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </>
-              );
-            })()}
+        </Section>
+      ))}
 
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between mt-4 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-                <span className="text-[11px] text-muted">
-                  Page {page} of {totalPages} ({totalCount} items)
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    className="btn btn-ghost btn-sm ds-focus"
-                    disabled={page <= 1}
-                    onClick={() => goToPage(page - 1)}
-                  >
-                    <ChevronLeft size={14} /> Prev
-                  </button>
-                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-                    const start = Math.max(1, Math.min(page - 2, totalPages - 4));
-                    const p = start + i;
-                    if (p > totalPages) return null;
-                    return (
-                      <button
-                        key={p}
-                        className={`px-2 py-1 text-[11px] font-semibold rounded ds-focus ${
-                          p === page ? "text-white" : "text-muted hover:text-text"
-                        }`}
-                        style={p === page ? { background: "var(--primary)" } : { background: "var(--surface)" }}
-                        onClick={() => goToPage(p)}
-                      >
-                        {p}
-                      </button>
-                    );
-                  })}
-                  <button
-                    className="btn btn-ghost btn-sm ds-focus"
-                    disabled={page >= totalPages}
-                    onClick={() => goToPage(page + 1)}
-                  >
-                    Next <ChevronLeft size={14} className="rotate-180" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-      </Section>
+      {filtered.length === 0 && !loading && (
+        <div className="ds-card p-8 text-center text-sm text-muted">No items found.</div>
+      )}
+
+      {/* Add Question Modal */}
+      {showAdd && (
+        <AddQuestionModal
+          type={addType}
+          onTypeChange={setAddType}
+          onClose={() => setShowAdd(false)}
+          onCreated={() => { setShowAdd(false); loadData(); }}
+        />
+      )}
     </>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Add / Edit Question Form                                           */
-/* ------------------------------------------------------------------ */
-
-function AddQuestionForm({ category, tenantId, editItem, forceCompany, onCreated, onCancelEdit }: {
-  category: BaseCategory; tenantId: string; editItem: QuestionItem | null;
-  forceCompany?: string; onCreated: () => void; onCancelEdit: () => void;
+function AddQuestionModal({ type, onTypeChange, onClose, onCreated }: {
+  type: string; onTypeChange: (t: string) => void; onClose: () => void; onCreated: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const { toast } = useToast();
+  const [form, setForm] = useState<any>({
+    stem: "", category: "reading_comprehension",
+    options: ["", "", "", ""], correct_index: 0, explanation: "",
+    company: "", difficulty: 0.3,
+  });
 
-  const [title, setTitle] = useState("");
-  const [bodyText, setBodyText] = useState("");
-  const [kind, setKind] = useState("article");
-  const [stem, setStem] = useState("");
-  const [options, setOptions] = useState(["", "", "", ""]);
-  const [correctIndex, setCorrectIndex] = useState(0);
-  const [explanation, setExplanation] = useState("");
-  const [prompt, setPrompt] = useState("");
-  const [minWords, setMinWords] = useState(150);
-  const [transcript, setTranscript] = useState("");
-  const [taskType, setTaskType] = useState("open_response");
-  const [promptText, setPromptText] = useState("");
-  const [referenceText, setReferenceText] = useState("");
-  const [company, setCompany] = useState(forceCompany || "");
+  const set = (k: string, v: any) => setForm((f: any) => ({ ...f, [k]: v }));
 
-  const COMPANIES = ["", "TCS", "Infosys", "Wipro", "Accenture", "Cognizant"];
-
-  useEffect(() => {
-    if (forceCompany) setCompany(forceCompany);
-  }, [forceCompany]);
-
-  useEffect(() => {
-    if (editItem) {
-      setTitle(editItem.title || "");
-      setBodyText(editItem.body || "");
-      setKind(editItem.kind || "article");
-      setStem(editItem.stem || "");
-      setOptions(editItem.options?.length >= 4 ? editItem.options.slice(0, 4) : ["", "", "", ""]);
-      setCorrectIndex(editItem.correct_index || 0);
-      setExplanation(editItem.explanation || "");
-      setPrompt(editItem.prompt || "");
-      setMinWords(editItem.min_words || 150);
-      setTranscript(editItem.transcript || "");
-      setTaskType(editItem.task_type || "open_response");
-      setPromptText(editItem.prompt_text || "");
-      setReferenceText(editItem.reference_text || "");
-      setCompany(editItem.company || forceCompany || "");
-    }
-  }, [editItem, forceCompany]);
-
-  function getDeleteCollection(cat: BaseCategory): string {
-    switch (cat) {
-      case "reading": return "reading_passages";
-      case "writing": return "writing_prompts";
-      case "listening": return "listening_passages";
-      default: return "quiz_items";
-    }
-  }
-
-  async function submit() {
-    setBusy(true);
+  const handleSubmit = async () => {
+    setLoading(true);
     setError("");
+    const token = getToken();
     try {
-      let body: Record<string, unknown> = {};
-      switch (category) {
-        case "reading":
-          body = {
-            title, kind, body: bodyText, company,
-            questions: stem ? [{ stem, options, correct_index: correctIndex, explanation }] : [],
-          };
-          break;
-        case "writing":
-          body = { title, kind, prompt, min_words: minWords, company };
-          break;
-        case "listening":
-          body = {
-            title, kind, transcript, company,
-            questions: stem ? [{ stem, options, correct_index: correctIndex, explanation }] : [],
-          };
-          break;
-        case "speaking":
-          body = { task_type: taskType, prompt_text: promptText, reference_text: referenceText, company };
-          break;
-        case "grammar":
-          body = { stem, options, correct_index: correctIndex, explanation, company };
-          break;
-        case "vocabulary":
-          body = { stem, options, correct_index: correctIndex, explanation, company };
-          break;
+      let url = `${API_BASE}/platform/questions/${type}`;
+      let body: any;
+
+      if (type === "quiz") {
+        body = form;
+      } else if (type === "speaking") {
+        body = {
+          task_type: form.task_type || "open_response",
+          prompt_text: form.prompt_text || form.stem,
+          company: form.company, reference_text: form.reference_text || "",
+          difficulty: form.difficulty,
+        };
+      } else if (type === "writing") {
+        body = {
+          title: form.title, kind: form.kind || "essay", prompt: form.prompt || form.stem,
+          company: form.company, scenario: form.scenario || "",
+          key_points: form.key_points || [], min_words: form.min_words || 150,
+          suggested_minutes: form.suggested_minutes || 20, difficulty: form.difficulty,
+        };
+      } else if (type === "listening") {
+        // Upload audio first if present
+        let audioKey = form.audioKey || "";
+        if (form.audioFile) {
+          const fd = new FormData();
+          fd.append("file", form.audioFile);
+          const upRes = await fetch(`${API_BASE}/platform/questions/audio`, {
+            method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            body: fd,
+          });
+          if (upRes.ok) {
+            const upData = await upRes.json();
+            audioKey = upData.key;
+          }
+        }
+        // Parse comprehension questions
+        const questions = parseQuestions(form.questions_text || "");
+        body = {
+          title: form.title, kind: "short_talk", transcript: form.transcript || "",
+          company: form.company, audio_key: audioKey, accent: "indian",
+          plays_allowed: form.plays_allowed || 1,
+          approx_seconds: form.approx_seconds || 45,
+          difficulty: form.difficulty, questions,
+        };
+      } else if (type === "reading") {
+        const questions = parseQuestions(form.questions_text || "");
+        body = {
+          title: form.title, kind: form.kind || "article", body: form.body || "",
+          company: form.company, difficulty: form.difficulty, questions,
+        };
       }
-      if (editItem) {
-        await api.platformDeleteQuestion(getDeleteCollection(category), editItem.id, tenantId);
-        await api.platformCreateQuestion(category, tenantId, body);
-        toast("success", `${CAT_LABELS_BASE[category]} question updated`);
-      } else {
-        await api.platformCreateQuestion(category, tenantId, body);
-        toast("success", `${CAT_LABELS_BASE[category]} question added${company ? ` for ${company}` : " to all institutions"}`);
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: "Failed" }));
+        throw new Error(err.detail || "Failed");
       }
       onCreated();
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : editItem ? "Failed to update question" : "Failed to create question");
+    } catch (e: any) {
+      setError(e.message);
     } finally {
-      setBusy(false);
+      setLoading(false);
     }
-  }
+  };
+
+  const parseQuestions = (text: string) => {
+    if (!text.trim()) return [];
+    const blocks = text.split("\n\n").filter(Boolean);
+    const questions: any[] = [];
+    for (const block of blocks) {
+      const lines = block.trim().split("\n").filter(Boolean);
+      if (lines.length < 6) continue;
+      const stem = lines[0];
+      const options = lines.slice(1, 5).map((l) => l.replace(/^[A-D]\)\s*/, ""));
+      const correct = { A: 0, B: 1, C: 2, D: 3 }[lines[5].trim().toUpperCase()] ?? 0;
+      questions.push({ stem, options, correct_index: correct, explanation: "" });
+    }
+    if (questions.length === 0 && text.trim()) {
+      const lines = text.trim().split("\n").filter(Boolean);
+      if (lines.length >= 6) {
+        const stem = lines[0];
+        const options = lines.slice(1, 5).map((l) => l.replace(/^[A-D]\)\s*/, ""));
+        const correct = { A: 0, B: 1, C: 2, D: 3 }[lines[5].trim().toUpperCase()] ?? 0;
+        questions.push({ stem, options, correct_index: correct, explanation: "" });
+      }
+    }
+    return questions;
+  };
 
   return (
-    <div className="border rounded-ds p-4 mb-4" style={{ borderColor: "var(--primary)", background: "color-mix(in srgb, var(--primary) 4%, var(--surface))" }}>
-      <div className="text-xs font-bold mb-3" style={{ color: "var(--primary)" }}>
-        {editItem ? "Edit" : "Add new"} {CAT_LABELS_BASE[category]} question
-        {company ? ` for ${company}` : editItem ? "" : " (saves to all institutions)"}
-      </div>
-      {error && <div className="text-xs mb-3 px-2 py-1 rounded" style={{ background: "color-mix(in srgb, var(--rag-red) 10%, transparent)", color: "var(--rag-red)" }}>{error}</div>}
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div className="bg-background rounded-lg p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-bold">Add Question</h2>
+          <button onClick={onClose} className="text-muted hover:text-foreground"><X size={16} /></button>
+        </div>
 
-      <div className="grid md:grid-cols-2 gap-3">
-        {!forceCompany && (
-          <div>
-            <label className="ds-label">Company</label>
-            <select className="ds-input w-full" value={company} onChange={(e) => setCompany(e.target.value)}>
-              {COMPANIES.map(c => <option key={c} value={c}>{c || "All / General"}</option>)}
-            </select>
-          </div>
-        )}
-        {forceCompany && (
-          <div>
-            <label className="ds-label">Company</label>
-            <div className="ds-input w-full bg-surface2" style={{ opacity: 0.7 }}>{forceCompany}</div>
-          </div>
-        )}
+        {/* Type selector */}
+        <div className="flex gap-1 mb-4 flex-wrap">
+          {["quiz", "speaking", "writing", "listening", "reading"].map((t) => (
+            <button
+              key={t}
+              onClick={() => onTypeChange(t)}
+              className={`px-3 py-1.5 text-xs rounded-md capitalize ${
+                type === t ? "bg-[var(--primary)] text-white" : "bg-surface2 text-muted"
+              }`}
+            >
+              {t}
+            </button>
+          ))}
+        </div>
 
-        {(category === "reading" || category === "writing" || category === "listening") && (
-          <div>
-            <label className="ds-label">Title</label>
-            <input className="ds-input w-full" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Question title" />
-          </div>
-        )}
+        {error && <div className="text-xs text-red-500 mb-3">{error}</div>}
 
-        {(category === "reading" || category === "writing" || category === "listening") && (
-          <div>
-            <label className="ds-label">Type</label>
-            <select className="ds-input w-full" value={kind} onChange={(e) => setKind(e.target.value)}>
-              {category === "reading" && <><option value="article">Article</option><option value="passage">Passage</option></>}
-              {category === "writing" && <><option value="essay">Essay</option><option value="email">Email</option></>}
-              {category === "listening" && <><option value="short_talk">Short Talk</option><option value="dialogue">Dialogue</option></>}
-            </select>
-          </div>
-        )}
+        <div className="space-y-3">
+          {type === "quiz" && (
+            <>
+              <label className="block">
+                <span className="text-[11px] text-muted">Category</span>
+                <select value={form.category} onChange={(e) => set("category", e.target.value)}
+                  className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }}>
+                  {CATEGORIES.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Question (Stem)</span>
+                <textarea value={form.stem} onChange={(e) => set("stem", e.target.value)}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[60px]" style={{ borderColor: "var(--border)" }} />
+              </label>
+              {form.options.map((opt: string, i: number) => (
+                <label key={i} className="block">
+                  <span className="text-[11px] text-muted">Option {String.fromCharCode(65 + i)} {i === form.correct_index && "(Correct)"}</span>
+                  <div className="flex gap-1 mt-1">
+                    <button onClick={() => set("correct_index", i)}
+                      className={`w-6 h-6 rounded text-[10px] font-bold flex-shrink-0 ${i === form.correct_index ? "bg-[var(--rag-green)] text-white" : "bg-surface2 text-muted"}`}>
+                      {String.fromCharCode(65 + i)}
+                    </button>
+                    <input value={opt} onChange={(e) => {
+                      const opts = [...form.options]; opts[i] = e.target.value; set("options", opts);
+                    }} className="flex-1 text-xs p-1.5 rounded border bg-transparent" style={{ borderColor: "var(--border)" }} />
+                  </div>
+                </label>
+              ))}
+              <label className="block">
+                <span className="text-[11px] text-muted">Explanation</span>
+                <textarea value={form.explanation} onChange={(e) => set("explanation", e.target.value)}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[40px]" style={{ borderColor: "var(--border)" }} />
+              </label>
+            </>
+          )}
 
-        {category === "speaking" && (
-          <div>
-            <label className="ds-label">Task Type</label>
-            <select className="ds-input w-full" value={taskType} onChange={(e) => setTaskType(e.target.value)}>
-              <option value="open_response">Open Response</option>
-              <option value="read_aloud">Read Aloud</option>
-              <option value="repeat">Repeat</option>
-              <option value="short_answer">Short Answer</option>
-            </select>
-          </div>
-        )}
+          {type === "speaking" && (
+            <>
+              <label className="block">
+                <span className="text-[11px] text-muted">Task Type</span>
+                <select value={form.task_type || "open_response"} onChange={(e) => set("task_type", e.target.value)}
+                  className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }}>
+                  {["open_response", "read_aloud", "repeat_sentence", "short_answer", "story_retell",
+                    "spoken_completion", "spoken_correction", "sentence_build", "conversation_question"].map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Prompt Text</span>
+                <textarea value={form.prompt_text || form.stem} onChange={(e) => { set("prompt_text", e.target.value); set("stem", e.target.value); }}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[60px]" style={{ borderColor: "var(--border)" }} />
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Reference Text (expected answer)</span>
+                <textarea value={form.reference_text || ""} onChange={(e) => set("reference_text", e.target.value)}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[40px]" style={{ borderColor: "var(--border)" }} />
+              </label>
+            </>
+          )}
 
-        {category === "reading" && (
-          <div className="md:col-span-2">
-            <label className="ds-label">Passage Text</label>
-            <textarea className="ds-input w-full" rows={4} value={bodyText} onChange={(e) => setBodyText(e.target.value)} placeholder="The passage text..." />
-          </div>
-        )}
-
-        {category === "writing" && (
-          <>
-            <div className="md:col-span-2">
-              <label className="ds-label">Prompt</label>
-              <textarea className="ds-input w-full" rows={3} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What the student should write about..." />
-            </div>
-            <div>
-              <label className="ds-label">Minimum Words</label>
-              <input className="ds-input w-full" type="number" value={minWords} onChange={(e) => setMinWords(Number(e.target.value))} />
-            </div>
-          </>
-        )}
-
-        {category === "listening" && (
-          <div className="md:col-span-2">
-            <label className="ds-label">Transcript</label>
-            <textarea className="ds-input w-full" rows={3} value={transcript} onChange={(e) => setTranscript(e.target.value)} placeholder="Audio transcript..." />
-          </div>
-        )}
-
-        {category === "speaking" && (
-          <>
-            <div className="md:col-span-2">
-              <label className="ds-label">Prompt Text</label>
-              <textarea className="ds-input w-full" rows={2} value={promptText} onChange={(e) => setPromptText(e.target.value)} placeholder="What the student should say..." />
-            </div>
-            <div className="md:col-span-2">
-              <label className="ds-label">Reference Text (optional)</label>
-              <textarea className="ds-input w-full" rows={2} value={referenceText} onChange={(e) => setReferenceText(e.target.value)} placeholder="Reference text for scoring..." />
-            </div>
-          </>
-        )}
-
-        {(category === "reading" || category === "listening" || category === "grammar" || category === "vocabulary") && (
-          <>
-            <div className="md:col-span-2">
-              <label className="ds-label">Question Stem</label>
-              <input className="ds-input w-full" value={stem} onChange={(e) => setStem(e.target.value)} placeholder="Which statement is NOT supported?" />
-            </div>
-            {options.map((opt, i) => (
-              <div key={i}>
-                <label className="ds-label">Option {String.fromCharCode(65 + i)} {i === correctIndex && <span className="text-rag-green">(correct)</span>}</label>
-                <input className="ds-input w-full" value={opt} onChange={(e) => {
-                  const next = [...options]; next[i] = e.target.value; setOptions(next);
-                }} placeholder={`Option ${String.fromCharCode(65 + i)}`} />
+          {type === "writing" && (
+            <>
+              <label className="block">
+                <span className="text-[11px] text-muted">Title</span>
+                <input value={form.title || ""} onChange={(e) => set("title", e.target.value)}
+                  className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }} />
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Kind</span>
+                <select value={form.kind || "essay"} onChange={(e) => set("kind", e.target.value)}
+                  className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }}>
+                  <option value="essay">Essay</option>
+                  <option value="email">Email</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Prompt</span>
+                <textarea value={form.prompt || form.stem} onChange={(e) => { set("prompt", e.target.value); set("stem", e.target.value); }}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[80px]" style={{ borderColor: "var(--border)" }} />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-[11px] text-muted">Min Words</span>
+                  <input type="number" value={form.min_words || 150} onChange={(e) => set("min_words", parseInt(e.target.value))}
+                    className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }} />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] text-muted">Suggested Minutes</span>
+                  <input type="number" value={form.suggested_minutes || 20} onChange={(e) => set("suggested_minutes", parseInt(e.target.value))}
+                    className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }} />
+                </label>
               </div>
-            ))}
-            <div>
-              <label className="ds-label">Correct Answer</label>
-              <select className="ds-input w-full" value={correctIndex} onChange={(e) => setCorrectIndex(Number(e.target.value))}>
-                {options.map((_, i) => <option key={i} value={i}>{String.fromCharCode(65 + i)}</option>)}
-              </select>
-            </div>
-            <div className="md:col-span-2">
-              <label className="ds-label">Explanation (optional)</label>
-              <input className="ds-input w-full" value={explanation} onChange={(e) => setExplanation(e.target.value)} placeholder="Why this is correct..." />
-            </div>
-          </>
-        )}
-      </div>
+            </>
+          )}
 
-      <div className="flex gap-2 mt-3">
-        <button className="btn btn-primary btn-sm ds-focus" disabled={busy} onClick={() => void submit()}>
-          <Save size={13} /> {busy ? "Saving..." : editItem ? "Update Question" : "Save Question"}
-        </button>
-        <button className="btn btn-ghost btn-sm ds-focus" onClick={editItem ? onCancelEdit : onCreated}>
-          {editItem ? "Cancel Edit" : "Cancel"}
-        </button>
+          {type === "listening" && (
+            <>
+              <label className="block">
+                <span className="text-[11px] text-muted">Title</span>
+                <input value={form.title || ""} onChange={(e) => set("title", e.target.value)}
+                  className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }} />
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Transcript</span>
+                <textarea value={form.transcript || ""} onChange={(e) => set("transcript", e.target.value)}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[80px]" style={{ borderColor: "var(--border)" }} />
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Audio File</span>
+                <input type="file" accept="audio/*" onChange={(e) => set("audioFile", e.target.files?.[0] || null)}
+                  className="w-full text-xs mt-1" />
+                {form.audioKey && <span className="text-[10px] text-green-600 mt-1 block">Uploaded: {form.audioKey}</span>}
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block">
+                  <span className="text-[11px] text-muted">Approx Seconds</span>
+                  <input type="number" value={form.approx_seconds || 45} onChange={(e) => set("approx_seconds", parseInt(e.target.value))}
+                    className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }} />
+                </label>
+                <label className="block">
+                  <span className="text-[11px] text-muted">Plays Allowed</span>
+                  <input type="number" value={form.plays_allowed || 1} onChange={(e) => set("plays_allowed", parseInt(e.target.value))}
+                    className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }} />
+                </label>
+              </div>
+              <label className="block">
+                <span className="text-[11px] text-muted">Comprehension Questions (one per line: Q | A | B | C | D | correct_letter)</span>
+                <textarea value={form.questions_text || ""} onChange={(e) => set("questions_text", e.target.value)}
+                  placeholder={"What is the main topic?\nA) Topic1\nB) Topic2\nC) Topic3\nD) Topic4\nB"}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[100px] font-mono" style={{ borderColor: "var(--border)" }} />
+              </label>
+            </>
+          )}
+
+          {type === "reading" && (
+            <>
+              <label className="block">
+                <span className="text-[11px] text-muted">Title</span>
+                <input value={form.title || ""} onChange={(e) => set("title", e.target.value)}
+                  className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }} />
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Kind</span>
+                <select value={form.kind || "article"} onChange={(e) => set("kind", e.target.value)}
+                  className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }}>
+                  <option value="article">Article</option>
+                  <option value="passage">Passage</option>
+                  <option value="paragraph">Paragraph</option>
+                </select>
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Body Text</span>
+                <textarea value={form.body || ""} onChange={(e) => set("body", e.target.value)}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[100px]" style={{ borderColor: "var(--border)" }} />
+              </label>
+              <label className="block">
+                <span className="text-[11px] text-muted">Comprehension Questions (one per line: Q | A | B | C | D | correct_letter)</span>
+                <textarea value={form.questions_text || ""} onChange={(e) => set("questions_text", e.target.value)}
+                  placeholder={"What is the main idea?\nA) Idea1\nB) Idea2\nC) Idea3\nD) Idea4\nA"}
+                  className="w-full text-xs p-2 rounded border bg-transparent mt-1 min-h-[100px] font-mono" style={{ borderColor: "var(--border)" }} />
+              </label>
+            </>
+          )}
+
+          {/* Common fields */}
+          <div className="grid grid-cols-2 gap-3">
+            <label className="block">
+              <span className="text-[11px] text-muted">Company</span>
+              <select value={form.company} onChange={(e) => set("company", e.target.value)}
+                className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }}>
+                <option value="">General (All)</option>
+                {COMPANIES.filter(Boolean).map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="block">
+              <span className="text-[11px] text-muted">Difficulty (0-1)</span>
+              <input type="number" step="0.1" min="0" max="1" value={form.difficulty}
+                onChange={(e) => set("difficulty", parseFloat(e.target.value))}
+                className="w-full text-xs p-1.5 rounded border bg-transparent mt-1" style={{ borderColor: "var(--border)" }} />
+            </label>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 mt-5">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs rounded-md bg-surface2 text-muted">Cancel</button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            className="px-3 py-1.5 text-xs rounded-md bg-[var(--primary)] text-white disabled:opacity-50"
+          >
+            {loading ? "Saving..." : "Save Question"}
+          </button>
+        </div>
       </div>
     </div>
   );

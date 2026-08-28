@@ -31,11 +31,13 @@ def control_db() -> AsyncIOMotorDatabase:
 
 
 def tenant_db_name(slug: str) -> str:
+    """Backward-compat name; now unused since all data lives in control DB."""
     return f"{settings.tenant_schema_prefix}{slug}"
 
 
 def tenant_db(slug: str) -> AsyncIOMotorDatabase:
-    return client[tenant_db_name(slug)]
+    """All tenant data now lives in the control database with prefixed collections."""
+    return control_db()
 
 
 # ---------------------------------------------------------------------------
@@ -46,88 +48,45 @@ _client_inited = False
 
 
 async def init_mongo() -> None:
-    """Ping and register the control-plane documents. Idempotent."""
+    """Ping and register ALL documents with the single CommunicationIQ database. Idempotent."""
     global _client_inited
     if _client_inited:
         return
     await client.admin.command("ping")
     from app.models.platform import CONTROL_DOCUMENTS
-    await init_beanie(database=control_db(), document_models=CONTROL_DOCUMENTS)
+    from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
+    all_docs = CONTROL_DOCUMENTS + TENANT_DOCUMENTS + SHARED_DOCUMENTS
+    await init_beanie(database=control_db(), document_models=all_docs)
     _client_inited = True
     _stamp_platform_owners()
 
 
 # ---------------------------------------------------------------------------
-# Tenant document bundles (lazy per-slug init)
-#
-# Beanie 2.0 stores the DB reference on the class object itself.  When we
-# call init_beanie(db_A, [User, Attempt, ...]) and then later
-# init_beanie(db_B, [User, Attempt, ...]) the second call overwrites the
-# first's binding.  We fix this by creating per-tenant subclasses that each
-# carry their own _database reference.
+# All models now live in the single CommunicationIQ database.
+# ensure_tenant_models returns the base classes (already registered with
+# control_db in init_mongo).  No per-tenant subclassing needed.
 # ---------------------------------------------------------------------------
 
-_tenant_bundles: dict[str, SimpleNamespace] = {}
-_tenant_locks: dict[str, asyncio.Lock] = {}
-
-
-def _make_tenant_subclasses(slug: str, base_docs: list) -> list:
-    """Create per-tenant Document subclasses.
-
-    Each subclass is created via ``type()`` *without* putting ``Settings``
-    in the namespace (which would trigger a Pydantic field-detection error),
-    then we patch ``Settings`` as a plain class attribute after creation.
-    """
-    subclasses = []
-    for cls in base_docs:
-        orig_name = cls.__name__
-        sub = type(
-            orig_name,
-            (cls,),
-            {
-                "__qualname__": f"{orig_name}_{slug}",
-                "__module__": cls.__module__,
-            },
-        )
-        # Patch Settings after class creation — Pydantic won't re-inspect.
-        sub.Settings = type("Settings", (), {"name": cls.Settings.name})
-        subclasses.append(sub)
-    return subclasses
-
-
 async def ensure_tenant_models(slug: str) -> SimpleNamespace:
-    """Return a namespace of Beanie Document classes bound to ``tenant_<slug>``.
+    """Return all Document classes for a tenant — now just the base classes.
 
-    The bundle is created and its documents registered with Beanie on first
-    use, then cached.  Each tenant gets distinct document subclasses so that
-    multiple tenants coexist without init_beanie clobbering DB bindings.
+    All data lives in the single CommunicationIQ database.  Tenant isolation
+    is handled by querying with ``tenant_id`` filters, not separate databases.
     """
-    cached = _tenant_bundles.get(slug)
-    if cached is not None:
-        return cached
-    lock = _tenant_locks.setdefault(slug, asyncio.Lock())
-    async with lock:
-        cached = _tenant_bundles.get(slug)
-        if cached is not None:
-            return cached
-        from app.models.tenant import TENANT_DOCUMENTS
-
-        db = tenant_db(slug)
-        tenant_docs = _make_tenant_subclasses(slug, list(TENANT_DOCUMENTS))
-        await init_beanie(database=db, document_models=tenant_docs)
-        # Beanie sets each field's ExpressionField on every class in the new
-        # subclass's MRO, the shared base included — so this only needs to
-        # run once, off the very first tenant, for every tenant's queries on
-        # the base classes to resolve their owner correctly from here on.
-        _stamp_tenant_owners()
-        bundle = SimpleNamespace(**{cls.__name__: cls for cls in tenant_docs})
-        _tenant_bundles[slug] = bundle
-        return bundle
+    from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
+    ns = {}
+    for cls in TENANT_DOCUMENTS + SHARED_DOCUMENTS:
+        ns[cls.__name__] = cls
+    return SimpleNamespace(**ns)
 
 
 def get_tenant_models(slug: str) -> SimpleNamespace:
-    """Synchronous accessor — only valid after ``ensure_tenant_models`` ran."""
-    return _tenant_bundles[slug]
+    """Synchronous accessor."""
+    from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
+    ns = {}
+    for cls in TENANT_DOCUMENTS + SHARED_DOCUMENTS:
+        ns[cls.__name__] = cls
+    return SimpleNamespace(**ns)
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +96,18 @@ def get_tenant_models(slug: str) -> SimpleNamespace:
 async def ensure_platform_models() -> SimpleNamespace:
     from app.models.platform import CONTROL_DOCUMENTS
     return SimpleNamespace(**{cls.__name__: cls for cls in CONTROL_DOCUMENTS})
+
+
+# Shared question models — accessible by all tenants
+_shared_bundle: SimpleNamespace | None = None
+
+async def ensure_shared_models() -> SimpleNamespace:
+    global _shared_bundle
+    if _shared_bundle is not None:
+        return _shared_bundle
+    from app.models.tenant import SHARED_DOCUMENTS
+    _shared_bundle = SimpleNamespace(**{cls.__name__: cls for cls in SHARED_DOCUMENTS})
+    return _shared_bundle
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +294,7 @@ class Session:
     def __init__(self, models: SimpleNamespace):
         self._models = models
         self._new: list = []
+        self._tracked: dict[str, Any] = {}
 
     async def __aenter__(self) -> Session:
         return self
@@ -336,6 +308,12 @@ class Session:
     def add_all(self, objs: list) -> None:
         self._new.extend(objs)
 
+    def _track(self, obj: Any) -> Any:
+        """Record a Beanie Document so commit() can persist any changes."""
+        if obj is not None and hasattr(obj, "save") and hasattr(obj, "id") and obj.id:
+            self._tracked[str(obj.id)] = obj
+        return obj
+
     async def flush(self) -> None:
         for obj in self._new:
             if not getattr(obj, 'id', None):
@@ -346,12 +324,24 @@ class Session:
 
     async def commit(self) -> None:
         await self.flush()
+        for obj in list(self._tracked.values()):
+            try:
+                await obj.save()
+            except Exception as exc:
+                import logging
+                logging.getLogger("db").warning(
+                    "commit save failed for %s id=%s: %s",
+                    type(obj).__name__, getattr(obj, "id", "?"), exc,
+                )
+        self._tracked.clear()
 
     def rollback(self) -> None:
         self._new.clear()
+        self._tracked.clear()
 
     async def get(self, model: type, pk: Any):
-        return await self._resolve(model).get(pk)
+        obj = await self._resolve(model).get(pk)
+        return self._track(obj)
 
     async def execute(self, stmt: _Stmt):
         if stmt.kind == _Stmt.DELETE:
@@ -389,11 +379,24 @@ class Session:
             return _Result(docs)
 
         owner = getattr(first, 'owner_model', None)
-        if owner is None:
-            raise TypeError(
-                f"select({first!r}) — its owning model was never stamped by "
-                "_stamp_owners(); is it a field on a model in CONTROL_DOCUMENTS "
-                "or TENANT_DOCUMENTS?")
+        # owner_model is a class when stamping worked; fall back to
+        # searching the namespace when the subclass's ExpressionField
+        # was created after _stamp_tenant_owners() ran.
+        if owner is None or not isinstance(owner, type):
+            field_name = str(first)
+            found = None
+            for attr_name in dir(self._models):
+                if attr_name.startswith('_'):
+                    continue
+                attr = getattr(self._models, attr_name, None)
+                if isinstance(attr, type) and hasattr(attr, field_name):
+                    found = attr
+                    break
+            if found is None:
+                raise TypeError(
+                    f"select({first!r}) — could not find the model "
+                    f"that owns field '{field_name}'")
+            owner = found
         model = self._resolve(owner)
         docs = await self._run(model, stmt)
         if len(entities) == 1:
@@ -401,26 +404,34 @@ class Session:
         return _Result([tuple(getattr(d, str(f)) for f in entities) for d in docs])
 
     async def _run(self, model, stmt: _Stmt) -> list:
+        from app.sqlbridge import normalize_condition, _Sort, Or
         resolved = self._resolve(model)
         if resolved is not None:
             model = resolved
         if stmt.conditions:
-            and_clauses = []
+            filters: list[dict] = []
             for c in stmt.conditions:
-                if isinstance(c, dict):
-                    and_clauses.append(c)
-                elif hasattr(c, 'query'):
-                    and_clauses.append(c.query)
+                if isinstance(c, Or):
+                    filters.append({"$or": [
+                        normalize_condition(x) for x in c.conditions if x is not None
+                    ]})
                 else:
-                    and_clauses.append(c)
-            if len(and_clauses) == 1:
-                query = model.find(and_clauses[0])
+                    nc = normalize_condition(c)
+                    if isinstance(nc, dict):
+                        filters.append(nc)
+            if len(filters) == 1:
+                query = model.find(filters[0])
+            elif len(filters) > 1:
+                query = model.find({"$and": filters})
             else:
-                query = model.find({"$and": and_clauses})
+                query = model.find()
         else:
             query = model.find()
-        if stmt.order:
-            query = query.sort(*stmt.order)
+        for o in stmt.order:
+            if isinstance(o, _Sort):
+                query = query.sort((o.field, o.direction))
+            else:
+                query = query.sort(o)
         if stmt.limit_val is not None:
             query = query.limit(stmt.limit_val)
         if stmt.offset_val is not None:

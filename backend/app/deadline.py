@@ -60,7 +60,7 @@ def deadline_for(started_at: datetime | None,
     """When this sitting must be over. None until it has started.
 
     An attempt that was created and never started has no deadline: the clock
-    begins at the environment check, not at the moment somebody opened the
+    begins when the runner is opened, not at the moment somebody opened the
     page and went to find headphones.
     """
     if started_at is None:

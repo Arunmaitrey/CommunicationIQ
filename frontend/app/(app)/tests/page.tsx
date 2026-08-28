@@ -65,7 +65,7 @@ function Tests() {
     setStartError("");
     try {
       const attempt = await attemptApi.start(profileId, "practice");
-      router.push(`/attempt/${attempt.attempt_id}/check`);
+      router.push(`/attempt/${attempt.attempt_id}/run`);
     } catch (err) {
       setStartError(err instanceof ApiError ? err.detail : "Could not start the test");
       setStarting("");
@@ -73,7 +73,7 @@ function Tests() {
   }
 
   function resume(attemptId: string) {
-    router.push(`/attempt/${attemptId}/check`);
+    router.push(`/attempt/${attemptId}/run`);
   }
 
   return (

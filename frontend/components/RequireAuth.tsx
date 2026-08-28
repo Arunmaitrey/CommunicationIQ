@@ -28,11 +28,7 @@ export function RequireAuth({ roles, children }: { roles?: Role[]; children: Rea
     }
   }, [loading, user, roles, router, pathname]);
 
-  if (loading) {
-    return (
-      <div className="p-8 text-xs text-muted animate-fade-in">Loading your session…</div>
-    );
-  }
+  if (loading) return null;
   if (!user) return null;
   if (roles && !roles.includes(user.role)) return null;
   return <>{children}</>;

@@ -14,10 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import (attempts, auth, game, invitations, listening,
-                         platform_admin, platform_export,
-                         reading, report, writing,
-                         platform_writes, practice, student, tenant_admin,
-                         tenant_writes, trainer, trainer_ops)
+                          platform_admin, platform_export,
+                          reading, report, writing,
+                          platform_writes, practice, student, tenant_admin,
+                          tenant_writes)
 
 log = logging.getLogger(__name__)
 
@@ -29,7 +29,7 @@ async def lifespan(_app: FastAPI):
     In a thread, and without blocking startup: a cold load is a couple of
     seconds from cache and a couple of minutes on a machine that has never
     downloaded the weights. Neither should delay the health check, and
-    neither should stop the API serving — a host where the model will not
+    neither should stop the API serving ΓÇö a host where the model will not
     load falls back to Tier 0 and says so in the provider console.
     """
     # Connect to MongoDB and register the control-plane documents. Tenant
@@ -39,7 +39,7 @@ async def lifespan(_app: FastAPI):
         from app.db import init_store
 
         await init_store()
-    except Exception:  # noqa: BLE001 — never block startup on this
+    except Exception:  # noqa: BLE001 ΓÇö never block startup on this
         log.exception("MongoDB init failed")
 
     # Operator-configured AI settings: create the table on an estate that
@@ -53,7 +53,7 @@ async def lifespan(_app: FastAPI):
         if applied:
             log.info("AI narration overrides applied: %s",
                      ", ".join(sorted(applied)))
-    except Exception:  # noqa: BLE001 — env defaults still work
+    except Exception:  # noqa: BLE001 ΓÇö env defaults still work
         log.exception("AI settings load failed; using environment defaults")
 
     engine = _engine_tier()
@@ -65,12 +65,7 @@ async def lifespan(_app: FastAPI):
     else:
         log.info("Tier 1 speech engine available")
 
-    if settings.whisper_warm_on_startup:
-        from app.engine.providers.tier1 import model, pronunciation
 
-        loop = asyncio.get_running_loop()
-        loop.run_in_executor(None, model.warm)
-        loop.run_in_executor(None, pronunciation.warm)
 
     # The narration recovery sweeper. The fast path is a BackgroundTask fired
     # when an attempt is scored; this loop is the durability net, so a job left
@@ -119,8 +114,6 @@ app.include_router(reading.router, prefix=API)
 app.include_router(writing.router, prefix=API)
 app.include_router(game.router, prefix=API)
 app.include_router(practice.router, prefix=API)
-app.include_router(trainer.router, prefix=API)
-app.include_router(trainer_ops.router, prefix=API)
 app.include_router(tenant_admin.router, prefix=API)
 app.include_router(tenant_writes.router, prefix=API)
 app.include_router(platform_admin.router, prefix=API)
@@ -145,10 +138,10 @@ def _engine_tier() -> dict:
     deployment should be able to see which one they have.
     """
     missing: list[str] = []
-    for name in ("faster_whisper", "torch", "torchaudio", "transformers"):
+    for name in ("torch", "torchaudio", "transformers"):
         try:
             __import__(name)
-        except Exception:  # noqa: BLE001 — absent or broken, same conclusion
+        except Exception:  # noqa: BLE001 ΓÇö absent or broken, same conclusion
             missing.append(name)
 
     if not missing:
@@ -226,7 +219,7 @@ async def capability() -> dict:
         "note": "" if full else (
             "This server measures timing and fluency only. Pronunciation, "
             "accuracy, grammar and content need speech-recognition models that "
-            "are not installed here, so they will show as not measured — and "
+            "are not installed here, so they will show as not measured ΓÇö and "
             "there will be no overall score, which needs at least three "
             "measures. Your practice still counts."),
     }

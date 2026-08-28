@@ -283,15 +283,28 @@ def normalize_condition(cond: Any) -> Any:
         return out
 
     if isinstance(cond, Or):
-        return {"$or": [normalize_condition(c) for c in cond.conditions]}
+        return {"$or": [normalize_condition(c) for c in cond.conditions if c is not None]}
     if isinstance(cond, dict):
         return _remap(cond.items())
-    # Beanie comparison operators expose their filter as a mapping; some
-    # versions via a `.query` property, all via `.items()`.
+    # Beanie comparison operators (In, NotIn, Eq, Ne, etc.) expose their
+    # filter via .query property or .items().
     if hasattr(cond, "query") and isinstance(cond.query, dict):
         return _remap(cond.query.items())
     if hasattr(cond, "items"):
-        return _remap(cond.items())
+        try:
+            return _remap(cond.items())
+        except Exception:
+            pass
+    # Fallback: some Beanie operators are string-like with the filter baked in
+    if hasattr(cond, "__str__") and not isinstance(cond, str):
+        s = str(cond)
+        # If it looks like a Mongo operator dict string, try to parse
+        if s.startswith("{") and s.endswith("}"):
+            import ast
+            try:
+                return _remap(ast.literal_eval(s).items())
+            except Exception:
+                pass
     raise TypeError(f"unsupported condition type: {type(cond).__name__}")
 
 

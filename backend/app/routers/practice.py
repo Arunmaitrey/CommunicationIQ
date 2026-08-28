@@ -228,11 +228,18 @@ async def mistakes(principal: Principal, models: TenantModels,
     ).to_list()}
 
     now = datetime.now(timezone.utc)
+    def _is_due(due_at):
+        if due_at is None:
+            return False
+        if due_at.tzinfo is None:
+            due_at = due_at.replace(tzinfo=timezone.utc)
+        return due_at <= now
+
     return [
         MistakeOut(
             id=r.id, skill=r.skill, times_wrong=r.times_wrong,
             times_right_since=r.times_right_since, interval_days=r.interval_days,
-            due_at=r.due_at, due_now=r.due_at <= now,
+            due_at=r.due_at, due_now=_is_due(r.due_at),
             stem=items[r.quiz_item_id].stem if r.quiz_item_id in items else "",
             category=items[r.quiz_item_id].category if r.quiz_item_id in items else "",
         )

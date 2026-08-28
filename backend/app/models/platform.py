@@ -88,7 +88,6 @@ class PlatformUser(Document):
     role: str = "support"
     mfa_enabled: bool = False
     active: bool = True
-    ui_language: str = "en"
     preferred_theme: str = ""
     last_login_at: datetime | None = None
     created_at: datetime = Field(default_factory=_now)

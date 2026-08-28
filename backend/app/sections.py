@@ -53,8 +53,15 @@ SKILL_OF_TASK: dict[str, str] = {
     # Reading — text in, no speaking.
     "reading_comprehension": "reading",
     "vocabulary_in_context": "reading",
+    # Vocabulary standalone questions (MCQ about word meaning).
+    "vocabulary": "reading",
+    # Grammar MCQ questions.
+    "grammar": "reading",
     # Writing.
+    "email": "writing",
     "email_writing": "writing",
+    # Listening comprehension from audio passages.
+    "audio_comprehension": "listening",
     "sentence_completion": "writing",
     "passage_reconstruction": "writing",
     # Timed typing: speed and accuracy on a given text.
@@ -84,6 +91,13 @@ RESPONSE_MODE: dict[str, str] = {
     "response_selection": "select",
     "reading_comprehension": "select",
     "vocabulary_in_context": "select",
+    # Vocabulary and Grammar are MCQ - select from options.
+    "vocabulary": "select",
+    "grammar": "select",
+    # Listening comprehension from audio - select from options.
+    "audio_comprehension": "select",
+    # Writing tasks.
+    "email": "write",
     "dictation": "write",
     "email_writing": "write",
     "sentence_completion": "write",
@@ -126,11 +140,19 @@ ITEM_SOURCE: dict[str, tuple[str, str]] = {
     # One word inside one sentence. Standalone, like sentence completion, and
     # for the same reason: there is no passage to have understood.
     "vocabulary_in_context": ("quiz", "vocabulary_in_context"),
+    # Vocabulary questions (standalone, not passage-based)
+    "vocabulary": ("quiz", "vocabulary"),
+    # Grammar questions
+    "grammar": ("quiz", "grammar"),
+    # Speaking questions (short answer style)
+    "speaking": ("quiz", "speaking"),
     # Heard once and typed back. The sentences are the Repeat Sentence bank:
     # same material, different channel, so the bank is shared rather than
     # duplicated and drifting.
     "dictation": ("task", "repeat_sentence"),
-    "email_writing": ("writing_prompt", ""),
+    # Writing tasks - draw from WritingPrompt bank
+    "email": ("writing_prompt", "email"),
+    "email_writing": ("writing_prompt", "email"),
     # One typed word into a gap. Its own quiz category rather than a writing
     # prompt: the item is a sentence with a hole, not a task to compose.
     "sentence_completion": ("quiz", "sentence_completion"),
@@ -150,6 +172,10 @@ ITEM_SOURCE: dict[str, tuple[str, str]] = {
     "typing": ("quiz", "typing"),
     # Read word lists aloud (Cognizant Q11-15): uses the task bank like read_aloud.
     "read_words": ("task", "read_words"),
+    # Listening comprehension - uses QuizItem bank
+    "audio_comprehension": ("quiz", "audio_comprehension"),
+    # Open response / speaking tasks - draw from TaskItem
+    "open_response": ("task", "open_response"),
 }
 
 # WritingPrompt kinds that ask the candidate to compose something new.

@@ -1,9 +1,7 @@
 """Sign-in and session.
 
-Two populations sign in here: platform staff (control plane) and institution
-users (students, trainers, tenant admins). The email decides which, and the
-issued token carries the answer. A caller never states which institution they
-belong to — the directory does, once, at sign-in.
+All data lives in the single CommunicationIQ database. Tenant isolation is by
+``tenant_id`` on documents, not separate databases.
 """
 from __future__ import annotations
 
@@ -53,9 +51,12 @@ async def signup(body: SignupRequest, request: Request) -> LoginResponse:
 
     tenant_models = await ensure_tenant_models(tenant.slug)
 
-    # Check if email already exists
-    existing = await tenant_models.User.find_one(
-        tenant_models.User.email == email)
+    # Check if email already exists in this tenant (use raw Motor to scope
+    # the query by tenant_id, since the Beanie User model may not have the
+    # field on all existing documents yet)
+    from app.db import client as _client, CONTROL_DB_NAME as _DB
+    _users_coll = _client[_DB]["users"]
+    existing = await _users_coll.find_one({"email": email, "tenant_id": tenant.id})
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "An account with this email already exists")
@@ -69,7 +70,7 @@ async def signup(body: SignupRequest, request: Request) -> LoginResponse:
 
     # Create the user
     user = tenant_models.User(
-        email=email, full_name=body.full_name, role="student",
+        tenant_id=tenant.id, email=email, full_name=body.full_name, role="student",
         password_hash=hash_password(body.password),
         must_change_password=False,
     )
@@ -100,19 +101,8 @@ async def signup(body: SignupRequest, request: Request) -> LoginResponse:
             role="student", scope="tenant",
             tenant_id=tenant.id, tenant_slug=tenant.slug, tenant_name=tenant.name,
             must_change_password=False,
-            ui_language="en", preferred_theme="campus",
+            preferred_theme="campus",
         ),
-    )
-
-
-@router.get("/me", response_model=SessionUser)
-async def me(principal: Principal) -> SessionUser:
-    """Return the current session user from the JWT."""
-    return SessionUser(
-        id=principal.user_id, email=principal.email,
-        full_name=principal.full_name, role=principal.role,
-        scope=principal.scope, tenant_id=principal.tenant_id,
-        tenant_slug=principal.tenant_slug,
     )
 
 
@@ -147,13 +137,11 @@ async def change_password(body: ChangePasswordRequest,
 
 @router.post("/preferences")
 async def save_preferences(body: dict, principal: Principal) -> dict:
-    """Save user preferences (language, theme, profile fields) to the DB."""
+    """Save user preferences (theme, profile fields) to the DB."""
     if principal.scope == "platform":
         staff = await PlatformUser.get(principal.user_id)
         if staff is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-        if "ui_language" in body:
-            staff.ui_language = body["ui_language"]
         if "preferred_theme" in body:
             staff.preferred_theme = body["preferred_theme"]
         if "full_name" in body:
@@ -167,8 +155,6 @@ async def save_preferences(body: dict, principal: Principal) -> dict:
         user = await models.User.get(principal.user_id)
         if user is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
-        if "ui_language" in body:
-            user.ui_language = body["ui_language"]
         if "preferred_theme" in body:
             user.preferred_theme = body["preferred_theme"]
         if "full_name" in body:
@@ -186,7 +172,12 @@ async def save_preferences(body: dict, principal: Principal) -> dict:
 
 
 def _branding_fields(tenant) -> dict:
-    raw = (tenant.branding or {}) if tenant is not None else {}
+    if tenant is None:
+        raw = {}
+    elif isinstance(tenant, dict):
+        raw = tenant.get("branding") or {}
+    else:
+        raw = (tenant.branding or {}) if getattr(tenant, 'branding', None) else {}
     return {
         "tenant_display_name": raw.get("display_name") or None,
         "tenant_logo_url": raw.get("logo_url") or None,
@@ -207,115 +198,119 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
             LOGIN_RATE_LIMIT_MESSAGE,
         )
 
-    staff = await PlatformUser.find(PlatformUser.email == email).first_or_none()
+    # Use raw Motor for all lookups to avoid Beanie _id type mismatches
+    from app.db import client, CONTROL_DB_NAME
+    _db = client[CONTROL_DB_NAME]
 
-    if staff is not None:
-        if not staff.active or not verify_password(body.password, staff.password_hash):
+    # Check platform staff first
+    staff_doc = await _db["platform_users"].find_one({"email": email})
+    if staff_doc is not None:
+        if not staff_doc.get("active", True) or not verify_password(body.password, staff_doc.get("password_hash", "")):
             record_failure(client_ip)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, _REJECT)
         reset(client_ip)
-        staff.last_login_at = datetime.now(timezone.utc)
-        await staff.save()
+        staff_id = str(staff_doc["_id"])
         principal = TokenPrincipal(
-            user_id=staff.id, email=staff.email, full_name=staff.full_name,
-            role=staff.role, scope="platform",
+            user_id=staff_id, email=staff_doc.get("email", email),
+            full_name=staff_doc.get("full_name", ""),
+            role=staff_doc.get("role", "platform_admin"), scope="platform",
         )
-        await audit.record(principal, "auth.login", entity="PlatformUser",
-                           entity_id=staff.id)
+        await _db["platform_users"].update_one(
+            {"_id": staff_doc["_id"]}, {"$set": {"last_login_at": datetime.now(timezone.utc).isoformat()}})
+        await audit.record(principal, "auth.login", entity="PlatformUser", entity_id=staff_id)
         return LoginResponse(
             token=create_token(principal),
             user=SessionUser(
-                id=staff.id, email=staff.email, full_name=staff.full_name,
-                role=staff.role, scope="platform",
+                id=staff_id, email=staff_doc.get("email", email),
+                full_name=staff_doc.get("full_name", ""),
+                role=staff_doc.get("role", "platform_admin"), scope="platform",
             ),
         )
 
-    # Use raw Motor query instead of Beanie to avoid _id type mismatches
-    # when records were inserted outside Beanie (ObjectId vs str)
-    from app.db import client, CONTROL_DB_NAME
-    _tud_coll = client[CONTROL_DB_NAME]["tenant_user_directory"]
+    # Institution user — route via tenant_user_directory
+    _tud_coll = _db["tenant_user_directory"]
     _tud_raw = await _tud_coll.find_one({"email": email})
     if _tud_raw is None or not _tud_raw.get("active", True):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _REJECT)
-    entry = type("_Entry", (), {
-        "id": str(_tud_raw.get("_id", "")),
-        "email": _tud_raw.get("email", email),
-        "tenant_id": str(_tud_raw.get("tenant_id") or ""),
-        "tenant_slug": str(_tud_raw.get("tenant_slug") or ""),
-        "active": bool(_tud_raw.get("active", True)),
-    })()
 
-    tenant = await Tenant.get(entry.tenant_id)
-    if tenant is None or tenant.status in {"suspended", "closed"}:
+    tenant_id = str(_tud_raw.get("tenant_id") or "")
+    tenant_slug = str(_tud_raw.get("tenant_slug") or "")
+
+    # Find tenant
+    tenant_doc = await _db["tenants"].find_one({"_id": tenant_id})
+    if tenant_doc is None or tenant_doc.get("status") in {"suspended", "closed"}:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "This institution's access is not currently active")
 
-    tenant_models = await ensure_tenant_models(tenant.slug)
-    user = await tenant_models.User.find(tenant_models.User.email == email).first_or_none()
-    if user is None or not user.active or not verify_password(body.password, user.password_hash):
+    # Find user scoped to this tenant
+    user_doc = await _db["users"].find_one({"email": email, "tenant_id": tenant_id})
+    if user_doc is None or not user_doc.get("active", True) or not verify_password(body.password, user_doc.get("password_hash", "")):
         record_failure(client_ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _REJECT)
     reset(client_ip)
-    user.last_login_at = datetime.now(timezone.utc)
-    await user.save()
+
+    user_id = str(user_doc["_id"])
+    await _db["users"].update_one(
+        {"_id": user_doc["_id"]}, {"$set": {"last_login_at": datetime.now(timezone.utc).isoformat()}})
 
     principal = TokenPrincipal(
-        user_id=user.id, email=user.email, full_name=user.full_name,
-        role=user.role, scope="tenant",
-        tenant_id=tenant.id, tenant_slug=tenant.slug,
+        user_id=user_id, email=user_doc.get("email", email),
+        full_name=user_doc.get("full_name", ""),
+        role=user_doc.get("role", "student"), scope="tenant",
+        tenant_id=tenant_id, tenant_slug=tenant_slug,
     )
     await audit.record(principal, "auth.login", entity="User",
-                       entity_id=user.id, tenant_id=tenant.id)
+                       entity_id=user_id, tenant_id=tenant_id)
+
+    branding = _branding_fields(tenant_doc)
     return LoginResponse(
         token=create_token(principal),
         user=SessionUser(
-            id=user.id, email=user.email, full_name=user.full_name,
-            role=user.role, scope="tenant",
-            tenant_id=tenant.id, tenant_slug=tenant.slug, tenant_name=tenant.name,
-            **_branding_fields(tenant),
-            must_change_password=user.must_change_password,
-            ui_language=user.ui_language, preferred_theme=user.preferred_theme,
+            id=user_id, email=user_doc.get("email", email),
+            full_name=user_doc.get("full_name", ""),
+            role=user_doc.get("role", "student"), scope="tenant",
+            tenant_id=tenant_id, tenant_slug=tenant_slug,
+            tenant_name=tenant_doc.get("name", ""),
+            must_change_password=user_doc.get("must_change_password", False),
+            preferred_theme=user_doc.get("preferred_theme", "campus"),
+            **branding,
         ),
     )
 
 
 @router.get("/me", response_model=SessionUser)
 async def me(principal: Principal) -> SessionUser:
-    """Restore a session from its token — what the frontend calls on every
-    page load to decide whether a stored token still means something.
+    from app.db import client, CONTROL_DB_NAME
+    _db = client[CONTROL_DB_NAME]
 
-    Re-reads the account rather than trusting the token's claims: a role
-    change, a rename, or a tenant's branding update should show up on the
-    next refresh without forcing a fresh sign-in, and an account or
-    institution deactivated after the token was issued should not be
-    trusted just because the signature still checks out.
-    """
     if principal.is_platform:
-        staff = await PlatformUser.get(principal.user_id)
-        if staff is None or not staff.active:
+        staff = await _db["platform_users"].find_one({"_id": principal.user_id})
+        if staff is None or not staff.get("active", True):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session")
         return SessionUser(
-            id=staff.id, email=staff.email, full_name=staff.full_name,
-            role=staff.role, scope="platform",
+            id=str(staff["_id"]), email=staff.get("email", ""),
+            full_name=staff.get("full_name", ""),
+            role=staff.get("role", "platform_admin"), scope="platform",
         )
 
     if not principal.tenant_slug:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session")
 
-    tenant = await Tenant.get(principal.tenant_id)
-    if tenant is None or tenant.status in {"suspended", "closed"}:
+    tenant_doc = await _db["tenants"].find_one({"_id": principal.tenant_id})
+    if tenant_doc is None or tenant_doc.get("status") in {"suspended", "closed"}:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session")
 
-    tenant_models = await ensure_tenant_models(tenant.slug)
-    user = await tenant_models.User.get(principal.user_id)
-    if user is None or not user.active:
+    user_doc = await _db["users"].find_one({"_id": principal.user_id, "tenant_id": principal.tenant_id})
+    if user_doc is None or not user_doc.get("active", True):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session")
 
     return SessionUser(
-        id=user.id, email=user.email, full_name=user.full_name,
-        role=user.role, scope="tenant",
-        tenant_id=tenant.id, tenant_slug=tenant.slug, tenant_name=tenant.name,
-        **_branding_fields(tenant),
-        must_change_password=user.must_change_password,
-        ui_language=user.ui_language, preferred_theme=user.preferred_theme,
+        id=str(user_doc["_id"]), email=user_doc.get("email", ""),
+        full_name=user_doc.get("full_name", ""),
+        role=user_doc.get("role", "student"), scope="tenant",
+        tenant_id=tenant_doc.get("_id", ""), tenant_slug=tenant_doc.get("slug", ""),
+        tenant_name=tenant_doc.get("name", ""),
+        **_branding_fields(tenant_doc),
+        must_change_password=user_doc.get("must_change_password", False),
+        preferred_theme=user_doc.get("preferred_theme", "campus"),
     )

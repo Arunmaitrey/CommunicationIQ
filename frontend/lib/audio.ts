@@ -58,11 +58,6 @@ export class MicRecorder {
   private events: RecorderEvents;
 
   readonly sampleRate: number;
-  readonly deviceLabel: string;
-  /** Which capture path this browser gave us. Reported with the environment
-   *  check so a failure in the field arrives diagnosable rather than as
-   *  "the microphone did not work". */
-  captureMode: "audioworklet" | "scriptprocessor" | "none" = "none";
 
   private constructor(context: AudioContext, stream: MediaStream, events: RecorderEvents) {
     this.context = context;
@@ -70,7 +65,6 @@ export class MicRecorder {
     this.events = events;
     this.sampleRate = context.sampleRate;
     this.source = context.createMediaStreamSource(stream);
-    this.deviceLabel = stream.getAudioTracks()[0]?.label ?? "";
   }
 
   static async open(events: RecorderEvents = {}): Promise<MicRecorder> {
@@ -146,7 +140,6 @@ export class MicRecorder {
         sink.gain.value = 0;
         node.connect(sink).connect(this.context.destination);
         this.node = node;
-        this.captureMode = "audioworklet";
         return;
       } catch {
         // Fall through to the older path rather than failing the attempt.
@@ -158,7 +151,6 @@ export class MicRecorder {
     this.source.connect(processor);
     processor.connect(this.context.destination);
     this.node = processor;
-    this.captureMode = "scriptprocessor";
   }
 
   /** Begin keeping frames. Levels are reported whether or not this is on. */
@@ -184,45 +176,6 @@ export class MicRecorder {
     const resampled = resample(captured, this.sampleRate, TARGET_SAMPLE_RATE);
     this.lastCapture = resampled;
     return encodeWav(resampled, TARGET_SAMPLE_RATE);
-  }
-
-  /** Listen for `ms` and report the ambient level — the room, before anyone speaks. */
-  async measureAmbient(ms = 1500): Promise<{ noiseDbfs: number; noiseCeilingDbfs: number; peakDbfs: number }> {
-    this.chunks = [];
-    this.capturing = true;
-    await new Promise((r) => setTimeout(r, ms));
-    this.capturing = false;
-    const captured = concat(this.chunks);
-    this.chunks = [];
-
-    if (captured.length === 0) return { noiseDbfs: -90, noiseCeilingDbfs: -90, peakDbfs: -90 };
-
-    // Tenth percentile is the room; the peak is whatever the loudest thing was.
-    const windows: number[] = [];
-    const size = Math.max(1, Math.floor(this.sampleRate * 0.02));
-    for (let i = 0; i + size <= captured.length; i += size) {
-      windows.push(rmsDbfs(captured.subarray(i, i + size)));
-    }
-    windows.sort((a, b) => a - b);
-    const noise = windows[Math.floor(windows.length * 0.1)] ?? -90;
-    // The ninetieth percentile is what the room sounds like most of the
-    // time on the processed (gain-controlled) stream -- the level a speech
-    // floor has to clear. The tenth percentile above is the "how quiet is
-    // it" figure and stays as the verdict input. (Hardware UAT, D1.)
-    const ceiling = windows[Math.floor(windows.length * 0.9)] ?? noise;
-    const peak = windows[windows.length - 1] ?? -90;
-    return { noiseDbfs: round(noise), noiseCeilingDbfs: round(ceiling), peakDbfs: round(peak) };
-  }
-
-  /** Everything worth knowing if this device misbehaves. */
-  diagnostics(): Record<string, string | number | boolean> {
-    return {
-      capture_mode: this.captureMode,
-      sample_rate: this.sampleRate,
-      device_label: this.deviceLabel,
-      secure_context: typeof window !== "undefined" && window.isSecureContext,
-      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : "",
-    };
   }
 
   close() {
@@ -308,10 +261,6 @@ export function encodeWav(samples: Float32Array, sampleRate: number): Blob {
   }
 
   return new Blob([buffer], { type: "audio/wav" });
-}
-
-function round(n: number): number {
-  return Math.round(n * 10) / 10;
 }
 
 /* ---------------------------------------------------------------------------

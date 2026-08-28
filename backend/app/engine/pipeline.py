@@ -262,6 +262,10 @@ async def score_response(tenant: Session, providers: Providers,
 
     transcript = TranscriptResult(text="", confidence=0.0)
     transcript_meta = None
+    scores: dict[str, float] = {}
+    records: list[ScoreRecord] = []
+    unscored: dict[str, str] = {}
+
     try:
         transcript, transcript_meta = await providers.invoke(
             Capability.ASR, tenant_id,
@@ -275,10 +279,6 @@ async def score_response(tenant: Session, providers: Providers,
         # now says so, instead of vanishing.
         for dimension in ("accuracy", "disfluency", "grammar", "content"):
             unscored[dimension] = NO_TRANSCRIPT
-
-    scores: dict[str, float] = {}
-    records: list[ScoreRecord] = []
-    unscored: dict[str, str] = {}
 
     def add(dimension: str, value: float, confidence: float, meta) -> None:
         scores[dimension] = value

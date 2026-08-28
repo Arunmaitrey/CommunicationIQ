@@ -8,8 +8,7 @@ from app.storage.base import StorageProvider
 from app.engine.contracts.language import (ContentRelevanceProvider,
                                            GrammarProvider, TTSProvider)
 from app.engine.contracts.services import (NotificationProvider,
-                                           NotificationResult, PaymentIntent,
-                                           PaymentProvider)
+                                            NotificationResult)
 from app.engine.contracts.speech import (AccuracyProvider, AlignmentProvider,
                                          ASRProvider, DisfluencyProvider,
                                          FluencyProvider,
@@ -42,7 +41,6 @@ CONTRACT_FOR: dict[Capability, type] = {
     Capability.CONTENT_RELEVANCE: ContentRelevanceProvider,
     Capability.TTS: TTSProvider,
     Capability.NOTIFICATION: NotificationProvider,
-    Capability.PAYMENT: PaymentProvider,
     Capability.STORAGE: StorageProvider,
 }
 
@@ -51,8 +49,8 @@ __all__ = [
     "FluencyProvider", "DisfluencyProvider", "GrammarProvider",
     "AccuracyProvider", "AccuracyResult",
     "ContentRelevanceProvider", "TTSProvider", "NotificationProvider",
-    "PaymentProvider", "StorageProvider", "IntelligibilityProvider",
-    "L1Provider", "NotificationResult", "PaymentIntent",
+    "StorageProvider", "IntelligibilityProvider",
+    "L1Provider", "NotificationResult",
     "AudioRef", "Capability", "ProviderMeta", "ProviderError",
     "ProviderUnavailable", "TranscriptResult", "VADResult", "AlignmentResult",
     "PronunciationResult", "FluencyResult", "DisfluencyResult", "GrammarResult",

@@ -105,7 +105,6 @@ async def _seat_usage(models: TenantModels, tenant_id: str) -> SeatUsage:
     return SeatUsage(
         used=used, limit=limit,
         students=counts.get("student", 0),
-        trainers=counts.get("trainer", 0),
         admins=counts.get("tenant_admin", 0),
         remaining=max(0, limit - used),
     )
@@ -336,7 +335,7 @@ async def create_cohort(body: CohortRequest, principal: Principal,
                         models: TenantModels) -> CohortOut:
     cohort = Cohort(name=body.name, branch=body.branch,
                     year_of_study=body.year_of_study, section=body.section,
-                    trainer_id=body.trainer_id, drive_start=body.drive_start,
+                    drive_start=body.drive_start,
                     drive_end=body.drive_end)
     await cohort.create()
 
@@ -345,7 +344,6 @@ async def create_cohort(body: CohortRequest, principal: Principal,
     return CohortOut(
         id=cohort.id, name=cohort.name, branch=cohort.branch,
         year_of_study=cohort.year_of_study, section=cohort.section,
-        trainer_id=cohort.trainer_id, trainer_name="",
         drive_start=cohort.drive_start, drive_end=cohort.drive_end,
         member_count=0, active=cohort.active,
     )
@@ -363,33 +361,27 @@ async def update_cohort(cohort_id: str, body: CohortRequest, principal: Principa
     if cohort is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Cohort not found")
 
-    before = {"name": cohort.name, "trainer_id": cohort.trainer_id,
-              "drive_start": cohort.drive_start.isoformat() if cohort.drive_start else None}
+    before = {"name": cohort.name, "drive_start": cohort.drive_start.isoformat() if cohort.drive_start else None}
 
     cohort.name = body.name or cohort.name
     cohort.branch = body.branch
     cohort.year_of_study = body.year_of_study
     cohort.section = body.section
-    cohort.trainer_id = body.trainer_id
     cohort.drive_start = body.drive_start
     cohort.drive_end = body.drive_end
     await cohort.save()
 
     count = await models.CohortMember.find(
         models.CohortMember.cohort_id == cohort.id).count()
-    trainer = await models.User.get(cohort.trainer_id) if cohort.trainer_id else None
 
     await audit.record(principal, "cohort.updated", entity="Cohort",
                        entity_id=cohort.id, before=before,
-                       after={"name": cohort.name, "trainer_id": cohort.trainer_id,
-                              "drive_start": cohort.drive_start.isoformat()
+                       after={"name": cohort.name, "drive_start": cohort.drive_start.isoformat()
                               if cohort.drive_start else None})
 
     return CohortOut(
         id=cohort.id, name=cohort.name, branch=cohort.branch,
         year_of_study=cohort.year_of_study, section=cohort.section,
-        trainer_id=cohort.trainer_id,
-        trainer_name=trainer.full_name if trainer else "",
         drive_start=cohort.drive_start, drive_end=cohort.drive_end,
         member_count=int(count), active=cohort.active,
     )
@@ -763,25 +755,16 @@ async def _sections_without_items(models: TenantModels,
     held (``mcq`` and ``audio_comprehension`` live in the quiz engine, not
     here), or one that simply has no published items yet.
     """
-    from app.models.tenant import QuizItem, WritingPrompt
+    from app.db import ensure_shared_models
     from app.sections import (fill_from_passages, groups_by_passage,
                               prompt_kinds_for, source_of)
 
-    # Ask the same question the runner asks: given this section, how many
-    # items would it actually get?
-    #
-    # This branched on the response mode and looked everything non-spoken up
-    # in the quiz bank. Dictation is typed and draws on the spoken sentence
-    # bank, so the guard went looking for "dictation questions", found none,
-    # and refused a section the runner would have filled perfectly well. The
-    # selector had already been taught where each bank lives; the guard had
-    # not, and two places encoding the same knowledge is how one of them ends
-    # up stale.
-    task_counts = {doc["_id"]: doc["count"] async for doc in models.TaskItem.get_motor_collection().aggregate([
+    shared = await ensure_shared_models()
+    task_counts = {doc["_id"]: doc["count"] async for doc in shared.TaskItem.get_motor_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$task_type", "count": {"$sum": 1}}},
     ])}
-    quiz_counts = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
+    quiz_counts = {doc["_id"]: doc["count"] async for doc in shared.QuizItem.get_motor_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$category", "count": {"$sum": 1}}},
     ])}
@@ -819,9 +802,9 @@ async def _sections_without_items(models: TenantModels,
             continue
 
         if kind == "task":
-            items = await models.TaskItem.find(
-                models.TaskItem.task_type == key,
-                models.TaskItem.status == "published").to_list()
+            items = await shared.TaskItem.find(
+                shared.TaskItem.task_type == key,
+                shared.TaskItem.status == "published").to_list()
             available = len(app_selection.eligible(items, pool_filter, "task"))
             reachable = min(available, section.item_count)
             bank = (f"{key} items matching the filter" if pool_filter.configured
@@ -835,9 +818,7 @@ async def _sections_without_items(models: TenantModels,
             available = quiz_counts.get(key, 0)
             bank = f"{key} questions"
             if groups_by_passage(key):
-                # Comprehension comes a whole passage at a time, so the raw
-                # count is not what the section will get.
-                sizes = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
+                sizes = {doc["_id"]: doc["count"] async for doc in shared.QuizItem.get_motor_collection().aggregate([
                     {"$match": {"category": key, "status": "published"}},
                     {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
                 ]) if doc["count"]}

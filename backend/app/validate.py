@@ -67,17 +67,25 @@ def load(name: str) -> Study:
 
 async def score_recordings(name: str) -> int:
     """Run the engine over the study set and write engine_scores.csv."""
-    from app.engine.providers.tier1.asr import FasterWhisperASR
+    # Dummy ASR and VAD providers (Whisper-related removed)
+    class DummyASR:
+        def analyse(self, samples):
+            from app.engine.contracts.types import TranscriptResult
+            return TranscriptResult(text="", language="", language_probability=0.0, words=[], duration_ms=0)
+    
+    class DummyVAD:
+        def analyse(self, samples, *, prompt_end_ms=0):
+            from app.engine.contracts.types import VADResult
+            return VADResult(segments=[], speech_ms=0, silence_ms=0, onset_ms=None, meta=None)
+    
     from app.engine.providers.tier1.accuracy import ReferenceMatchAccuracy
     from app.engine.providers.tier1.fluency import FeatureFluency  # noqa: F401
     from app.engine.providers.tier0.fluency import FeatureFluency as Fluency
     from app.engine.providers.tier1.pronunciation import Wav2VecGOP
-    from app.engine.providers.tier1.vad import SileroVAD
-
-    study = load(name)
-    asr, vad, gop, accuracy, fluency = (FasterWhisperASR(), SileroVAD(),
-                                        Wav2VecGOP(), ReferenceMatchAccuracy(),
-                                        Fluency())
+    
+    asr, vad, gop, accuracy, fluency = (DummyASR(), DummyVAD(),
+                                         Wav2VecGOP(), ReferenceMatchAccuracy(),
+                                         Fluency())
 
     rows = []
     for recording in study.recordings.values():

@@ -14,7 +14,7 @@ import { DataUsageIndicator } from "@/components/DataUsageIndicator";
 import { firstOpenIndex, nextStep } from "@/lib/sequence";
 import { sectionBudget, sectionMood, sectionRemaining } from "@/lib/timing";
 import { groupNumbering, remainingSeconds, sectionExpiry } from "@/lib/sectionClock";
-import { FRESH, advanceReason, inspect, observe, shouldAdvance, speechFloorFor, windowFor, type TalkState } from "@/lib/speech";
+import { FRESH, advanceReason, inspect, observe, shouldAdvance, SILENCE_DBFS, windowFor, type TalkState } from "@/lib/speech";
 import {
   beep, levelToFraction, MicPermissionError, MicRecorder, MicUnavailableError,
   playAudioUrl, primeSpeech, speak, TARGET_SAMPLE_RATE,
@@ -198,8 +198,6 @@ function Runner() {
   // at a gate (Play Audio / Start Recording / thinking). The item is passed
   // over without a response -- "section time is over" means over.
   const skipCurrent = useRef(false);
-  // The room's speech floor, from the setup check (D1).
-  const floor = useRef(speechFloorFor(null));
   // A carried message (topic skipped, section over) shown on the screens
   // that follow, until the candidate starts answering again.
   const [banner, setBanner] = useState("");
@@ -341,24 +339,10 @@ function Runner() {
           setPhase("failed");
           return;
         }
-        // The runner is never the place to discover a dead microphone. If the
-        // check has not been done — or somebody deep-linked past it — go back
-        // and do it, rather than starting a clock the student cannot answer.
-        // A test with nothing spoken in it needs neither the environment
-        // check nor the microphone. Demanding both would make a reading
-        // comprehension paper refuse to start on a machine with no mic --
-        // and would train candidates to click through a permission prompt
-        // they did not need, which is how the prompt stops meaning anything.
-        const needsMic = data.items.some((x) => x.response_mode === "speak");
-
-        if (needsMic && !data.env_check_done) {
-          router.replace(`/attempt/${id}/check`);
-          return;
-        }
         setPayload(data);
-        floor.current = speechFloorFor(data.noise_dbfs, data.noise_ceiling_dbfs);
-        console.debug("[runner] speech floor " + JSON.stringify({ noise: data.noise_dbfs,
-          ceiling: data.noise_ceiling_dbfs, floorDbfs: floor.current }));
+        // Open the microphone up front when any item speaks, so the permission
+        // prompt happens before the first recording rather than mid-answer.
+        const needsMic = data.items.some((x) => x.response_mode === "speak");
         // Resume where the server's record ends, not at item 1 (D7). With
         // everything already answered there is nothing left to run: go
         // straight to submission.
@@ -377,7 +361,7 @@ function Runner() {
             // ~7x too fast on the AudioWorklet path (128 samples ≈ 2.7 ms),
             // ending every recording in a few seconds regardless of the timer.
             if (!listenFor.current) return;
-            talk.current = observe(talk.current, dbfs, frameMs, floor.current);
+            talk.current = observe(talk.current, dbfs, frameMs, SILENCE_DBFS);
             if (shouldAdvance(talk.current, listenFor.current, trailingFor.current)) {
               // The same lever the "I'm done" button pulls. The countdown
               // remains the ceiling; this reaches it early only once the
@@ -793,10 +777,10 @@ function Runner() {
     // dimension, and never alters a byte of what is uploaded. The server's
     // own VAD runs on exactly these samples and remains the only authority
     // over the result.
-    const heard = inspect(samples, TARGET_SAMPLE_RATE, floor.current);
+    const heard = inspect(samples, TARGET_SAMPLE_RATE, SILENCE_DBFS);
     // UAT instrumentation: what the silence gate saw. Debug level only.
     console.debug("[runner] silence-check " + JSON.stringify({
-      item: current.response_id, floorDbfs: floor.current, samples: samples.length,
+      item: current.response_id, floorDbfs: SILENCE_DBFS, samples: samples.length,
       heardSomething: heard.heardSomething, speechMs: heard.speechMs, peakDbfs: heard.peakDbfs,
       talk: talk.current,
     }));
@@ -934,21 +918,21 @@ function Runner() {
     // like. An invited candidate cannot: an invitation is one sitting, the
     // server refuses a second attempt, and /simulate is a student page that
     // would eject them to a login screen they have no account for. What they
-    // need is the environment check for *this* attempt -- it resumes the same
-    // one, and everything already recorded is already uploaded.
+    // need is the runner for *this* attempt -- it resumes the same one, and
+    // everything already recorded is already uploaded.
     return (
       <Centered>
         <div className="max-w-sm text-center">
           <div className="text-sm font-bold mb-2">This attempt stopped</div>
           <p className="text-xs text-muted mb-4">{error}</p>
           <p className="text-[11px] text-muted mb-4 leading-relaxed">
-            Nothing you have already answered is lost. Check your microphone
-            and carry on from where you stopped.
+            Nothing you have already answered is lost. Carry on from where you
+            stopped.
           </p>
           <button
-            onClick={() => router.push(`/attempt/${id}/check`)}
+            onClick={() => router.push(`/attempt/${id}/run`)}
             className="btn btn-primary ds-focus">
-            Check the microphone and carry on
+            Resume and carry on
           </button>
         </div>
       </Centered>
