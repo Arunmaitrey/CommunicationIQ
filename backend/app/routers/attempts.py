@@ -21,7 +21,7 @@ from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcept
                      Request, Response as HttpResponse, UploadFile, status)
 from app.config import settings
 from app.invitations import CANDIDATE_ROLE
-from app.db import ensure_tenant_models, func, select
+from app.db import Session, ensure_platform_models, ensure_tenant_models, func, select
 from app import formats
 from app.deps import Principal, PlatformSession, TenantSession, require_roles
 from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
@@ -100,8 +100,17 @@ async def _score_in_background(slug: str, tenant_id: str | None,
     answered, and its session closed with it.
     """
     try:
-        models = await ensure_tenant_models(slug)
-        await score_response(models, None, tenant_id, response_id)
+        # score_response needs a real Session for its own tenant.get()/
+        # .execute() calls — ensure_tenant_models returns the raw Beanie
+        # bundle, not one, which is why this crashed with 'SimpleNamespace'
+        # object has no attribute 'get' on every background scoring
+        # attempt. Providers separately needs a *platform* session:
+        # ProviderConfig/ProviderRegistry are control-plane models (see the
+        # submit-time retry a few hundred lines down, which builds it the
+        # same way from `platform`).
+        tenant = Session(await ensure_tenant_models(slug))
+        providers = Providers(Session(await ensure_platform_models()))
+        await score_response(tenant, providers, tenant_id, response_id)
     except Exception as exc:  # noqa: BLE001
         # Recoverable: submit retries anything still pending, and
         # score_response is idempotent so the retry is safe.

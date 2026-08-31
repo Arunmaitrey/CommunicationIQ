@@ -323,6 +323,15 @@ class Session:
     def __init__(self, models: SimpleNamespace):
         self._models = models
         self._new: list = []
+        # SQLAlchemy's session auto-tracks anything it fetched: mutate an
+        # object session.get() handed you, call commit(), and it persists —
+        # no session.add() needed, because the session already knows about
+        # it. This codebase was written against exactly that idiom (see
+        # attempts.py's env_check: fetch, mutate attempt.env_check in place,
+        # commit — never add()). Beanie has no equivalent auto-tracking, so
+        # get() below records what it hands out, and flush() saves it,
+        # otherwise every such mutation is silently discarded.
+        self._tracked: list = []
 
     async def __aenter__(self) -> Session:
         return self
@@ -343,15 +352,22 @@ class Session:
                 obj.id = str(uuid.uuid4())
             await obj.insert()
         self._new.clear()
+        for obj in self._tracked:
+            await obj.save()
+        self._tracked.clear()
 
     async def commit(self) -> None:
         await self.flush()
 
     def rollback(self) -> None:
         self._new.clear()
+        self._tracked.clear()
 
     async def get(self, model: type, pk: Any):
-        return await self._resolve(model).get(pk)
+        obj = await self._resolve(model).get(pk)
+        if obj is not None:
+            self._tracked.append(obj)
+        return obj
 
     async def execute(self, stmt: _Stmt):
         if stmt.kind == _Stmt.DELETE:
