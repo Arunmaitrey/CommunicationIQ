@@ -119,7 +119,7 @@ class PrimaryDiagnosis:
     label: str = ""
     score: float | None = None
     responses: int = 0
-    scale_max: float = 80.0
+    scale_max: float = 100.0
     confidence: str = ""           # solid | moderate | ""
     practice_code: str = ""
     candidates: tuple[Candidate, ...] = field(default_factory=tuple)
@@ -133,7 +133,7 @@ def _n(score: float) -> str:
     return f"{score:.0f}"
 
 
-def diagnose(dimensions: dict[str, float], *, scale_max: float = 80.0,
+def diagnose(dimensions: dict[str, float], *, scale_max: float = 100.0,
              response_counts: dict[str, int] | None = None,
              available_practice: set[str] | None = None) -> PrimaryDiagnosis:
     """Apply the rule above to one attempt's measured dimensions.

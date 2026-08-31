@@ -59,13 +59,15 @@ async def lifespan(_app: FastAPI):
     engine = _engine_tier()
     if engine["tier"] == 0:
         log.warning(
-            "TIER 0 ONLY - speech models unavailable (%s). Pronunciation, "
-            "accuracy, grammar and content will report as unscored.",
+            "WHISPER UNAVAILABLE - transcript-based accuracy, grammar, "
+            "content and disfluency will report as unscored (%s).",
             ", ".join(engine["missing"]))
     else:
         log.info("Tier 1 speech engine available")
 
-
+    if settings.whisper_warm_on_startup:
+        from app.engine.providers.tier1 import model
+        asyncio.get_running_loop().run_in_executor(None, model.warm)
 
     # The narration recovery sweeper. The fast path is a BackgroundTask fired
     # when an attempt is scored; this loop is the durability net, so a job left
@@ -138,7 +140,7 @@ def _engine_tier() -> dict:
     deployment should be able to see which one they have.
     """
     missing: list[str] = []
-    for name in ("torch", "torchaudio", "transformers"):
+    for name in ("faster_whisper",):
         try:
             __import__(name)
         except Exception:  # noqa: BLE001 ΓÇö absent or broken, same conclusion
@@ -150,9 +152,9 @@ def _engine_tier() -> dict:
         "tier": 0,
         "speech_models": "unavailable",
         "missing": missing,
-        "effect": ("Pronunciation, accuracy, grammar and content report as "
-                   "unscored. Timing measures still work. Install "
-                   "requirements-engine.txt to enable them."),
+        "effect": ("Transcript accuracy, transcript-based grammar/content "
+                   "and disfluency report as unscored. Timing measures still "
+                   "work. Install requirements.txt to enable Faster Whisper."),
     }
 
 
@@ -212,13 +214,13 @@ async def capability() -> dict:
     return {
         "tier": engine["tier"],
         "full_scoring": full,
-        "measures": (["pronunciation", "accuracy", "grammar", "content",
+        "measures": (["accuracy", "grammar", "content",
                       "fluency", "latency", "disfluency"] if full
                      else ["fluency", "latency"]),
         # Said plainly, and only when it is true.
         "note": "" if full else (
-            "This server measures timing and fluency only. Pronunciation, "
-            "accuracy, grammar and content need speech-recognition models that "
+            "This server measures timing and fluency only. Accuracy, grammar "
+            "and content need Faster Whisper speech recognition, which "
             "are not installed here, so they will show as not measured ΓÇö and "
             "there will be no overall score, which needs at least three "
             "measures. Your practice still counts."),

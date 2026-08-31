@@ -540,9 +540,15 @@ class WordTimingOut(BaseModel):
 
 class ResponseMetrics(BaseModel):
     response_id: str
+    section_id: str = ""
     position: int
     task_type: str
     prompt_text: str = ""
+    submitted_answer: str = ""
+    correct_answer: str = ""
+    question_score: float | None = None
+    word_count: int | None = None
+    content_score: float | None = None
     skipped: bool = False
     onset_ms: int | None = None
     speech_ms: int | None = None
@@ -791,9 +797,9 @@ class ProfileRequest(BaseModel):
     # Empty means "use the engine's own weights", which is what every existing
     # profile does and what practice should keep doing.
     scoring_weights: dict[str, float] = {}
-    # Overall, on the internal 20-80 scale. None means this assessment does
+    # Overall, on the native 0-100 scale. None means this assessment does
     # not pass or fail anybody -- right for practice, wrong for a hiring round.
-    pass_threshold: float | None = Field(default=None, ge=20, le=80)
+    pass_threshold: float | None = Field(default=None, ge=0, le=100)
     # {dimension: floor}. Failing any floor fails the assessment even when the
     # weighted overall clears the bar.
     skill_thresholds: dict[str, float] = {}
@@ -822,9 +828,9 @@ class ProfileRequest(BaseModel):
                 raise ValueError(
                     f"Not a measured dimension: {dimension}. "
                     f"Available: {', '.join(sorted(ENGINE_WEIGHTS))}.")
-            if not 20 <= float(floor) <= 80:
+            if not 0 <= float(floor) <= 100:
                 raise ValueError(
-                    f"A floor is on the same 20-80 scale as the scores. "
+                    f"A floor is on the same 0-100 scale as the scores. "
                     f"{dimension} was given {floor}.")
         return v
 
@@ -926,7 +932,7 @@ class PrimaryDiagnosisOut(BaseModel):
     label: str = ""
     score: float | None = None
     responses: int = 0
-    scale_max: float = 80.0
+    scale_max: float = 100.0
     confidence: str = ""
     # The tied group (status "tied") or the eligible set, weakest first.
     candidates: list[dict] = []
@@ -1009,8 +1015,8 @@ class AttemptResult(BaseModel):
     attempt_number: int
     overall: float | None
     band: str = ""
-    scale_min: float = 20
-    scale_max: float = 80
+    scale_min: float = 0
+    scale_max: float = 100
     dimensions: dict[str, float] = {}
     confidence: dict[str, float] = {}
     # Dimension → why it is not scored yet. Shown, not hidden.

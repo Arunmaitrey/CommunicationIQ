@@ -54,8 +54,8 @@ async def signup(body: SignupRequest, request: Request) -> LoginResponse:
     # Check if email already exists in this tenant (use raw Motor to scope
     # the query by tenant_id, since the Beanie User model may not have the
     # field on all existing documents yet)
-    from app.db import client as _client, CONTROL_DB_NAME as _DB
-    _users_coll = _client[_DB]["users"]
+    from app.db import tenant_db
+    _users_coll = tenant_db(tenant.slug)["users"]
     existing = await _users_coll.find_one({"email": email, "tenant_id": tenant.id})
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT,
@@ -242,15 +242,16 @@ async def login(body: LoginRequest, request: Request) -> LoginResponse:
         raise HTTPException(status.HTTP_403_FORBIDDEN,
                             "This institution's access is not currently active")
 
-    # Find user scoped to this tenant
-    user_doc = await _db["users"].find_one({"email": email, "tenant_id": tenant_id})
+    # Institution users are structurally isolated in their tenant database.
+    from app.db import tenant_db
+    user_doc = await tenant_db(tenant_slug)["users"].find_one({"email": email})
     if user_doc is None or not user_doc.get("active", True) or not verify_password(body.password, user_doc.get("password_hash", "")):
         record_failure(client_ip)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, _REJECT)
     reset(client_ip)
 
     user_id = str(user_doc["_id"])
-    await _db["users"].update_one(
+    await tenant_db(tenant_slug)["users"].update_one(
         {"_id": user_doc["_id"]}, {"$set": {"last_login_at": datetime.now(timezone.utc).isoformat()}})
 
     principal = TokenPrincipal(
@@ -300,7 +301,9 @@ async def me(principal: Principal) -> SessionUser:
     if tenant_doc is None or tenant_doc.get("status") in {"suspended", "closed"}:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session")
 
-    user_doc = await _db["users"].find_one({"_id": principal.user_id, "tenant_id": principal.tenant_id})
+    from app.db import tenant_db
+    user_doc = await tenant_db(principal.tenant_slug)["users"].find_one(
+        {"_id": principal.user_id})
     if user_doc is None or not user_doc.get("active", True):
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid or expired session")
 

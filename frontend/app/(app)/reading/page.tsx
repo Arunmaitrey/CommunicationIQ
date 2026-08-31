@@ -220,7 +220,7 @@ function Reading() {
             <div className="text-2xl font-bold mt-2" style={{ color: "var(--primary)" }}>
               {result.score}
             </div>
-            <div className="text-[11px] text-muted mt-1">out of 80 · {result.band}</div>
+            <div className="text-[11px] text-muted mt-1">out of 100 · {result.band}</div>
           </div>
           <div className="ds-card p-4">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted flex items-center gap-1.5">

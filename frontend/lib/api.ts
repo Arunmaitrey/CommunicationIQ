@@ -700,9 +700,15 @@ export interface DisfluencyEvent {
 
 export interface ResponseMetrics {
   response_id: string;
+  section_id: string;
   position: number;
   task_type: string;
   prompt_text: string;
+  submitted_answer: string;
+  correct_answer: string;
+  question_score: number | null;
+  word_count: number | null;
+  content_score: number | null;
   skipped: boolean;
   onset_ms: number | null;
   speech_ms: number | null;

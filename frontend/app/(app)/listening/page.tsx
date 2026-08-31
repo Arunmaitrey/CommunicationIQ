@@ -293,7 +293,7 @@ function Listening() {
               {result.score}
             </div>
             <div className="text-[11px] text-muted mt-1">
-              out of 80 · {result.band}
+              out of 100 · {result.band}
             </div>
           </div>
           <div className="ds-card p-4 sm:col-span-2 flex items-center gap-4 flex-wrap">

@@ -65,7 +65,7 @@ RUBRIC = {
 
 DIMENSIONS = list(RUBRIC)
 
-# Human ratings are 1-5; engine scores are 20-80. Everything is compared on
+# Human ratings are 1-5; engine scores are 0-100. Everything is compared on
 # the engine's scale, so the ratings are mapped up rather than the scores down
 # — the engine's resolution is the thing being tested.
 def rating_to_scale(rating: float) -> float:

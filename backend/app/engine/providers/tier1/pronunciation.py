@@ -38,8 +38,8 @@ from app.engine.providers.tier1.asr import SAMPLE_RATE, load_samples
 
 log = logging.getLogger(__name__)
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 MODEL_NAME = "facebook/wav2vec2-base-960h"
 

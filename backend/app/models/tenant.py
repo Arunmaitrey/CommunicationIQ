@@ -498,8 +498,8 @@ class ScoreRecord(Document):
     response_id: str | None = Field(default=None, index=True)
     dimension: str = Field(default="", index=True)
     score: float
-    scale_min: float = 20
-    scale_max: float = 80
+    scale_min: float = 0
+    scale_max: float = 100
     band: str = ""
     confidence: float | None = None
     provider_id: str = ""

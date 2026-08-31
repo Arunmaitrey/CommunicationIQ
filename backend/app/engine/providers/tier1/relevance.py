@@ -19,8 +19,8 @@ import re
 
 from app.engine.contracts.types import ProviderMeta, RelevanceResult
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 # Words that carry no topic information. Matching on these would make any
 # answer look like it covered any point.

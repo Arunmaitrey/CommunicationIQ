@@ -6,6 +6,10 @@ import {
   AlertTriangle, ChevronDown, ChevronRight, Clock, Gauge, Loader2, Lock, Mic,
   Star, Volume2,
 } from "lucide-react";
+import {
+  Bar, BarChart, CartesianGrid, Cell, LabelList, PolarAngleAxis, PolarGrid,
+  Radar, RadarChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+} from "recharts";
 import { ListenBack } from "@/components/ListenBack";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useRole } from "@/components/RoleProvider";
@@ -19,7 +23,7 @@ import { useToast } from "@/components/Toast";
 import {
   ApiError, attemptApi, type PreviousAttempt,
   type PracticeOutcome, type PrimaryDiagnosis, type ResponseMetrics,
-  type ResultPriority,
+  type ResultPriority, type SectionResult,
 } from "@/lib/api";
 import { Evidence, Export, Highlights, NarrationCard, Skills, Summary, answerLabel,
          itemsFootnote } from "@/components/Report";
@@ -201,7 +205,7 @@ function Result() {
             <div className="mt-2"><Badge tone="var(--primary)">{data.band}</Badge></div>
           )}
           {/* An uncalibrated composite shown in the product's brand colour,
-              on a 20-80 scale that looks like a vendor band, is how somebody
+              on a 0-100 scale that looks like a vendor result, is how somebody
               ends up quoting it to a recruiter. Greyed, badged, and explained
               until a validation study says otherwise. */}
           <p className="text-[11px] text-muted mt-3 leading-relaxed">
@@ -412,6 +416,14 @@ function Result() {
         </div>
       </div>
 
+      <ScoreCharts
+        dimensions={data.dimensions}
+        skills={data.skills ?? []}
+        sections={data.sections ?? []}
+        scaleMin={data.scale_min}
+        scaleMax={data.scale_max}
+      />
+
       {/* The plan, the evidence, and the export. Everything below is
           derived from measurements already on this page -- nothing here
           computes a score.
@@ -470,20 +482,16 @@ function Result() {
             ))}
           </div>
           <p className="text-[11px] text-muted mt-3 leading-relaxed">
-            The engine measures what it can actually hear today: timing, pauses
-            and speech rate. Pronunciation and grammar need transcription, which
-            arrives with the Tier-1 speech model. Until then they are blank
-            rather than guessed.
+            A missing measure is never replaced with a guessed score. The reason
+            shown beside each measure describes what evidence was unavailable for
+            this attempt.
           </p>
         </Section>
       )}
 
       <Section title={`Item by item — ${answered.length} of ${data.responses.length} answered`}>
-        <div className="space-y-2">
-          {data.responses.map((item) => (
-            <ItemRow key={item.response_id} attemptId={data.attempt_id} item={item} />
-          ))}
-        </div>
+        <SectionedItems attemptId={data.attempt_id} responses={data.responses}
+                        sections={data.sections ?? []} />
         <p className="text-[11px] text-muted mt-3 leading-relaxed">
           {itemsFootnote(data.responses.some((r) => r.has_audio))}
         </p>
@@ -495,6 +503,91 @@ function Result() {
         </div>
       )}
     </>
+  );
+}
+
+function SectionedItems({ attemptId, responses, sections }: {
+  attemptId: string;
+  responses: ResponseMetrics[];
+  sections: SectionResult[];
+}) {
+  const orderedSections = [...sections].sort((a, b) => a.position - b.position);
+  const knownSectionIds = new Set(orderedSections.map((section) => section.section_id));
+  const groups = orderedSections.map((section) => ({
+    section,
+    responses: responses
+      .filter((response) => response.section_id === section.section_id)
+      .sort((a, b) => a.position - b.position),
+  }));
+  const unassigned = responses
+    .filter((response) => !response.section_id || !knownSectionIds.has(response.section_id))
+    .sort((a, b) => a.position - b.position);
+
+  return (
+    <div className="space-y-3">
+      {groups.map((group, index) => (
+        <QuestionSection key={group.section.section_id} attemptId={attemptId}
+                         section={group.section} responses={group.responses}
+                         initiallyOpen={index === 0} />
+      ))}
+      {unassigned.length > 0 && (
+        <QuestionSection attemptId={attemptId} responses={unassigned}
+                         initiallyOpen={groups.length === 0} />
+      )}
+    </div>
+  );
+}
+
+function QuestionSection({ attemptId, responses, section, initiallyOpen }: {
+  attemptId: string;
+  responses: ResponseMetrics[];
+  section?: SectionResult;
+  initiallyOpen: boolean;
+}) {
+  const [open, setOpen] = useState(initiallyOpen);
+  const answered = responses.filter((response) => !response.skipped).length;
+  const Chevron = open ? ChevronDown : ChevronRight;
+
+  return (
+    <div className="ds-inset overflow-hidden">
+      <button onClick={() => setOpen((value) => !value)}
+              className="w-full p-3 flex items-center gap-2 text-left ds-focus">
+        <Chevron size={15} className="text-muted shrink-0" />
+        <span className="flex-1 min-w-0">
+          <span className="text-xs font-bold block truncate">
+            {section?.title || "Other questions"}
+          </span>
+          <span className="text-[10px] text-muted capitalize">
+            {section?.skill ? `${section.skill} · ` : ""}{answered} of {responses.length} answered
+          </span>
+        </span>
+        {section?.score != null ? (
+          <span className="text-sm font-bold tabular-nums shrink-0">
+            {section.score}/100
+          </span>
+        ) : section?.unscored_reason ? (
+          <Badge tone="var(--rag-amber)">not scored</Badge>
+        ) : null}
+      </button>
+
+      {open && (
+        <div className="p-3 pt-0 space-y-2">
+          {section?.unscored_reason && (
+            <p className="text-[10px] text-muted leading-relaxed">
+              {section.unscored_reason}
+            </p>
+          )}
+          {responses.length === 0 && !section?.unscored_reason && (
+            <p className="text-[10px] text-muted leading-relaxed">
+              No question responses were stored for this section.
+            </p>
+          )}
+          {responses.map((item) => (
+            <ItemRow key={item.response_id} attemptId={attemptId} item={item} />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -512,10 +605,10 @@ function ItemRow({ attemptId, item }: { attemptId: string; item: ResponseMetrics
     <div className="ds-card p-3">
       <button
         onClick={() => setOpen((v) => !v)}
-        disabled={item.skipped || !item.has_audio}
+        disabled={item.skipped}
         className="w-full flex items-center gap-2 text-left ds-focus disabled:cursor-default"
       >
-        {item.skipped || !item.has_audio
+        {item.skipped
           ? <span style={{ width: 14 }} />
           : <Chevron size={14} className="text-muted shrink-0" />}
 
@@ -564,7 +657,176 @@ function ItemRow({ attemptId, item }: { attemptId: string; item: ResponseMetrics
         )}
       </button>
 
-      {open && <ListenBack attemptId={attemptId} item={item} />}
+      {open && (
+        item.has_audio
+          ? <ListenBack attemptId={attemptId} item={item} />
+          : <div className="pt-3 border-t border-border text-xs space-y-2">
+              <Detail label="Question" value={item.prompt_text} />
+              <Detail label="Your answer" value={item.submitted_answer || "No answer recorded"} />
+              {item.correct_answer && <Detail label="Correct answer" value={item.correct_answer} />}
+              {item.question_score != null && <Detail label="Score" value={`${item.question_score}/100`} />}
+              {item.word_count != null && <Detail label="Word count" value={String(item.word_count)} />}
+              {item.content_score != null && <Detail label="Content score" value={`${item.content_score}/100`} />}
+            </div>
+      )}
+    </div>
+  );
+}
+
+function ScoreCharts({ dimensions, skills, sections, scaleMin, scaleMax }: {
+  dimensions: Record<string, number>;
+  skills: import("@/lib/api").SkillScore[];
+  sections: import("@/lib/api").SectionResult[];
+  scaleMin: number;
+  scaleMax: number;
+}) {
+  const skillColours: Record<string, string> = {
+    speaking: "#7c3aed",
+    listening: "#0284c7",
+    reading: "#16a34a",
+    writing: "#ea580c",
+  };
+  const performanceColour = (score: number) => {
+    if (score >= 80) return "#16a34a";
+    if (score >= 60) return "#2563eb";
+    if (score >= 40) return "#d97706";
+    return "#dc2626";
+  };
+  const skillData = skills
+    .filter((skill) => skill.section_count > 0 && skill.score !== null)
+    .map((skill) => ({
+      key: skill.skill,
+      name: skill.skill[0].toUpperCase() + skill.skill.slice(1),
+      score: skill.score as number,
+      colour: skillColours[skill.skill] ?? "#64748b",
+    }));
+  const sectionData = sections
+    .filter((section) => section.score !== null)
+    .map((section) => ({
+      name: section.title,
+      score: section.score as number,
+      colour: performanceColour(section.score as number),
+    }));
+  const speakingData = Object.entries(dimensions).map(([dimension, score]) => ({
+    dimension: DIMENSION_LABEL[dimension] ?? dimension,
+    score,
+  }));
+
+  if (skillData.length < 2 && sectionData.length < 2 && speakingData.length < 3) return null;
+
+  const tooltipStyle = {
+    background: "var(--surface)",
+    border: "1px solid var(--border)",
+    borderRadius: "8px",
+    color: "var(--text)",
+    fontSize: "12px",
+  };
+
+  return (
+    <Section title="Score charts" className="mb-4">
+      <p className="text-[11px] text-muted mb-4 leading-relaxed">
+        These charts visualize the scores shown elsewhere in this report. They do not
+        recalculate or change your result.
+      </p>
+      <div className="grid lg:grid-cols-2 gap-4">
+        {skillData.length >= 2 && (
+          <div className="ds-inset p-3">
+            <h3 className="text-xs font-bold mb-1">Four-skill overview</h3>
+            <p className="text-[10px] text-muted mb-2">Reading, listening, writing and speaking on the same scale.</p>
+            <div className="h-64" role="img" aria-label="Bar chart comparing skill scores">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={skillData} margin={{ top: 10, right: 8, left: -20, bottom: 5 }}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                  <XAxis dataKey="name" tick={{ fill: "var(--muted)", fontSize: 10 }} />
+                  <YAxis domain={[scaleMin, scaleMax]} tick={{ fill: "var(--muted)", fontSize: 10 }} />
+                  <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(100,116,139,.10)" }}
+                           formatter={(value) => [`${value} / ${scaleMax}`, "Score"]} />
+                  <Bar dataKey="score" radius={[6, 6, 0, 0]}>
+                    {skillData.map((entry) => <Cell key={entry.key} fill={entry.colour} />)}
+                    <LabelList dataKey="score" position="top" fill="var(--text)" fontSize={10} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-1">
+              {skillData.map((entry) => (
+                <span key={entry.key} className="text-[10px] text-muted flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full" style={{ background: entry.colour }} />
+                  {entry.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {speakingData.length >= 3 && (
+          <div className="ds-inset p-3">
+            <h3 className="text-xs font-bold mb-1">Speaking dimensions</h3>
+            <p className="text-[10px] text-muted mb-2">The measured parts that contribute to the speaking result.</p>
+            <div className="h-64" role="img" aria-label="Radar chart comparing speaking dimensions">
+              <ResponsiveContainer width="100%" height="100%">
+                <RadarChart data={speakingData} outerRadius="65%">
+                  <defs>
+                    <linearGradient id="speakingRadarFill" x1="0" y1="0" x2="1" y2="1">
+                      <stop offset="0%" stopColor="#7c3aed" stopOpacity={0.62} />
+                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0.24} />
+                    </linearGradient>
+                  </defs>
+                  <PolarGrid stroke="var(--border)" />
+                  <PolarAngleAxis dataKey="dimension" tick={{ fill: "var(--muted)", fontSize: 9 }} />
+                  <Radar dataKey="score" stroke="#7c3aed" strokeWidth={2.5}
+                         fill="url(#speakingRadarFill)" fillOpacity={1} dot={{ fill: "#06b6d4", r: 3 }} />
+                  <Tooltip contentStyle={tooltipStyle}
+                           formatter={(value) => [`${value} / ${scaleMax}`, "Score"]} />
+                </RadarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {sectionData.length >= 2 && (
+          <div className="ds-inset p-3 lg:col-span-2">
+            <h3 className="text-xs font-bold mb-1">Section comparison</h3>
+            <p className="text-[10px] text-muted mb-2">Every scored section, displayed without changing its weight.</p>
+            <div className="h-72" role="img" aria-label="Bar chart comparing section scores">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={sectionData} layout="vertical" margin={{ top: 5, right: 20, left: 30, bottom: 5 }}>
+                  <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" domain={[scaleMin, scaleMax]} tick={{ fill: "var(--muted)", fontSize: 10 }} />
+                  <YAxis type="category" dataKey="name" width={130} tick={{ fill: "var(--muted)", fontSize: 10 }} />
+                  <Tooltip contentStyle={tooltipStyle} cursor={{ fill: "rgba(100,116,139,.10)" }}
+                           formatter={(value) => [`${value} / ${scaleMax}`, "Score"]} />
+                  <Bar dataKey="score" radius={[0, 6, 6, 0]}>
+                    {sectionData.map((entry) => <Cell key={entry.name} fill={entry.colour} />)}
+                    <LabelList dataKey="score" position="right" fill="var(--text)" fontSize={10} />
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="flex flex-wrap justify-center gap-x-3 gap-y-1 mt-2 text-[10px] text-muted">
+              {[
+                ["#dc2626", "Needs attention (0–39)"],
+                ["#d97706", "Developing (40–59)"],
+                ["#2563eb", "Good (60–79)"],
+                ["#16a34a", "Strong (80–100)"],
+              ].map(([colour, label]) => (
+                <span key={label} className="flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full" style={{ background: colour }} />{label}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </Section>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</div>
+      <div className="mt-0.5 whitespace-pre-wrap">{value}</div>
     </div>
   );
 }

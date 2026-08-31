@@ -40,7 +40,7 @@ _ADVICE_UNITS = (
     "question", "session", "round",
 )
 # Tokens that mark a number as an assessment figure: a score/percentage/band.
-_ASSESS_AFTER = ("out of", "/80", "/ 80", "%", "percent", "point", "band")
+_ASSESS_AFTER = ("out of", "/100", "/ 100", "%", "percent", "point", "band")
 _ASSESS_BEFORE = ("score", "scored", "overall", "band", "rated", "rating")
 
 # Semantic identity of each dimension, so a paraphrased biggest lever is
@@ -101,7 +101,7 @@ def check(draft: NarrationDraft, evidence: NarrationEvidence) -> NarrationDraft:
     # numbers and small counts are allowed. See module docstring.
     supplied = _supplied_numbers(evidence)
     scale = evidence.attempt.get("scale") or [20, 80]
-    scale_min = float(scale[0]) if scale else 20.0
+    scale_min = float(scale[0]) if scale else 0.0
     for blob in (headline, summary, focus, action, *caveats):
         low = blob.lower()
         for m in _NUM.finditer(blob):

@@ -290,8 +290,8 @@ def typical_minutes(blueprint: "FormatBlueprint") -> int:
 # The engine's own scale. Mirrored rather than imported so this module stays
 # free of the scoring path -- ``test_formats_vendor.py`` asserts the two agree,
 # so a change to the engine cannot silently desynchronise the presentation.
-INTERNAL_MIN = 20.0
-INTERNAL_MAX = 80.0
+INTERNAL_MIN = 0.0
+INTERNAL_MAX = 100.0
 
 
 def _fraction(internal: float) -> float:
@@ -317,13 +317,11 @@ class ScaleBlueprint:
     bands: tuple[tuple[float, str], ...]
     # Whether a *number* on this scale can be justified at all.
     #
-    # True only where the internal scale was built on this range, which is the
-    # case for exactly one format: the engine's 20-80 was designed Versant-like
-    # from the start, so restating a score on it is arithmetic rather than a
-    # claim.
+    # True only where a numeric projection is part of this product's own
+    # presentation. Vendor concordance is never implied by this flag.
     #
     # False everywhere else, and then no number is published. Stretching our
-    # 20-80 linearly onto somebody else's 0-100 asserts that our floor is their
+    # 0-100 linearly onto somebody else's range asserts that our floor is their
     # floor and our ceiling is their ceiling -- a perfect concordance, which is
     # the one thing we know we have not established. It also inflates: an
     # internal 70, respectable and barely above the ready threshold, would come
@@ -405,11 +403,11 @@ class FormatBlueprint:
 # counts as ready. A single definition also means one place to refit them when
 # the study comes back.
 _BANDS: tuple[tuple[float, str, str], ...] = (
-    (72.0, "Likely to clear",
+    (86.7, "Likely to clear",
      "On this evidence you would probably get through a round of this shape."),
-    (60.0, "Borderline",
+    (66.7, "Borderline",
      "Could go either way on the day. The gap below is the one to close first."),
-    (45.0, "Not yet",
+    (41.7, "Not yet",
      "A round of this shape would probably stop you today. It is closeable, "
      "and the diagnosis below says where to start."),
     (0.0, "Well short",
@@ -1238,7 +1236,7 @@ TEMPLATE_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
             "Every heard prompt plays exactly once.",
             "Story retelling and open questions want a whole answer, not a word.",
         ),
-        scale=ScaleBlueprint(20, 80, _VENDOR_BANDS, anchored=True),
+        scale=ScaleBlueprint(0, 100, _VENDOR_BANDS, anchored=True),
         subscores=_SPEAKING_SUBSCORES,
         not_included=(
             "Every part of this is listening -- you hear the prompt and speak "
@@ -1310,7 +1308,7 @@ TEMPLATE_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
             "The reconstruction passages disappear - that is the point of them.",
             "One score per skill, not one score for the lot.",
         ),
-        scale=ScaleBlueprint(20, 80, _VENDOR_BANDS, anchored=True),
+        scale=ScaleBlueprint(0, 100, _VENDOR_BANDS, anchored=True),
         # No vendor sub-scores on purpose. This format's report is the
         # four-skill rollup, and publishing both would put two different
         # numbers labelled Listening on the same page.
@@ -1397,7 +1395,7 @@ TEMPLATE_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
             "All four skills, workplace material in every part.",
             "The writing parts are the longest and carry the most weight.",
         ),
-        scale=ScaleBlueprint(20, 80, _VENDOR_BANDS, anchored=True),
+        scale=ScaleBlueprint(0, 100, _VENDOR_BANDS, anchored=True),
         subscores=(),
         not_included=_FOUR_SKILL_NOTE,
     ),

@@ -1,0 +1,21 @@
+fastapi>=0.115.6
+uvicorn[standard]>=0.34.0
+beanie==1.30.0
+motor>=3.5,<3.8
+pymongo>=4.10,<5
+dnspython>=2,<3
+SQLAlchemy>=2.0,<2.1
+pydantic>=2.10
+pydantic-settings==2.7.0
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-multipart==0.0.20
+httpx==0.28.1
+email-validator==2.2.0
+numpy==2.2.1
+requests==2.32.3
+
+# Lightweight local speech recognition. This supplies transcript text, word
+# timestamps and confidence without the Torch/Wav2Vec2 pronunciation stack.
+faster-whisper==1.1.1

@@ -10,11 +10,13 @@ Two kinds of documents:
 from __future__ import annotations
 
 import asyncio
+import warnings
 from types import SimpleNamespace
 from typing import Any
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from beanie import Document, init_beanie
+from pydantic import create_model
 
 from app.config import settings
 
@@ -31,13 +33,11 @@ def control_db() -> AsyncIOMotorDatabase:
 
 
 def tenant_db_name(slug: str) -> str:
-    """Backward-compat name; now unused since all data lives in control DB."""
     return f"{settings.tenant_schema_prefix}{slug}"
 
 
 def tenant_db(slug: str) -> AsyncIOMotorDatabase:
-    """All tenant data now lives in the control database with prefixed collections."""
-    return control_db()
+    return client[tenant_db_name(slug)]
 
 
 # ---------------------------------------------------------------------------
@@ -48,24 +48,43 @@ _client_inited = False
 
 
 async def init_mongo() -> None:
-    """Ping and register ALL documents with the single CommunicationIQ database. Idempotent."""
+    """Ping and register control-plane and shared-content documents."""
     global _client_inited
     if _client_inited:
         return
     await client.admin.command("ping")
     from app.models.platform import CONTROL_DOCUMENTS
-    from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
-    all_docs = CONTROL_DOCUMENTS + TENANT_DOCUMENTS + SHARED_DOCUMENTS
-    await init_beanie(database=control_db(), document_models=all_docs)
+    from app.models.tenant import SHARED_DOCUMENTS
+    await init_beanie(database=control_db(),
+                      document_models=CONTROL_DOCUMENTS + SHARED_DOCUMENTS)
     _client_inited = True
     _stamp_platform_owners()
 
 
 # ---------------------------------------------------------------------------
-# All models now live in the single CommunicationIQ database.
-# ensure_tenant_models returns the base classes (already registered with
-# control_db in init_mongo).  No per-tenant subclassing needed.
+# Tenant document bundles are initialized lazily per slug. Separate subclasses
+# prevent Beanie's database binding from being overwritten when another tenant
+# is opened in the same process.
 # ---------------------------------------------------------------------------
+
+_tenant_bundles: dict[str, SimpleNamespace] = {}
+_tenant_locks: dict[str, asyncio.Lock] = {}
+
+
+def _tenant_subclasses(slug: str, documents: list[type[Document]]) -> list[type[Document]]:
+    bound = []
+    for base in documents:
+        fields = {name: (field.annotation, field)
+                  for name, field in base.model_fields.items()}
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore", message=r'Field name ".*" in ".*" shadows an attribute')
+            subclass = create_model(
+                base.__name__, __base__=base, __module__=base.__module__, **fields)
+        subclass.__qualname__ = f"{base.__name__}_{slug}"
+        subclass.Settings = type("Settings", (), {"name": base.Settings.name})
+        bound.append(subclass)
+    return bound
 
 async def ensure_tenant_models(slug: str) -> SimpleNamespace:
     """Return all Document classes for a tenant — now just the base classes.
@@ -73,20 +92,27 @@ async def ensure_tenant_models(slug: str) -> SimpleNamespace:
     All data lives in the single CommunicationIQ database.  Tenant isolation
     is handled by querying with ``tenant_id`` filters, not separate databases.
     """
-    from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
-    ns = {}
-    for cls in TENANT_DOCUMENTS + SHARED_DOCUMENTS:
-        ns[cls.__name__] = cls
-    return SimpleNamespace(**ns)
+    cached = _tenant_bundles.get(slug)
+    if cached is not None:
+        return cached
+    lock = _tenant_locks.setdefault(slug, asyncio.Lock())
+    async with lock:
+        cached = _tenant_bundles.get(slug)
+        if cached is not None:
+            return cached
+        from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
+        documents = _tenant_subclasses(
+            slug, list(TENANT_DOCUMENTS) + list(SHARED_DOCUMENTS))
+        await init_beanie(database=tenant_db(slug), document_models=documents)
+        bundle = SimpleNamespace(**{model.__name__: model for model in documents})
+        _tenant_bundles[slug] = bundle
+        _stamp_tenant_owners()
+        return bundle
 
 
 def get_tenant_models(slug: str) -> SimpleNamespace:
-    """Synchronous accessor."""
-    from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
-    ns = {}
-    for cls in TENANT_DOCUMENTS + SHARED_DOCUMENTS:
-        ns[cls.__name__] = cls
-    return SimpleNamespace(**ns)
+    """Synchronous accessor after initialization."""
+    return _tenant_bundles[slug]
 
 
 # ---------------------------------------------------------------------------
@@ -303,10 +329,14 @@ class Session:
         pass
 
     def add(self, obj: Any) -> None:
+        bound = self._resolve(type(obj))
+        if bound is not type(obj):
+            obj = bound.model_validate(obj.model_dump())
         self._new.append(obj)
 
     def add_all(self, objs: list) -> None:
-        self._new.extend(objs)
+        for obj in objs:
+            self.add(obj)
 
     def _track(self, obj: Any) -> Any:
         """Record a Beanie Document so commit() can persist any changes."""

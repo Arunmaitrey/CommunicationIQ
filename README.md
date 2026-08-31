@@ -1,6 +1,6 @@
 # CommunicationIQ
 
-Communication assessment and training platform for placement readiness. AI-powered scoring of pronunciation, fluency, grammar, content, and listening comprehension. Multi-tenant SaaS with data isolation by `tenant_id` on MongoDB Atlas.
+Communication assessment and training platform for placement readiness. Whisper-backed transcription supports accuracy, fluency, grammar, content, and listening-comprehension evidence. Multi-tenant SaaS with data isolation by `tenant_id` on MongoDB Atlas.
 
 ## Architecture
 
@@ -48,7 +48,7 @@ Frontend (Next.js 14)       Backend (FastAPI)           MongoDB Atlas
 | Backend | Python 3.14+, FastAPI, uvicorn |
 | Database | MongoDB Atlas (Beanie ODM + Motor) |
 | Auth | JWT (python-jose), bcrypt |
-| Speech | faster-whisper, wav2vec2 (optional Tier 1) |
+| Speech | faster-whisper (CPU/int8 by default) |
 | AI Narration | Anthropic Claude / OpenAI-compatible / NVIDIA NIM |
 
 ## Quick Start

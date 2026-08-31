@@ -69,19 +69,18 @@ DIMENSIONS_BY_TASK: dict[str, frozenset[str]] = {
     # the candidate produced the right voice. Grammar, and nothing spoken.
     "voice_change": frozenset({"grammar"}),
     "read_aloud": frozenset({"accuracy", "completeness", "disfluency",
-                             "fluency", "latency", "pronunciation"}),
+                             "fluency", "latency"}),
     "repeat_sentence": frozenset({"accuracy", "completeness", "disfluency",
-                                  "fluency", "latency", "pronunciation"}),
+                                  "fluency", "latency"}),
     # Hear a gapped/flawed sentence, say the whole correct one. Scored like
     # Repeat Sentence -- the target is scripted -- and the grammar signal is
     # carried by accuracy: the target IS the grammatical sentence.
     "spoken_completion": frozenset({"accuracy", "completeness", "disfluency",
-                                    "fluency", "latency", "pronunciation"}),
+                                    "fluency", "latency"}),
     "spoken_correction": frozenset({"accuracy", "completeness", "disfluency",
-                                    "fluency", "latency", "pronunciation"}),
+                                    "fluency", "latency"}),
 "sentence_build": frozenset({"accuracy", "completeness", "construction",
-                                 "disfluency", "fluency", "grammar", "latency",
-                                 "pronunciation"}),
+                                 "disfluency", "fluency", "grammar", "latency"}),
     "short_answer": frozenset({"content", "disfluency", "fluency", "latency"}),
 "story_retell": frozenset({"accuracy", "completeness", "content", "disfluency",
                                 "fluency", "grammar", "latency"}),

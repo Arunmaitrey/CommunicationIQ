@@ -43,7 +43,7 @@ def build(result, *, l1_language: str = "") -> NarrationEvidence:
         "status": getattr(result, "status", ""),
         "has_overall": overall is not None,
         "overall": round(overall, 1) if overall is not None else None,
-        "scale": [getattr(result, "scale_min", 20), getattr(result, "scale_max", 80)],
+        "scale": [getattr(result, "scale_min", 0), getattr(result, "scale_max", 100)],
         "band_phrase": reporting.band_phrase(overall) if overall is not None else "",
         "calibrated": bool(getattr(result, "calibrated", False)),
         "has_audio": any(getattr(r, "has_audio", False)

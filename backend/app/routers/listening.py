@@ -29,7 +29,7 @@ router = APIRouter(prefix="/student/listening", tags=["listening"],
 
 
 def _score(correct: int, total: int) -> float:
-    """Proportion correct, on the product's internal 20-80 scale.
+    """Proportion correct, on the product's native 0-100 scale.
 
     The same scale as every other measure here, so a Listening score can sit
     beside a Speaking one without a silent change of units. Not calibrated

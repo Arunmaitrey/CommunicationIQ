@@ -66,12 +66,17 @@ async def score_pending(tenant, providers, tenant_id: str | None,
     whether the candidate understood. ``_unscored_reasons`` in the attempts
     router notices the missing dimension and says so.
     """
-    rows = list((await tenant.execute(
-        select(Response, ProfileSection.task_type)
-        .join(ProfileSection, ProfileSection.id == Response.section_id)
-        .where(Response.attempt_id == attempt_id,
-               ProfileSection.task_type.in_(sorted(SCORED_HERE)))
-    )).all())
+    responses = list((await tenant.execute(
+        select(Response).where(Response.attempt_id == attempt_id)
+    )).scalars().all())
+    section_ids = [r.section_id for r in responses if r.section_id]
+    sections = {s.id: s for s in (await tenant.execute(
+        select(ProfileSection).where(ProfileSection.id.in_(section_ids or [""]))
+    )).scalars().all()}
+    rows = [(response, sections[response.section_id].task_type)
+            for response in responses
+            if response.section_id in sections
+            and sections[response.section_id].task_type in SCORED_HERE]
     if not rows:
         return 0
 

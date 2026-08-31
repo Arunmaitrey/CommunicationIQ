@@ -52,20 +52,18 @@ class SkillModule:
 
 async def _count_tasks(models: SimpleNamespace, types: tuple[str, ...]) -> int:
     """Count published task items of the given types using Beanie."""
-    items = await models.TaskItem.find(
+    return await models.TaskItem.find(
         In(models.TaskItem.task_type, list(types)),
         models.TaskItem.status == "published",
-    ).to_list()
-    return len(items)
+    ).count()
 
 
 async def _count_quiz(models: SimpleNamespace, categories: tuple[str, ...]) -> int:
     """Count published quiz items in the given categories using Beanie."""
-    items = await models.QuizItem.find(
+    return await models.QuizItem.find(
         In(models.QuizItem.category, list(categories)),
         models.QuizItem.status == "published",
-    ).to_list()
-    return len(items)
+    ).count()
 
 
 async def _mastery(models: SimpleNamespace, user_id: str,
@@ -81,9 +79,9 @@ async def _mastery(models: SimpleNamespace, user_id: str,
 
 
 async def _count_writing_prompts(models: SimpleNamespace) -> int:
-    return len(await models.WritingPrompt.find(
+    return await models.WritingPrompt.find(
         models.WritingPrompt.status == "published"
-    ).to_list())
+    ).count()
 
 
 async def modules_for(models: SimpleNamespace, user_id: str) -> list[SkillModule]:
@@ -125,13 +123,14 @@ async def _speaking(models: SimpleNamespace, user_id: str, items: int) -> SkillM
         key="speaking", label="Speaking",
         status="live" if items >= MIN_ITEMS_FOR_LIVE else "partial",
         summary=("Read aloud, repeat, build sentences, answer and retell. "
-                 "Scored on pronunciation, fluency, timing and content."),
-        measures=["pronunciation", "fluency", "response latency", "grammar",
-                  "content"],
+                 "Scored from transcript accuracy, fluency, timing, grammar, "
+                 "content and completeness."),
+        measures=["accuracy", "fluency", "response latency", "grammar",
+                  "content", "completeness"],
         item_count=items,
         href="/simulate",
         mastery=await _mastery(models, user_id,
-                               ("pronunciation", "fluency", "response_latency")),
+                               ("accuracy", "fluency", "response_latency")),
         mastery_basis="Measured directly from your recordings.",
     )
 

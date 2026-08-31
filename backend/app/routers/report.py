@@ -24,7 +24,7 @@ router = APIRouter(prefix="/report", tags=["report"],
                    dependencies=[Depends(require_roles("student", "tenant_admin", "super_admin"))])
 
 
-def _skill_bar(label: str, score: float, scale_max: float = 80, width: int = 40) -> str:
+def _skill_bar(label: str, score: float, scale_max: float = 100, width: int = 40) -> str:
     """A text-based horizontal bar for a score."""
     if score is None:
         return f"{label}: —"

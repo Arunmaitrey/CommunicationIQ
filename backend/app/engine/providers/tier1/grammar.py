@@ -25,8 +25,8 @@ import re
 
 from app.engine.contracts.types import GrammarResult, ProviderMeta
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 # Errors that are unambiguous in any variety of English. Each entry is
 # (pattern, error type, what to say instead, severity 1-3).

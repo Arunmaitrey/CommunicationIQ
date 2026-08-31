@@ -348,8 +348,8 @@ def select_next(theta: float, candidates: list[ItemParameters],
     return max(usable, key=lambda c: information(theta, c.difficulty, c.discrimination))
 
 
-def ability_from_scores(scores: list[float], scale_min: float = 20.0,
-                        scale_max: float = 80.0) -> float:
+def ability_from_scores(scores: list[float], scale_min: float = 0.0,
+                        scale_max: float = 100.0) -> float:
     """A rough ability estimate from presentation scores, for a first item.
 
     Used only to seed selection before a student has answered anything in this

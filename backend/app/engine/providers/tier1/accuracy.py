@@ -22,8 +22,8 @@ from difflib import SequenceMatcher
 from app.engine.contracts.types import (AccuracyResult, ProviderMeta,
                                         TranscriptResult)
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 # Tasks with a right answer to align against.
 #
@@ -187,7 +187,11 @@ class ReferenceMatchAccuracy:
                     errors.append({"expected": "", "heard": heard[offset],
                                    "kind": "insertion", **heard_at(offset)})
 
-        accuracy = matched / len(reference)
+        # Word-error accuracy must charge insertions as well as substitutions
+        # and deletions.  SequenceMatcher's equal-word ratio alone allowed an
+        # answer containing all reference words plus arbitrary extra words to
+        # receive full accuracy.
+        accuracy = max(0.0, 1.0 - len(errors) / len(reference))
         score = SCALE_MIN + accuracy * (SCALE_MAX - SCALE_MIN)
 
         # Confidence follows the recogniser. If it was unsure of the words it

@@ -38,16 +38,19 @@ from app.models.tenant import (Attempt, FeatureRecord, ProfileSection,
 
 log = logging.getLogger(__name__)
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 # How the overall number is composed. Only dimensions that were actually
 # measured take part, and the weights are renormalised over those — so an
 # attempt scored by Tier 0 alone still produces an honest overall from the two
 # dimensions it could reach.
-WEIGHTS = {"pronunciation": 0.20, "accuracy": 0.20, "fluency": 0.17,
-           "latency": 0.11, "disfluency": 0.08, "grammar": 0.09, "content": 0.07,
-           "completeness": 0.08}
+# Whisper provides the transcript and timestamps used by these measures.  It
+# does not provide phoneme-level pronunciation evidence, so pronunciation is
+# deliberately excluded instead of being guessed from transcript similarity.
+WEIGHTS = {"accuracy": 0.25, "fluency": 0.2125, "latency": 0.1375,
+           "grammar": 0.1125, "disfluency": 0.10,
+           "completeness": 0.10, "content": 0.0875}
 
 # Response latency bands, in milliseconds from the beep to the first speech.
 LATENCY_EXCELLENT = 800
@@ -322,6 +325,15 @@ async def score_response(tenant: Session, providers: Providers,
             )
             if accuracy.confidence > 0:
                 add("accuracy", accuracy.score, accuracy.confidence, accuracy_meta)
+                # Sentence Build is evaluated by the accuracy provider's
+                # construction path: coverage of the supplied words plus
+                # their order in the accepted sentence.  Keep accuracy for
+                # the existing composite, and persist the same evidence under
+                # its honest reporting name so the result contract does not
+                # claim that construction was never measured.
+                if accuracy.coverage is not None and accuracy.order is not None:
+                    add("construction", accuracy.score, accuracy.confidence,
+                        accuracy_meta)
         except ProviderUnavailable:
             unscored["accuracy"] = _no_provider("word-accuracy")
 
@@ -352,30 +364,6 @@ async def score_response(tenant: Session, providers: Providers,
                 add("grammar", grammar.score, grammar.confidence, grammar_meta)
         except ProviderUnavailable:
             unscored["grammar"] = _no_provider("grammar")
-
-    pronunciation = None
-    # Only where there is a target the student was asked to produce. Scoring
-    # articulation against a transcript the recogniser guessed would be marking
-    # its own homework.
-    if reference and task_type in SCRIPTED_FOR_PRONUNCIATION:
-        try:
-            pronunciation, pron_meta = await providers.invoke(
-                Capability.PRONUNCIATION, tenant_id,
-                lambda impl: impl.score(ref, reference_text=reference,
-                                        l1_language=""),
-            )
-            # Measured at ingest. A poor signal-to-noise ratio cuts how far
-            # the pronunciation number is trusted, because this GOP variant
-            # cannot otherwise tell a quiet speaker from a noisy room.
-            snr = _snr_of(audio)
-            if snr is not None:
-                pronunciation.confidence = round(
-                    pronunciation.confidence * _snr_penalty(snr), 2)
-            if pronunciation.confidence > 0:
-                add("pronunciation", pronunciation.score, pronunciation.confidence,
-                    pron_meta)
-        except ProviderUnavailable:
-            unscored["pronunciation"] = _no_provider("pronunciation")
 
     relevance = None
     if transcript.text and task_type in {"story_retell", "open_response", "short_answer"}:
@@ -462,9 +450,6 @@ async def score_response(tenant: Session, providers: Providers,
     if relevance is not None:
         metrics["content_coverage"] = relevance.coverage
         metrics["off_topic"] = relevance.off_topic
-    if pronunciation is not None:
-        metrics["unclear_words"] = len(pronunciation.mispronounced_words)
-
     feature = FeatureRecord(
         response_id=response.id,
         transcript=transcript.text,
@@ -477,8 +462,7 @@ async def score_response(tenant: Session, providers: Providers,
         disfluencies=disfluency.events if disfluency else [],
         # Per-word clarity, which is what the listen-back highlights. Named
         # for the contract; per-word in fact, and labelled as such.
-        phoneme_scores=(pronunciation.phonemes if pronunciation
-                        else (relevance.key_points if relevance else [])),
+        phoneme_scores=(relevance.key_points if relevance else []),
         # And separately, what the words themselves were measured against.
         # These two answer different questions -- "was this word clear" and
         # "was this the right word" -- and serving one under the other's name
@@ -543,14 +527,14 @@ async def pending_responses(tenant: Session, attempt_id: str) -> list[str]:
     if not responses:
         return []
     ids = [r.id for r in responses]
-    audible = {a.response_id for a in (await tenant.execute(
+    audible = set((await tenant.execute(
         select(ResponseAudio.response_id).where(
             ResponseAudio.response_id.in_(ids),
             ResponseAudio.deleted_at.is_(None))
-    )).scalars().all()}
-    featured = {f.response_id for f in (await tenant.execute(
+    )).scalars().all())
+    featured = set((await tenant.execute(
         select(FeatureRecord.response_id).where(FeatureRecord.response_id.in_(ids))
-    )).scalars().all()}
+    )).scalars().all())
     return [r.id for r in responses
             if r.id in audible and r.id not in featured]
 
@@ -638,26 +622,33 @@ async def finalise_attempt(tenant: Session, attempt_id: str) -> AttemptOutcome:
 async def update_mastery(tenant: Session, user_id: str,
                          dimensions: dict[str, float]) -> None:
     """Move mastery on evidence, using Bayesian Knowledge Tracing (ENG-13)."""
+    rows_by_skill: dict[str, SkillMastery] = {}
     for dimension, value in dimensions.items():
         skill = DIMENSION_TO_SKILL.get(dimension)
         if skill is None:
             continue
 
-        row = (await tenant.execute(
-            select(SkillMastery).where(SkillMastery.user_id == user_id,
-                                       SkillMastery.skill == skill)
-        )).scalar_one_or_none()
+        row = rows_by_skill.get(skill)
+        if row is None:
+            row = (await tenant.execute(
+                select(SkillMastery).where(SkillMastery.user_id == user_id,
+                                           SkillMastery.skill == skill)
+            )).scalars().first()
 
         if row is None:
             prior = bkt.parameters_for(skill).p_init
             posterior = bkt.update_from_score(prior, value, skill)
-            tenant.add(SkillMastery(
+            row = SkillMastery(
                 user_id=user_id, skill=skill, mastery=round(posterior, 4),
                 baseline=round(posterior, 4),
                 confidence=bkt.confidence_after(1), observations=1,
                 last_change=0.0,
-            ))
+            )
+            tenant.add(row)
+            rows_by_skill[skill] = row
             continue
+
+        rows_by_skill[skill] = row
 
         posterior = bkt.update_from_score(row.mastery, value, skill)
         row.last_change = round(posterior - row.mastery, 4)
@@ -668,7 +659,7 @@ async def update_mastery(tenant: Session, user_id: str,
             row.baseline = round(posterior, 4)
         row.updated_at = datetime.now(timezone.utc)
 
-    await tenant.commit()
+    # finalise_attempt commits mastery and the attempt status atomically.
 
 
 class AttemptScorer:
@@ -708,9 +699,9 @@ def latency_score(onset_ms: int) -> float:
         return SCALE_MIN
     if onset_ms <= LATENCY_GOOD:
         span = LATENCY_GOOD - LATENCY_EXCELLENT
-        return SCALE_MAX - 12.0 * (onset_ms - LATENCY_EXCELLENT) / span
+        return SCALE_MAX - 20.0 * (onset_ms - LATENCY_EXCELLENT) / span
     span = LATENCY_POOR - LATENCY_GOOD
-    return (SCALE_MAX - 12.0) - (SCALE_MAX - 12.0 - SCALE_MIN) * (onset_ms - LATENCY_GOOD) / span
+    return (SCALE_MAX - 20.0) - (SCALE_MAX - 20.0 - SCALE_MIN) * (onset_ms - LATENCY_GOOD) / span
 
 
 def average_dimensions(outcomes: list[ResponseOutcome]) -> dict[str, float]:
@@ -821,11 +812,11 @@ def quality_verdict(audio: ResponseAudio) -> str:
 
 
 def band_label(score: float) -> str:
-    if score >= 65:
+    if score >= 75:
         return "Strong"
-    if score >= 51:
+    if score >= 51.7:
         return "Competent"
-    if score >= 36:
+    if score >= 26.7:
         return "Developing"
     return "Beginning"
 

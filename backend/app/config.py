@@ -97,6 +97,14 @@ class Settings(BaseSettings):
     # DPDP: recordings are not kept forever. The sweeper reads this.
     recording_retention_days: int = 30
 
+    # Lightweight Faster Whisper engine; no Torch/Wav2Vec2 pronunciation
+    # model is required.
+    whisper_model: str = "small.en"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+    whisper_cpu_threads: int = 0
+    whisper_warm_on_startup: bool = True
+
 
 
     # --- AI Feedback Narrator (explains the frozen scores; never computes one) ---

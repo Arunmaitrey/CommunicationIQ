@@ -43,7 +43,7 @@ from app.gamification import engine as game
 from app.models.tenant import (Attempt, ConsentRecord, ExamReview, FeatureRecord,
                                 Invitation, ProfileSection, Response,
                                 ResponseAudio, ScoreRecord, SimulationProfile,
-                                TaskItem)
+                                TaskItem, QuizItem, WritingPrompt)
 from app.schemas import (AnswerSubmission, AttemptResult, CandidateResume,
                          NarrationOut, PromptResponse, ResponseMetrics,
                          ReviewRequest, ReviewOut, RunnerItem, RunnerPayload,
@@ -1634,18 +1634,21 @@ async def _run_game_hook(session, platform, principal, attempt, outcome) -> None
     their report, so it is logged and swallowed.
     """
     try:
-        config = await game.config_for(platform, principal.tenant_id)
+        config = await game.config_for(principal.tenant_id)
 
-        previous = (await session.execute(
-            select(ScoreRecord.score)
-            .join(Attempt, Attempt.id == ScoreRecord.attempt_id)
-            .where(Attempt.user_id == principal.user_id,
-                   Attempt.profile_id == attempt.profile_id,
-                   Attempt.id != attempt.id,
-                   ScoreRecord.dimension == "overall",
-                   ScoreRecord.response_id.is_(None))
+        prior_ids = [row.id for row in (await session.execute(
+            select(Attempt).where(Attempt.user_id == principal.user_id,
+                                  Attempt.profile_id == attempt.profile_id,
+                                  Attempt.id != attempt.id)
+        )).scalars().all()]
+        prior_scores = list((await session.execute(
+            select(ScoreRecord).where(
+                ScoreRecord.attempt_id.in_(prior_ids or [""]),
+                ScoreRecord.dimension == "overall",
+                ScoreRecord.response_id.is_(None))
             .order_by(ScoreRecord.score.desc()).limit(1)
-        )).scalars().first()
+        )).scalars().all())
+        previous = prior_scores[0].score if prior_scores else None
 
         sections = list((await session.execute(
             select(ProfileSection.task_type)
@@ -1681,7 +1684,7 @@ def _speech_models_present() -> bool:
     that is where its absence is felt. Import failures are cached by Python
     after the first attempt, so this is cheap.
     """
-    for name in ("faster_whisper", "torch"):
+    for name in ("faster_whisper",):
         try:
             __import__(name)
         except Exception:  # noqa: BLE001 - absent or broken, same conclusion
@@ -2199,7 +2202,7 @@ async def _diagnosis_for(session: TenantSession, attempt: Attempt,
         if r.response_id is not None:
             counts[r.dimension] = counts.get(r.dimension, 0) + 1
     return app_diagnosis.diagnose(
-        dims, scale_max=overall.scale_max if overall else 80.0,
+        dims, scale_max=overall.scale_max if overall else 100.0,
         response_counts=counts, available_practice=available_practice)
 
 
@@ -2240,6 +2243,16 @@ async def _result(session: TenantSession, attempt: Attempt,
         select(TaskItem).where(TaskItem.id.in_([r.item_id for r in responses if r.item_id] or [""]))
     )).scalars().all()}
 
+    quiz_items = {i.id: i for i in (await session.execute(
+        select(QuizItem).where(QuizItem.id.in_(
+            [r.quiz_item_id for r in responses if r.quiz_item_id] or [""]))
+    )).scalars().all()}
+
+    writing_prompts = {p.id: p for p in (await session.execute(
+        select(WritingPrompt).where(WritingPrompt.id.in_(
+            [r.prompt_id for r in responses if r.prompt_id] or [""]))
+    )).scalars().all()}
+
     per_response: dict[str, dict[str, float]] = {}
     for row in scores:
         if row.response_id:
@@ -2262,15 +2275,39 @@ async def _result(session: TenantSession, attempt: Attempt,
             noisy_count += 1
         section = sections.get(r.section_id or "")
         item = items.get(r.item_id or "")
+        quiz_item = quiz_items.get(r.quiz_item_id or "")
+        writing_prompt = writing_prompts.get(r.prompt_id or "")
         audio = audio_rows.get(r.id)
+        response_scores = per_response.get(r.id, {})
+        submitted = feature.transcript if feature else ""
+        correct_answer = ""
+        if quiz_item is not None:
+            options = list(quiz_item.options or [])
+            if r.selected_index is not None and 0 <= r.selected_index < len(options):
+                submitted = str(options[r.selected_index])
+            if 0 <= quiz_item.correct_index < len(options):
+                correct_answer = str(options[quiz_item.correct_index])
+            if section and section.task_type == "sentence_completion":
+                correct_answer = ", ".join(str(value) for value in options)
+        prompt_text = (_prompt_text_for(section, item) if item is not None
+                       else quiz_item.stem if quiz_item is not None
+                       else writing_prompt.prompt if writing_prompt is not None
+                       else "")
         rows.append(ResponseMetrics(
             response_id=r.id,
+            section_id=r.section_id or "",
             position=r.position,
             task_type=section.task_type if section else "",
             # Safe to reveal now: the attempt is over and the score is fixed.
             # The same field choice as when it was served, so the report shows
             # the question that was asked rather than the answer that was wanted.
-            prompt_text=_prompt_text_for(section, item),
+            prompt_text=prompt_text,
+            submitted_answer=submitted,
+            correct_answer=correct_answer,
+            question_score=(round(sum(response_scores.values()) / len(response_scores), 1)
+                            if response_scores else None),
+            word_count=metrics.get("word_count"),
+            content_score=response_scores.get("content"),
             skipped=r.skipped,
             onset_ms=metrics.get("onset_ms"),
             speech_ms=metrics.get("speech_ms"),
@@ -2280,7 +2317,7 @@ async def _result(session: TenantSession, attempt: Attempt,
             pause_count=metrics.get("pause_count"),
             longest_pause_ms=metrics.get("longest_pause_ms"),
             quality=quality,
-            scores=per_response.get(r.id, {}),
+            scores=response_scores,
             ended_mid_speech=bool(metrics.get("ended_mid_speech")),
             ended_by=r.ended_by or "",
             completeness=metrics.get("completeness"),
@@ -2394,7 +2431,7 @@ async def _result(session: TenantSession, attempt: Attempt,
     for row in scores:
         if row.response_id is not None:
             counts[row.dimension] = counts.get(row.dimension, 0) + 1
-    scale_max = overall_row.scale_max if overall_row else 80.0
+    scale_max = overall_row.scale_max if overall_row else 100.0
 
     # The practice profiles this tenant can actually start. A dimension
     # whose practice is missing here cannot become the primary, and no
