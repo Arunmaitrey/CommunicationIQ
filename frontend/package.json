@@ -12,6 +12,7 @@
     "clean": "rimraf .next"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
     "lucide-react": "^0.414.0",
     "next": "14.2.35",
     "react": "18.3.1",

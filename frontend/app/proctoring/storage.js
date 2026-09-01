@@ -1,26 +1,28 @@
-const getStorageKey = (examId) => `proctor_state:${examId || 'unknown_exam'}`;
 
-export const readPersistedState = (examId) => {
+const getStorageKey = (examId, candidateId) =>
+  `proctor_state:${candidateId || 'unknown_candidate'}:${examId || 'unknown_exam'}`;
+
+export const readPersistedState = (examId, candidateId) => {
   try {
-    const raw = window.sessionStorage.getItem(getStorageKey(examId));
+    const raw = window.sessionStorage.getItem(getStorageKey(examId, candidateId));
     return raw ? JSON.parse(raw) : null;
   } catch (error) {
     return null;
   }
 };
 
-export const writePersistedState = (examId, state) => {
+export const writePersistedState = (examId, candidateId, state) => {
   try {
-    window.sessionStorage.setItem(getStorageKey(examId), JSON.stringify(state));
+    window.sessionStorage.setItem(getStorageKey(examId, candidateId), JSON.stringify(state));
   } catch (error) {
     // storage unavailable (quota/private mode) — proctoring still works,
     // it just won't survive a reload.
   }
 };
 
-export const clearPersistedState = (examId) => {
+export const clearPersistedState = (examId, candidateId) => {
   try {
-    window.sessionStorage.removeItem(getStorageKey(examId));
+    window.sessionStorage.removeItem(getStorageKey(examId, candidateId));
   } catch (error) {
     // ignore
   }

@@ -1,22 +1,30 @@
-export const CONFIRM_DURATION_MS = 3000; // default / fallback
-export const MAX_VIOLATIONS = 3;
+
+export const CONFIRM_DURATION_MS = 1000; // default / fallback
+export const MAX_VIOLATIONS = 4;
 export const DETECTION_INTERVAL_MS = 200;
+export const PHONE_DETECTION_INTERVAL_MS = 600; // YOLOv8n (wasm) inference is heavier than face-mesh — poll slower. Raise this further (e.g. 1500-2000) on low-end devices if the UI feels sluggish.
 
 export const VIOLATION_TYPES = {
   NO_FACE: 'no_face',
   MULTIPLE_FACES: 'multiple_faces',
   LOOKING_AWAY: 'looking_away',
   FULLSCREEN_EXIT: 'fullscreen_exit',
+  MOBILE_PHONE: 'mobile_phone',
   TAB_SWITCH: 'tab_switch'
 };
 
 // Per-type sustained-duration before a violation is confirmed. Any type
 // not listed here falls back to CONFIRM_DURATION_MS.
+//
+// TAB_SWITCH is 0 on purpose: it's confirmed the instant the tab is
+// backgrounded, not after a grace window — see detectors/tabSwitch.js for
+// why a duration-based confirm doesn't work reliably for a hidden tab.
 export const CONFIRM_DURATIONS_MS = {
-  [VIOLATION_TYPES.NO_FACE]: 1500,
+  [VIOLATION_TYPES.NO_FACE]: 1000,
   [VIOLATION_TYPES.MULTIPLE_FACES]: 1000,
-  [VIOLATION_TYPES.LOOKING_AWAY]: 1500,
+  [VIOLATION_TYPES.LOOKING_AWAY]: 1000,
   [VIOLATION_TYPES.FULLSCREEN_EXIT]: 2000,
+  [VIOLATION_TYPES.MOBILE_PHONE]: 1000,
   [VIOLATION_TYPES.TAB_SWITCH]: 0
 };
 
@@ -40,8 +48,12 @@ export const VIOLATION_COPY = {
     title: 'Fullscreen Exited',
     body: 'You must stay in fullscreen mode during the exam. Re-enter fullscreen to continue.'
   },
+  [VIOLATION_TYPES.MOBILE_PHONE]: {
+    title: 'Mobile Phone Detected',
+    body: 'A mobile phone was detected in the camera view. Please remove it from view to continue.'
+  },
   [VIOLATION_TYPES.TAB_SWITCH]: {
     title: 'Tab Switch Detected',
-    body: 'Switching tabs or windows is not allowed during the interview. Please stay on this tab.'
+    body: 'You switched away from the exam tab or window. Please stay on this tab for the entire duration of the exam.'
   }
 };
