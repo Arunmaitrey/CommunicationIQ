@@ -1,13 +1,76 @@
 import { VIOLATION_TYPES } from '../constants';
 
 /*
-  Key MediaPipe FaceLandmarker landmark indices used:
-    1   = Nose tip
-    10  = Forehead
-    33  = Left eye
-    152 = Chin
-    263 = Right eye
+  MediaPipe FaceLandmarker landmarks:
+  1   nose tip
+  10  forehead
+  33, 133   left-eye horizontal bounds
+  159, 145  left-eye vertical bounds
+  263, 362  right-eye horizontal bounds
+  386, 374  right-eye vertical bounds
+  152 chin
+
+  Iris landmarks are normally included when FaceLandmarker returns 478 points:
+  468-472 left iris
+  473-477 right iris
 */
+
+const HEAD_ENTER = {
+  horizontal: 0.35,
+  down: 0.5,   // loosened from 0.35 — keyboard glances tilt the head down, give this more room
+  up: -0.15,
+};
+
+const HEAD_EXIT = {
+  horizontal: 0.25,
+  down: 0.35,  // loosened from 0.25 to match HEAD_ENTER.down being loosened
+  up: -0.08,
+};
+
+const GAZE_ENTER = {
+  horizontal: 0.18,
+  vertical: 0.28, // loosened from 0.18 — down-gaze needs more slack for keyboard glances
+};
+
+const GAZE_EXIT = {
+  horizontal: 0.12,
+  vertical: 0.2,  // loosened from 0.12 to match GAZE_ENTER.vertical being loosened
+};
+
+const SMOOTHING_ALPHA = 0.35;
+
+function averageLandmarks(landmarks, indices) {
+  const points = indices.map((index) => landmarks[index]).filter(Boolean);
+
+  if (points.length !== indices.length) {
+    return null;
+  }
+
+  return {
+    x: points.reduce((sum, point) => sum + point.x, 0) / points.length,
+    y: points.reduce((sum, point) => sum + point.y, 0) / points.length,
+  };
+}
+
+function getNormalizedEyePosition(iris, left, right, top, bottom) {
+  const minX = Math.min(left.x, right.x);
+  const maxX = Math.max(left.x, right.x);
+  const minY = Math.min(top.y, bottom.y);
+  const maxY = Math.max(top.y, bottom.y);
+
+  const eyeWidth = maxX - minX;
+  const eyeHeight = maxY - minY;
+
+  if (eyeWidth < 0.005 || eyeHeight < 0.005) {
+    return null;
+  }
+
+  return {
+    // 0 means iris is near the eye centre.
+    horizontal: ((iris.x - minX) / eyeWidth - 0.5) * 2,
+    vertical: ((iris.y - minY) / eyeHeight - 0.5) * 2,
+  };
+}
 
 export function getHeadPose(landmarks) {
   if (!landmarks || landmarks.length < 264) {
@@ -33,68 +96,167 @@ export function getHeadPose(landmarks) {
     return null;
   }
 
-  const horizontalOffset = (nose.x - eyeCenterX) / eyeDistance;
-  const verticalOffset = (nose.y - eyeCenterY) / faceHeight;
-
-  return { horizontalOffset, verticalOffset };
+  return {
+    horizontalOffset: (nose.x - eyeCenterX) / eyeDistance,
+    verticalOffset: (nose.y - eyeCenterY) / faceHeight,
+  };
 }
 
-// Enter/exit are different thresholds (hysteresis) so a single noisy frame
-// right at the boundary doesn't flip state back and forth and keep
-// resetting the 3-second confirmation window.
-const ENTER_THRESHOLDS = { horizontal: 0.35, down: 0.35, up: -0.15 };
-const EXIT_THRESHOLDS = { horizontal: 0.25, down: 0.25, up: -0.08 };
+export function getEyeGaze(landmarks) {
+  // Iris landmarks are unavailable in some FaceLandmarker configurations.
+  if (!landmarks || landmarks.length < 478) {
+    return null;
+  }
 
-const SMOOTHING_ALPHA = 0.35; // 0-1, lower = smoother but slower to react
+  const leftIris = averageLandmarks(landmarks, [468, 469, 470, 471, 472]);
+  const rightIris = averageLandmarks(landmarks, [473, 474, 475, 476, 477]);
 
-/**
- * Stateful tracker: smooths per-frame head-pose readings (EMA) and applies
- * hysteresis so momentary jitter doesn't repeatedly clear/restart the
- * caller's confirmation window. Create one instance per exam session and
- * call .check(faceLandmarks) every frame; call .reset() when the face is
- * lost or proctoring restarts.
- */
+  const leftEye = getNormalizedEyePosition(
+    leftIris,
+    landmarks[33],
+    landmarks[133],
+    landmarks[159],
+    landmarks[145],
+  );
+
+  const rightEye = getNormalizedEyePosition(
+    rightIris,
+    landmarks[362],
+    landmarks[263],
+    landmarks[386],
+    landmarks[374],
+  );
+
+  if (!leftEye || !rightEye) {
+    return null;
+  }
+
+  return {
+    horizontalOffset: (leftEye.horizontal + rightEye.horizontal) / 2,
+    verticalOffset: (leftEye.vertical + rightEye.vertical) / 2,
+  };
+}
+
+function getHeadDirection(horizontal, vertical) {
+  if (horizontal > HEAD_ENTER.horizontal) return 'HEAD_RIGHT';
+  if (horizontal < -HEAD_ENTER.horizontal) return 'HEAD_LEFT';
+  if (vertical > HEAD_ENTER.down) return 'HEAD_DOWN';
+  if (vertical < HEAD_ENTER.up) return 'HEAD_UP';
+
+  return 'FORWARD';
+}
+
+function getGazeDirection(horizontal, vertical) {
+  if (horizontal > GAZE_ENTER.horizontal) return 'EYES_RIGHT';
+  if (horizontal < -GAZE_ENTER.horizontal) return 'EYES_LEFT';
+  if (vertical > GAZE_ENTER.vertical) return 'EYES_DOWN';
+  if (vertical < -GAZE_ENTER.vertical) return 'EYES_UP';
+
+  return 'SCREEN';
+}
+
+/*
+  If your camera preview is mirrored with CSS transform: scaleX(-1),
+  the visual meaning of LEFT and RIGHT is reversed. Detection still works;
+  only the displayed direction label needs swapping.
+*/
+function getAttentionDirection(headDirection, gazeDirection) {
+  if (headDirection !== 'FORWARD') return headDirection;
+  if (gazeDirection !== 'SCREEN') return gazeDirection;
+
+  return 'SCREEN';
+}
+
 export function createLookingAwayTracker() {
-  let smoothedH = 0;
-  let smoothedV = 0;
   let initialized = false;
   let currentlyAway = false;
+
+  let smoothedHeadH = 0;
+  let smoothedHeadV = 0;
+  let smoothedGazeH = 0;
+  let smoothedGazeV = 0;
+
+  function smooth(previous, current) {
+    return previous + SMOOTHING_ALPHA * (current - previous);
+  }
 
   return {
     reset() {
       initialized = false;
       currentlyAway = false;
-      smoothedH = 0;
-      smoothedV = 0;
+      smoothedHeadH = 0;
+      smoothedHeadV = 0;
+      smoothedGazeH = 0;
+      smoothedGazeV = 0;
     },
 
-    check(faceLandmarks) {
-      const pose = getHeadPose(faceLandmarks);
+    checkDetailed(faceLandmarks) {
+      const headPose = getHeadPose(faceLandmarks);
+      const eyeGaze = getEyeGaze(faceLandmarks);
 
-      // Pose unreadable this frame (e.g. transient landmark glitch) — hold
-      // the previous state rather than flip-flopping.
-      if (!pose) {
-        return currentlyAway ? VIOLATION_TYPES.LOOKING_AWAY : null;
+      // Do not mark a user as looking away based on a missing landmark frame.
+      if (!headPose) {
+        return {
+          violation: currentlyAway ? VIOLATION_TYPES.LOOKING_AWAY : null,
+          isAway: currentlyAway,
+          direction: currentlyAway ? 'UNKNOWN' : 'SCREEN',
+          headDirection: 'UNKNOWN',
+          gazeDirection: 'UNKNOWN',
+        };
       }
 
       if (!initialized) {
-        smoothedH = pose.horizontalOffset;
-        smoothedV = pose.verticalOffset;
+        smoothedHeadH = headPose.horizontalOffset;
+        smoothedHeadV = headPose.verticalOffset;
+        smoothedGazeH = eyeGaze?.horizontalOffset ?? 0;
+        smoothedGazeV = eyeGaze?.verticalOffset ?? 0;
         initialized = true;
       } else {
-        smoothedH += SMOOTHING_ALPHA * (pose.horizontalOffset - smoothedH);
-        smoothedV += SMOOTHING_ALPHA * (pose.verticalOffset - smoothedV);
+        smoothedHeadH = smooth(smoothedHeadH, headPose.horizontalOffset);
+        smoothedHeadV = smooth(smoothedHeadV, headPose.verticalOffset);
+
+        if (eyeGaze) {
+          smoothedGazeH = smooth(smoothedGazeH, eyeGaze.horizontalOffset);
+          smoothedGazeV = smooth(smoothedGazeV, eyeGaze.verticalOffset);
+        }
       }
 
-      const crossedEnter =
-        Math.abs(smoothedH) > ENTER_THRESHOLDS.horizontal ||
-        smoothedV > ENTER_THRESHOLDS.down ||
-        smoothedV < ENTER_THRESHOLDS.up;
+      // "Down" (keyboard glance) requires BOTH head and gaze to agree before
+      // counting as away — this is the most common false-positive direction
+      // during typing-heavy exams. Left/right/up stay single-signal-triggered
+      // since those are stronger signals of genuinely looking away (second
+      // screen, notes, phone).
+      const headDown = smoothedHeadV > HEAD_ENTER.down;
+      const gazeDown = eyeGaze ? smoothedGazeV > GAZE_ENTER.vertical : false;
+      const downAwayEnter = eyeGaze ? headDown && gazeDown : headDown;
 
-      const withinExit =
-        Math.abs(smoothedH) <= EXIT_THRESHOLDS.horizontal &&
-        smoothedV <= EXIT_THRESHOLDS.down &&
-        smoothedV >= EXIT_THRESHOLDS.up;
+      const otherHeadAwayEnter =
+        Math.abs(smoothedHeadH) > HEAD_ENTER.horizontal ||
+        smoothedHeadV < HEAD_ENTER.up;
+
+      const otherGazeAwayEnter =
+        eyeGaze &&
+        (Math.abs(smoothedGazeH) > GAZE_ENTER.horizontal ||
+          smoothedGazeV < -GAZE_ENTER.vertical);
+
+      const headAwayEnter = downAwayEnter || otherHeadAwayEnter || otherGazeAwayEnter;
+
+      const headDownExit = smoothedHeadV <= HEAD_EXIT.down;
+      const gazeDownExit = !eyeGaze || smoothedGazeV <= GAZE_EXIT.vertical;
+
+      const headWithinExit =
+        Math.abs(smoothedHeadH) <= HEAD_EXIT.horizontal &&
+        headDownExit &&
+        smoothedHeadV >= HEAD_EXIT.up;
+
+      const gazeWithinExit =
+        !eyeGaze ||
+        (Math.abs(smoothedGazeH) <= GAZE_EXIT.horizontal &&
+          gazeDownExit &&
+          smoothedGazeV >= -GAZE_EXIT.vertical);
+
+      const crossedEnter = headAwayEnter;
+      const withinExit = headWithinExit && gazeWithinExit;
 
       if (!currentlyAway && crossedEnter) {
         currentlyAway = true;
@@ -102,23 +264,57 @@ export function createLookingAwayTracker() {
         currentlyAway = false;
       }
 
-      return currentlyAway ? VIOLATION_TYPES.LOOKING_AWAY : null;
-    }
+      const headDirection = getHeadDirection(smoothedHeadH, smoothedHeadV);
+      const gazeDirection = eyeGaze
+        ? getGazeDirection(smoothedGazeH, smoothedGazeV)
+        : 'UNAVAILABLE';
+
+      return {
+        violation: currentlyAway ? VIOLATION_TYPES.LOOKING_AWAY : null,
+        isAway: currentlyAway,
+        direction: getAttentionDirection(headDirection, gazeDirection),
+        headDirection,
+        gazeDirection,
+        headPose: {
+          horizontalOffset: smoothedHeadH,
+          verticalOffset: smoothedHeadV,
+        },
+        eyeGaze: eyeGaze
+          ? {
+              horizontalOffset: smoothedGazeH,
+              verticalOffset: smoothedGazeV,
+            }
+          : null,
+      };
+    },
+
+    // Backwards-compatible: existing code can continue calling tracker.check().
+    check(faceLandmarks) {
+      return this.checkDetailed(faceLandmarks).violation;
+    },
   };
 }
 
-/**
- * One-off, non-smoothed check (e.g. for tests). Prefer
- * createLookingAwayTracker() for the live detection loop.
- */
 export function checkLookingAway(faceLandmarks) {
   const headPose = getHeadPose(faceLandmarks);
-  if (!headPose) return null;
+  const eyeGaze = getEyeGaze(faceLandmarks);
 
-  const away =
-    Math.abs(headPose.horizontalOffset) > ENTER_THRESHOLDS.horizontal ||
-    headPose.verticalOffset > ENTER_THRESHOLDS.down ||
-    headPose.verticalOffset < ENTER_THRESHOLDS.up;
+  if (!headPose) {
+    return null;
+  }
 
-  return away ? VIOLATION_TYPES.LOOKING_AWAY : null;
+  const headDown = headPose.verticalOffset > HEAD_ENTER.down;
+  const gazeDown = eyeGaze ? eyeGaze.verticalOffset > GAZE_ENTER.vertical : false;
+  const downAway = eyeGaze ? headDown && gazeDown : headDown;
+
+  const otherHeadAway =
+    Math.abs(headPose.horizontalOffset) > HEAD_ENTER.horizontal ||
+    headPose.verticalOffset < HEAD_ENTER.up;
+
+  const otherGazeAway =
+    eyeGaze &&
+    (Math.abs(eyeGaze.horizontalOffset) > GAZE_ENTER.horizontal ||
+      eyeGaze.verticalOffset < -GAZE_ENTER.vertical);
+
+  return downAway || otherHeadAway || otherGazeAway ? VIOLATION_TYPES.LOOKING_AWAY : null;
 }

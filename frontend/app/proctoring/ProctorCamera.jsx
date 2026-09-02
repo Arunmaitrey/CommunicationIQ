@@ -24,21 +24,18 @@ import { checkLookingAway, createLookingAwayTracker } from './detectors/lookingA
 import {
   isDocumentFullscreen,
   requestFullscreen,
-  exitFullscreen,
-  checkFullscreenExited
+  exitFullscreen
 } from './detectors/fullscreenExit';
+import {
+  loadPhoneDetector,
+  releasePhoneDetector,
+  runObjectDetection,
+  checkMobilePhone,
+  countPersons
+} from './detectors/mobilePhone';
 import ViolationToast from './ViolationToast';
+import { API_BASE, getToken } from '@/lib/api';
 
-/**
- * ProctorCamera — AI interview proctoring component.
- *
- * Props:
- * - sessionId: string|number — the interview session id
- * - enabled: boolean — whether proctoring should be active
- * - onViolation: ({ type, count, timestamp }) => void — called on each confirmed violation
- * - onAutoEnd: ({ reason, violationType, count, timestamp }) => void — called when max violations reached
- * - examCompleted: boolean — set true when interview finishes normally
- */
 const ProctorCamera = ({
   sessionId,
   enabled = true,
@@ -60,6 +57,19 @@ const ProctorCamera = ({
     lookingAwayTrackerRef.current = createLookingAwayTracker();
   }
 
+  const phoneSessionRef = useRef(null);
+  const phoneCheckInFlightRef = useRef(false);
+  const activePhoneViolationRef = useRef(null);
+
+  // Person-body count from the same YOLO pass used for phone detection.
+  // Fed into checkMultipleFaces() as a fallback for a second person whose
+  // face isn't frontal (turned away / side-on), which MediaPipe's
+  // face-only detector can't see on its own. Defaults to 1 until the
+  // first object-detection pass completes.
+  const personCountRef = useRef(1);
+
+  const pendingAutoEndRef = useRef(null);
+
   const persistedOnMount = readPersistedState(sessionId);
 
   const [faceStatus, setFaceStatus] = useState('Initializing...');
@@ -70,6 +80,11 @@ const ProctorCamera = ({
     () => persistedOnMount?.violationCount ?? 0
   );
   const [fullscreenReady, setFullscreenReady] = useState(() => isDocumentFullscreen());
+  // Tracks whether onAutoEnd already fired for the final violation this
+  // render cycle, so the fallback lock screen (with its own "Continue to
+  // Results" button) doesn't render a second time while the parent is
+  // still navigating away — see the isLocked render block below.
+  const [autoEndFired, setAutoEndFired] = useState(false);
 
   const fullscreenTimerRef = useRef(null);
   const violationCountRef = useRef(persistedOnMount?.violationCount ?? 0);
@@ -95,9 +110,14 @@ const ProctorCamera = ({
     }
 
     if (videoRef.current) {
+      videoRef.current.onloadedmetadata = null;
       videoRef.current.pause();
       videoRef.current.srcObject = null;
     }
+
+    streamRef.current?.getTracks().forEach((track) => {
+      try { track.stop(); } catch { /* ignore */ }
+    });
 
     stopProctoringStream();
     streamRef.current = null;
@@ -111,6 +131,13 @@ const ProctorCamera = ({
       try { faceLandmarkerRef.current.close(); } catch { /* ignore */ }
       faceLandmarkerRef.current = null;
     }
+
+    if (phoneSessionRef.current) {
+      releasePhoneDetector(phoneSessionRef.current);
+      phoneSessionRef.current = null;
+    }
+    phoneCheckInFlightRef.current = false;
+    activePhoneViolationRef.current = null;
   }, []);
 
   useEffect(() => {
@@ -129,9 +156,13 @@ const ProctorCamera = ({
       violation_count: faceEvalRef.current.violation_count,
     }
     try {
-      await fetch(`/api/interview/${sessionId}/face-evaluation`, {
+      const token = getToken();
+      await fetch(`${API_BASE}/student/attempts/${sessionId}/proctor-events`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify(payload),
       })
     } catch { /* best-effort */ }
@@ -198,6 +229,15 @@ const ProctorCamera = ({
         if (cancelled) { detector.close(); landmarker.close(); return; }
         faceLandmarkerRef.current = landmarker;
 
+        const phoneSession = await loadPhoneDetector();
+        if (cancelled) {
+          detector.close();
+          landmarker.close();
+          releasePhoneDetector(phoneSession);
+          return;
+        }
+        phoneSessionRef.current = phoneSession;
+
         setFaceStatus('Face detector ready');
       } catch (err) {
         console.error('MediaPipe init failed:', err);
@@ -223,14 +263,33 @@ const ProctorCamera = ({
         setFaceStatus('Starting camera...');
         const stream = await getProctoringStream();
         if (cancelled) return;
+
+        const videoTracks = stream.getVideoTracks();
+        if (!videoTracks.length || videoTracks[0].readyState !== 'live') {
+          console.error('[ProctorCamera] stream has no live video track', videoTracks);
+          setFaceStatus('Camera unavailable');
+          setProctoringBlocked(true);
+          return;
+        }
+
         streamRef.current = stream;
 
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          await videoRef.current.play().catch(() => {});
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+
+          const tryPlay = () => {
+            video.play().catch((err) => {
+              console.error('[ProctorCamera] video.play() failed:', err);
+            });
+          };
+
+          video.onloadedmetadata = tryPlay;
+          tryPlay();
         }
         setFaceStatus('Waiting for face...');
-      } catch {
+      } catch (err) {
+        console.error('[ProctorCamera] camera start failed:', err);
         setFaceStatus('Camera unavailable');
         setProctoringBlocked(true);
       }
@@ -271,15 +330,22 @@ const ProctorCamera = ({
     setCurrentToast({ type, count: nextCount, isFinal, timestamp });
 
     if (isFinal) {
+      // Release the camera hardware immediately rather than waiting for
+      // the isLocked-driven effect — on a backgrounded tab (exactly the
+      // case when the user has switched to another app), React can delay
+      // that effect, leaving the camera indicator on longer than it
+      // should be. teardown() is idempotent (safe to call again from the
+      // effect right after).
+      teardown();
       setIsLocked(true);
-      onAutoEnd?.({
+      pendingAutoEndRef.current = {
         reason: 'proctoring_violation_limit_reached',
         violationType: type,
         count: nextCount,
         timestamp
-      });
+      };
     }
-  }, [sessionId, onViolation, onAutoEnd]);
+  }, [sessionId, onViolation, onAutoEnd, teardown]);
 
   const trackViolation = useCallback((type, now) => {
     const active = activeViolationRef.current;
@@ -302,6 +368,30 @@ const ProctorCamera = ({
 
   const clearActiveViolation = () => {
     activeViolationRef.current = null;
+  };
+
+  const trackPhoneViolation = useCallback((now) => {
+    const type = VIOLATION_TYPES.MOBILE_PHONE;
+    const active = activePhoneViolationRef.current;
+
+    if (!active) {
+      activePhoneViolationRef.current = { since: now, confirmed: false };
+      setFaceStatus(`Checking (${VIOLATION_COPY[type]?.title || 'Phone detected'})...`);
+      return;
+    }
+
+    if (active.confirmed) return;
+
+    if (now - active.since >= getConfirmDuration(type)) {
+      activePhoneViolationRef.current = { ...active, confirmed: true };
+      confirmViolation(type);
+    } else {
+      setFaceStatus(`Checking (${VIOLATION_COPY[type]?.title || 'Phone detected'})...`);
+    }
+  }, [confirmViolation]);
+
+  const clearPhoneViolation = () => {
+    activePhoneViolationRef.current = null;
   };
 
   // ==================================================
@@ -329,12 +419,38 @@ const ProctorCamera = ({
       if (now - lastDetectionTimeRef.current >= DETECTION_INTERVAL_MS) {
         lastDetectionTimeRef.current = now;
 
+        // Phone + person-body detection: async YOLO inference, run
+        // independently of the synchronous face checks below. Guarded so
+        // a slow inference call can't stack up multiple overlapping runs.
+        // The same detection pass feeds both checkMobilePhone() and the
+        // personCountRef used by checkMultipleFaces() below.
+        if (phoneSessionRef.current && !phoneCheckInFlightRef.current) {
+          phoneCheckInFlightRef.current = true;
+          runObjectDetection(phoneSessionRef.current, video)
+            .then((objDetections) => {
+              const phoneViolation = checkMobilePhone(objDetections);
+              if (phoneViolation) {
+                trackPhoneViolation(performance.now());
+              } else {
+                clearPhoneViolation();
+              }
+
+              personCountRef.current = countPersons(objDetections) || 1;
+            })
+            .catch((err) => {
+              console.error('[ProctorCamera] phone detection error:', err);
+            })
+            .finally(() => {
+              phoneCheckInFlightRef.current = false;
+            });
+        }
+
         try {
           const detectorResult = detector.detectForVideo(video, now);
           const detections = detectorResult?.detections || [];
 
           const noFace = checkFaceNotDetected(detections);
-          const multiFace = checkMultipleFaces(detections);
+          const multiFace = checkMultipleFaces(detections, personCountRef.current);
 
           if (noFace) {
             trackViolation(noFace, now);
@@ -375,7 +491,7 @@ const ProctorCamera = ({
         animationFrameRef.current = null;
       }
     };
-  }, [shouldProctor, isLocked, examCompleted, proctoringBlocked, trackViolation]);
+  }, [shouldProctor, isLocked, examCompleted, proctoringBlocked, trackViolation, trackPhoneViolation]);
 
   // ==================================================
   // 4b. FULLSCREEN EXIT DETECTION
@@ -384,14 +500,15 @@ const ProctorCamera = ({
     if (!shouldProctor || isLocked || examCompleted || proctoringBlocked || !fullscreenReady) return;
 
     const handleFullscreenChange = () => {
-      const violation = checkFullscreenExited();
-      if (violation) {
+      const stillFullscreen = isDocumentFullscreen();
+
+      if (!stillFullscreen) {
         if (!fullscreenTimerRef.current) {
-          setFaceStatus(`Checking (${VIOLATION_COPY[violation]?.title})...`);
+          setFaceStatus(`Checking (${VIOLATION_COPY[VIOLATION_TYPES.FULLSCREEN_EXIT]?.title || 'Fullscreen exited'})...`);
           fullscreenTimerRef.current = setTimeout(() => {
             fullscreenTimerRef.current = null;
-            confirmViolation(violation);
-          }, getConfirmDuration(violation));
+            confirmViolation(VIOLATION_TYPES.FULLSCREEN_EXIT);
+          }, getConfirmDuration(VIOLATION_TYPES.FULLSCREEN_EXIT));
         }
       } else if (fullscreenTimerRef.current) {
         clearTimeout(fullscreenTimerRef.current);
@@ -466,10 +583,29 @@ const ProctorCamera = ({
     };
   }, [shouldProctor, isLocked, examCompleted, proctoringBlocked, confirmViolation]);
 
-  // Unmount cleanup
   useEffect(() => {
     return () => { teardown(); };
   }, [teardown]);
+
+  useEffect(() => {
+    const handlePageHide = () => teardown();
+    window.addEventListener('pagehide', handlePageHide);
+    window.addEventListener('beforeunload', handlePageHide);
+    return () => {
+      window.removeEventListener('pagehide', handlePageHide);
+      window.removeEventListener('beforeunload', handlePageHide);
+    };
+  }, [teardown]);
+
+  const statusTone = useCallback(() => {
+    if (faceStatus === 'Face detected') return 'ok';
+    if (faceStatus.startsWith('Checking') || faceStatus === 'Waiting for face...') return 'warn';
+    if (faceStatus === 'Camera unavailable' || faceStatus.startsWith('Camera stopped') || faceStatus === 'Proctoring init failed') return 'error';
+    return 'neutral';
+  }, [faceStatus]);
+  const tone = statusTone();
+  const toneDot = { ok: 'bg-emerald-500', warn: 'bg-amber-500 animate-pulse', error: 'bg-red-500', neutral: 'bg-slate-400' }[tone];
+  const toneText = { ok: 'text-emerald-700 dark:text-emerald-400', warn: 'text-amber-700 dark:text-amber-400', error: 'text-red-700 dark:text-red-400', neutral: 'text-slate-500 dark:text-slate-400' }[tone];
 
   // ==================================================
   // 5. UI
@@ -480,25 +616,42 @@ const ProctorCamera = ({
 
   if (!fullscreenReady && !isLocked) {
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
-        <div className="w-[90%] max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 p-6 shadow-2xl text-center">
-          <div className="w-16 h-16 rounded-full bg-teal-100 dark:bg-teal-900/50 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-teal-600 dark:text-teal-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+        style={{ background: 'rgba(0,0,0,0.6)' }}
+      >
+        <div
+          className="w-full max-w-sm rounded-2xl p-6 text-center"
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+          }}
+        >
+          <div
+            className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center"
+            style={{ background: 'color-mix(in srgb, var(--brand) 15%, transparent)' }}
+          >
+            <svg className="w-7 h-7" style={{ color: 'var(--brand)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Fullscreen Required</h2>
-          <p className="mt-3 text-sm text-gray-600 dark:text-slate-400">
+
+          <h2 className="text-base font-bold" style={{ color: 'var(--text)' }}>
+            Fullscreen Required
+          </h2>
+          <p className="mt-2 text-[13px] leading-relaxed" style={{ color: 'var(--muted)' }}>
             This interview must be taken in fullscreen mode with proctoring active.
             Click below to enter fullscreen and start.
           </p>
+
           <button
             type="button"
             onClick={async () => {
               await requestFullscreen();
               setFullscreenReady(isDocumentFullscreen());
             }}
-            className="mt-4 px-5 py-2.5 text-sm font-semibold rounded-xl bg-teal-600 text-white hover:bg-teal-700 transition-colors cursor-pointer"
+            className="btn btn-primary w-full mt-4"
           >
             Enter Fullscreen & Start
           </button>
@@ -509,17 +662,33 @@ const ProctorCamera = ({
 
   if (proctoringBlocked) {
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60">
-        <div className="w-[90%] max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 p-6 shadow-2xl text-center">
-          <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+        style={{ background: 'rgba(0,0,0,0.6)' }}
+      >
+        <div
+          className="w-full max-w-sm rounded-2xl p-6 text-center"
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+          }}
+        >
+          <div
+            className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center"
+            style={{ background: 'color-mix(in srgb, var(--rag-red) 15%, transparent)' }}
+          >
+            <svg className="w-7 h-7" style={{ color: 'var(--rag-red)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Proctoring Unavailable</h2>
-          <p className="mt-3 text-sm text-gray-600 dark:text-slate-400">
-            Camera access or proctoring system failed. This interview cannot continue
-            without proctoring. Please allow camera access and reload.
+
+          <h2 className="text-base font-bold" style={{ color: 'var(--text)' }}>
+            Proctoring Unavailable
+          </h2>
+          <p className="mt-2 text-[13px] leading-relaxed" style={{ color: 'var(--muted)' }}>
+            Camera access or the proctoring system failed. This interview cannot
+            continue without proctoring. Please allow camera access and reload.
           </p>
         </div>
       </div>
@@ -527,19 +696,85 @@ const ProctorCamera = ({
   }
 
   if (isLocked) {
+    if (currentToast?.isFinal) {
+      return (
+        <ViolationToast
+          violation={currentToast}
+          onDismiss={() => {
+            setCurrentToast(null);
+            const payload = pendingAutoEndRef.current;
+            if (payload) {
+              pendingAutoEndRef.current = null;
+              setAutoEndFired(true);
+              onAutoEnd?.(payload);
+            }
+          }}
+          onReenterFullscreen={async () => {
+            await requestFullscreen();
+            setFullscreenReady(isDocumentFullscreen());
+          }}
+        />
+      );
+    }
+
+    // onAutoEnd already fired from the dismiss above — keep the same
+    // backdrop up instead of going blank, so there's no flash of the
+    // underlying page while waiting for the parent to navigate away.
+    if (autoEndFired) {
+      return (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.6)' }}
+        />
+      );
+    }
+
     return (
-      <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70">
-        <div className="w-[90%] max-w-md rounded-2xl bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 p-6 shadow-2xl text-center">
-          <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-900/50 flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+        style={{ background: 'rgba(0,0,0,0.6)' }}
+      >
+        <div
+          className="w-full max-w-sm rounded-2xl p-6 text-center"
+          style={{
+            background: 'var(--surface)',
+            border: '1px solid var(--border)',
+            boxShadow: '0 20px 60px rgba(0,0,0,0.35)',
+          }}
+        >
+          <div
+            className="w-14 h-14 rounded-full mx-auto mb-4 flex items-center justify-center"
+            style={{ background: 'color-mix(in srgb, var(--rag-red) 15%, transparent)' }}
+          >
+            <svg className="w-7 h-7" style={{ color: 'var(--rag-red)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
             </svg>
           </div>
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Interview Locked</h2>
-          <p className="mt-3 text-sm text-gray-600 dark:text-slate-400">
-            Your interview was automatically submitted after repeated proctoring violations.
-            Contact an administrator if you believe this was a mistake.
+
+          <h2 className="text-base font-bold" style={{ color: 'var(--text)' }}>
+            Interview Locked
+          </h2>
+          <p className="mt-2 text-[13px] leading-relaxed" style={{ color: 'var(--muted)' }}>
+            Your interview was automatically submitted after repeated proctoring
+            violations. Contact an administrator if you believe this was a mistake.
           </p>
+
+          <button
+            type="button"
+            onClick={() => {
+              const payload = pendingAutoEndRef.current || {
+                reason: 'proctoring_violation_limit_reached',
+                violationType: persistedOnMount?.lastViolationType ?? null,
+                count: violationCountRef.current,
+                timestamp: persistedOnMount?.lastViolationAt ?? Date.now()
+              };
+              pendingAutoEndRef.current = null;
+              onAutoEnd?.(payload);
+            }}
+            className="btn btn-primary w-full mt-4"
+          >
+            Continue to Results
+          </button>
         </div>
       </div>
     );
@@ -549,7 +784,7 @@ const ProctorCamera = ({
     <>
       {!inline && (
         <div className="fixed bottom-4 right-4 z-50">
-          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-700 rounded-xl shadow-lg overflow-hidden">
+          <div className="bg-white dark:bg-slate-900 border-2 border-gray-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
             <video
               ref={videoRef}
               autoPlay
@@ -557,9 +792,14 @@ const ProctorCamera = ({
               playsInline
               className="w-40 h-28 object-cover bg-black rounded-t-xl"
             />
-            <div className="px-2 py-1.5 text-[10px] text-gray-500 dark:text-slate-400 flex justify-between gap-2 bg-white dark:bg-slate-900">
-              <span className="truncate">{faceStatus}</span>
-              <span className="shrink-0 font-mono">{violationCount}/{MAX_VIOLATIONS}</span>
+            <div className="px-2.5 py-2 text-[11px] flex items-center justify-between gap-2 bg-white dark:bg-slate-900">
+              <span className={`flex items-center gap-1.5 font-semibold truncate ${toneText}`}>
+                <span className={`w-2 h-2 rounded-full shrink-0 ${toneDot}`} />
+                {faceStatus}
+              </span>
+              <span className={`shrink-0 font-mono font-bold ${violationCount > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                {violationCount}/{MAX_VIOLATIONS + 1}
+              </span>
             </div>
           </div>
         </div>
@@ -590,14 +830,20 @@ const ProctorCamera = ({
               </div>
             )}
           </div>
-          <div className="px-3 py-2 text-xs text-slate-400 flex justify-between gap-2 bg-slate-900">
-            <span className="truncate">{faceStatus}</span>
-            <span className="shrink-0 font-mono">{violationCount}/{MAX_VIOLATIONS}</span>
+          <div className="px-3 py-2 text-xs flex items-center justify-between gap-2 bg-slate-900">
+            <span className={`flex items-center gap-1.5 font-semibold truncate ${
+              tone === 'ok' ? 'text-emerald-400' : tone === 'warn' ? 'text-amber-400' : tone === 'error' ? 'text-red-400' : 'text-slate-400'
+            }`}>
+              <span className={`w-2 h-2 rounded-full shrink-0 ${toneDot}`} />
+              {faceStatus}
+            </span>
+            <span className={`shrink-0 font-mono font-bold ${violationCount > 0 ? 'text-red-400' : 'text-slate-500'}`}>
+              {violationCount}/{MAX_VIOLATIONS + 1}
+            </span>
           </div>
         </div>
       )}
 
-      {/* Violation Toast */}
       <ViolationToast
         violation={currentToast}
         onDismiss={() => setCurrentToast(null)}
