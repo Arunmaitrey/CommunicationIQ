@@ -1,4 +1,20 @@
+
 import { VIOLATION_TYPES } from '../constants';
+
+/*
+  YOLOv8n (COCO classes) runs in-browser via onnxruntime-web, loaded as a
+  plain <script> tag from a CDN (like this project already does with
+  MediaPipe's model files) instead of an npm import. This avoids Vite
+  trying to bundle/transform onnxruntime-web's internal files, which
+  was causing build errors.
+
+  The CDN script also auto-fetches its own matching .wasm file from the
+  same CDN folder — no local /public/ort/ folder needed anymore.
+
+  Model file (still needed locally):
+  Place yolov8n.onnx at:
+  /public/models/yolov8n.onnx
+*/
 
 const ORT_SCRIPT_URL =
   'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js';
@@ -6,6 +22,8 @@ const ORT_SCRIPT_URL =
 const MODEL_URL = '/models/yolov8n.onnx';
 const INPUT_SIZE = 640;
 
+// Lower phone threshold helps detect small, cropped, or partly occluded phones.
+// Lower values increase sensitivity but can also create false positives.
 const PHONE_SCORE_THRESHOLD = 0.10;
 const PERSON_SCORE_THRESHOLD = 0.3;
 const IOU_THRESHOLD = 0.45;
@@ -17,6 +35,7 @@ let ortLoadPromise = null;
 let sessionPromise = null;
 let scratchCanvas = null;
 
+/** Injects the onnxruntime-web <script> tag once and resolves with window.ort. */
 function loadOrtGlobal() {
   if (window.ort) {
     return Promise.resolve(window.ort);
@@ -32,7 +51,7 @@ function loadOrtGlobal() {
         reject(new Error('Failed to load onnxruntime-web from CDN'));
       document.head.appendChild(script);
     }).catch((error) => {
-      ortLoadPromise = null;
+      ortLoadPromise = null; // allow retry
       throw error;
     });
   }
@@ -44,14 +63,14 @@ export function loadPhoneDetector() {
   if (!sessionPromise) {
     sessionPromise = loadOrtGlobal()
       .then((ort) => {
-        ort.env.wasm.numThreads = 1;
+        ort.env.wasm.numThreads = 1; // simplest, most compatible config
         return ort.InferenceSession.create(MODEL_URL, {
           executionProviders: ['wasm'],
           graphOptimizationLevel: 'all',
         });
       })
       .catch((error) => {
-        sessionPromise = null;
+        sessionPromise = null; // allow retry on next call
         throw error;
       });
   }

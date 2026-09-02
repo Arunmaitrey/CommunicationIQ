@@ -115,6 +115,9 @@ const ProctorCamera = ({
       videoRef.current.srcObject = null;
     }
 
+    // Stop tracks directly too — don't rely solely on stopProctoringStream()
+    // internals to release the hardware; this guarantees the camera light
+    // actually turns off even if that helper only clears its own reference.
     streamRef.current?.getTracks().forEach((track) => {
       try { track.stop(); } catch { /* ignore */ }
     });
@@ -284,6 +287,9 @@ const ProctorCamera = ({
             });
           };
 
+          // Some browsers need metadata loaded before play() actually
+          // paints a frame; retry there in case the first attempt was
+          // ignored (this is what usually causes a black-but-"playing" feed).
           video.onloadedmetadata = tryPlay;
           tryPlay();
         }
@@ -500,6 +506,12 @@ const ProctorCamera = ({
     if (!shouldProctor || isLocked || examCompleted || proctoringBlocked || !fullscreenReady) return;
 
     const handleFullscreenChange = () => {
+      // Check the browser's real fullscreen state directly on every event,
+      // rather than trusting checkFullscreenExited()'s own internal
+      // tracking. If that helper only flags a transition once (e.g. an
+      // internal "already warned" flag that never resets), a second exit
+      // — via tab switch, going back and returning, etc. — would silently
+      // stop being detected, which matches what you're seeing.
       const stillFullscreen = isDocumentFullscreen();
 
       if (!stillFullscreen) {
@@ -587,6 +599,11 @@ const ProctorCamera = ({
     return () => { teardown(); };
   }, [teardown]);
 
+  // React's unmount cleanup above only fires for client-side unmounts
+  // (route change within the SPA). A tab close, hard reload, or the user
+  // typing a new URL doesn't unmount the component in time — 'pagehide'
+  // (and 'beforeunload' as a fallback for browsers that skip pagehide in
+  // some cases) fires reliably for those and releases the camera hardware.
   useEffect(() => {
     const handlePageHide = () => teardown();
     window.addEventListener('pagehide', handlePageHide);
@@ -696,6 +713,10 @@ const ProctorCamera = ({
   }
 
   if (isLocked) {
+    // Show the detailed violation-summary card first (currentToast holds it
+    // right after the final strike fires). Only once it's dismissed — or on
+    // a page reload where currentToast never got set — fall back to the
+    // plain persistent lock screen below.
     if (currentToast?.isFinal) {
       return (
         <ViolationToast

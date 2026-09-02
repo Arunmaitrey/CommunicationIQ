@@ -1,8 +1,8 @@
 
-export const CONFIRM_DURATION_MS = 200; // default / fallback
-export const MAX_VIOLATIONS = 40;
+export const CONFIRM_DURATION_MS = 1000; // default / fallback
+export const MAX_VIOLATIONS = 4;
 export const DETECTION_INTERVAL_MS = 200;
-export const PHONE_DETECTION_INTERVAL_MS = 200; // YOLOv8n (wasm) inference is heavier than face-mesh — poll slower. Raise this further (e.g. 1500-2000) on low-end devices if the UI feels sluggish.
+export const PHONE_DETECTION_INTERVAL_MS = 600; // YOLOv8n (wasm) inference is heavier than face-mesh — poll slower. Raise this further (e.g. 1500-2000) on low-end devices if the UI feels sluggish.
 
 export const VIOLATION_TYPES = {
   NO_FACE: 'no_face',
@@ -20,11 +20,11 @@ export const VIOLATION_TYPES = {
 // backgrounded, not after a grace window — see detectors/tabSwitch.js for
 // why a duration-based confirm doesn't work reliably for a hidden tab.
 export const CONFIRM_DURATIONS_MS = {
-  [VIOLATION_TYPES.NO_FACE]: 500,
-  [VIOLATION_TYPES.MULTIPLE_FACES]: 500,
-  [VIOLATION_TYPES.LOOKING_AWAY]: 500,
-  [VIOLATION_TYPES.FULLSCREEN_EXIT]: 500,
-  [VIOLATION_TYPES.MOBILE_PHONE]: 200,
+  [VIOLATION_TYPES.NO_FACE]: 1000,
+  [VIOLATION_TYPES.MULTIPLE_FACES]: 1000,
+  [VIOLATION_TYPES.LOOKING_AWAY]: 1000,
+  [VIOLATION_TYPES.FULLSCREEN_EXIT]: 2000,
+  [VIOLATION_TYPES.MOBILE_PHONE]: 1000,
   [VIOLATION_TYPES.TAB_SWITCH]: 0
 };
 
