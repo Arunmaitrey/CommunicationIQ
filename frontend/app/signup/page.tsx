@@ -78,9 +78,10 @@ export default function SignupPage() {
             Create your student account
           </h1>
           <p className="text-sm leading-relaxed" style={{ color: "var(--rail-muted)" }}>
-            Join your institution&apos;s placement readiness program. Practise
-            speaking, listening, reading and writing with assessments
-            that tell you exactly where to improve.
+            Create a personal practice account. Practise speaking,
+            listening, reading and writing with assessments that tell you
+            exactly where to improve. Institution students are added by
+            their institution admin and sign in with those credentials.
           </p>
         </div>
       </div>
@@ -94,8 +95,9 @@ export default function SignupPage() {
 
           <h2 className="text-lg font-bold mb-1">Sign up</h2>
           <p className="text-xs text-muted mb-5">
-            Students register here using your institution email. Admins are
-            created by the platform super admin.
+            Self-registration creates a general practice account. If you belong
+            to an institution, your admin creates your account — sign in with
+            the credentials they provide.
           </p>
 
           <form onSubmit={submit} className="space-y-3">
@@ -107,11 +109,11 @@ export default function SignupPage() {
                      placeholder="Aarav Reddy" />
             </div>
             <div>
-              <label className="ds-label" htmlFor="email">Institution Email</label>
+              <label className="ds-label" htmlFor="email">Email</label>
               <input id="email" type="email" required autoComplete="username"
                      className="ds-input ds-focus" value={form.email}
                      onChange={(e) => setForm({ ...form, email: e.target.value })}
-                     placeholder="aarav.reddy@stmarys.edu" />
+                     placeholder="you@example.com" />
             </div>
             <div>
               <label className="ds-label" htmlFor="password">Password</label>

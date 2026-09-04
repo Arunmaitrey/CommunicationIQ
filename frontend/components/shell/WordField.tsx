@@ -40,7 +40,6 @@ const WORDS: Word[] = [
   { text: "Placement", x: 4, y: 8, size: 5.5 },
   { text: "READINESS", x: 58, y: 4, size: 1.5, mono: true },
   { text: "Fluency", x: 66, y: 13, size: 4.2, warm: true },
-  { text: "Interview", x: 10, y: 24, size: 3.4, rotate: -4 },
   { text: "ASSESSMENT", x: 38, y: 21, size: 1.25, mono: true, wide: true },
   { text: "Pronunciation", x: 52, y: 31, size: 3.8 },
   { text: "Diagnostic", x: 3, y: 41, size: 4.6, warm: true },

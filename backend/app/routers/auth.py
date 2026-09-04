@@ -29,140 +29,85 @@ _REJECT = "Incorrect email or password"
 
 @router.post("/signup", response_model=LoginResponse)
 async def signup(body: SignupRequest, request: Request) -> LoginResponse:
-    """Student self-service registration.
+    """Self-service registration for the general (free) pool.
 
-    If the email domain matches a registered institution, the user is linked
-    to that institution. Otherwise, the user is placed in a general pool and
-    must pay to access premium features.
+    Institution accounts are deliberately NOT created here: a tenant admin
+    creates students directly under their institution, and those students sign
+    in with the credentials they are given. Self-registration therefore always
+    lands in the general pool — no email-domain sniffing, no auto-joining a
+    college by its domain.
     """
     email = body.email.lower().strip()
-    domain = email.split("@")[-1] if "@" in email else ""
-
-    if not domain:
+    if "@" not in email:
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             "Invalid email address")
 
-    # Find the tenant by domain
-    tenant = await Tenant.find_one(Tenant.domain == domain)
+    # Any existing active account anywhere blocks self-registration.
+    dir_entry = await TenantUserDirectory.find(
+        TenantUserDirectory.email == email).first_or_none()
+    if dir_entry is not None and dir_entry.active:
+        holder = None
+        if dir_entry.tenant_id:
+            holder = await Tenant.get(dir_entry.tenant_id)
+        if holder is not None and holder.slug != "general"                 and holder.status not in {"suspended", "closed"}:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN,
+                f"Accounts at {holder.name} are created by your institution "
+                "admin. Sign in with the credentials they gave you.")
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            "An account with this email already exists. Sign in.")
 
-    # General registration: no matching domain → create in general pool
-    if tenant is None:
-        # Check if email already exists globally
-        dir_entry = await TenantUserDirectory.find(
-            TenantUserDirectory.email == email).first_or_none()
-        if dir_entry is not None and dir_entry.active:
-            raise HTTPException(status.HTTP_409_CONFLICT,
-                                "An account with this email already exists")
-
-        # Create a "general" tenant if it doesn't exist
-        general_tenant = await Tenant.find_one(Tenant.slug == "general")
-        if general_tenant is None:
-            general_tenant = Tenant(
-                name="General Users", slug="general",
-                domain="", tenant_type="other", status="active",
-                seat_limit=10000,
-            )
-            await general_tenant.create()
-            from app.provisioning import create_tenant_schema
-            await create_tenant_schema("general")
-
-        tenant = general_tenant
-        tenant_models = await ensure_tenant_models(tenant.slug)
-
-        # Check if user already exists in general tenant
-        from app.db import client as _client, CONTROL_DB_NAME as _DB
-        _users_coll = _client[_DB]["users"]
-        existing = await _users_coll.find_one({"email": email, "tenant_id": tenant.id})
-        if existing is not None:
-            raise HTTPException(status.HTTP_409_CONFLICT,
-                                "An account with this email already exists")
-
-        user = tenant_models.User(
-            tenant_id=tenant.id, email=email, full_name=body.full_name,
-            role="student",
-            password_hash=hash_password(body.password),
-            must_change_password=False,
+    # Create the "general" tenant lazily if it does not exist yet.
+    general_tenant = await Tenant.find_one(Tenant.slug == "general")
+    if general_tenant is None:
+        general_tenant = Tenant(
+            name="General Users", slug="general",
+            domain="", tenant_type="other", status="active",
+            seat_limit=10000,
         )
-        await user.create()
+        await general_tenant.create()
 
-        if dir_entry is None:
-            await TenantUserDirectory(email=email, tenant_id=tenant.id,
-                                       tenant_slug=tenant.slug).create()
-        else:
-            dir_entry.tenant_id = tenant.id
-            dir_entry.tenant_slug = tenant.slug
-            dir_entry.active = True
-            await dir_entry.save()
-
-        principal = TokenPrincipal(
-            user_id=user.id, email=user.email, full_name=user.full_name,
-            role="student", scope="tenant",
-            tenant_id=tenant.id, tenant_slug=tenant.slug,
-        )
-        await audit.record(principal, "auth.signup", entity="User",
-                           entity_id=user.id, tenant_id=tenant.id)
-        return LoginResponse(
-            token=create_token(principal),
-            user=SessionUser(
-                id=user.id, email=user.email, full_name=user.full_name,
-                role="student", scope="tenant",
-                tenant_id=tenant.id, tenant_slug=tenant.slug,
-                tenant_name=tenant.name,
-                must_change_password=False, preferred_theme="campus",
-            ),
-        )
-
-    # Domain matched an institution
-    if tenant.status in {"suspended", "closed"}:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "No institution found for this email domain. "
-                            "Contact your institution admin to register.")
-
-    tenant_models = await ensure_tenant_models(tenant.slug)
+    tenant_models = await ensure_tenant_models(general_tenant.slug)
 
     from app.db import client as _client, CONTROL_DB_NAME as _DB
     _users_coll = _client[_DB]["users"]
-    existing = await _users_coll.find_one({"email": email, "tenant_id": tenant.id})
+    existing = await _users_coll.find_one(
+        {"email": email, "tenant_id": general_tenant.id})
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT,
                             "An account with this email already exists")
 
-    dir_entry = await TenantUserDirectory.find(
-        TenantUserDirectory.email == email).first_or_none()
-    if dir_entry is not None and dir_entry.active:
-        raise HTTPException(status.HTTP_409_CONFLICT,
-                            "An account with this email already exists")
-
     user = tenant_models.User(
-        tenant_id=tenant.id, email=email, full_name=body.full_name, role="student",
+        tenant_id=general_tenant.id, email=email, full_name=body.full_name,
+        role="student",
         password_hash=hash_password(body.password),
         must_change_password=False,
     )
     await user.create()
 
     if dir_entry is None:
-        await TenantUserDirectory(email=email, tenant_id=tenant.id,
-                                   tenant_slug=tenant.slug).create()
+        await TenantUserDirectory(email=email, tenant_id=general_tenant.id,
+                                   tenant_slug=general_tenant.slug).create()
     else:
-        dir_entry.tenant_id = tenant.id
-        dir_entry.tenant_slug = tenant.slug
+        dir_entry.tenant_id = general_tenant.id
+        dir_entry.tenant_slug = general_tenant.slug
         dir_entry.active = True
         await dir_entry.save()
 
     principal = TokenPrincipal(
         user_id=user.id, email=user.email, full_name=user.full_name,
         role="student", scope="tenant",
-        tenant_id=tenant.id, tenant_slug=tenant.slug,
+        tenant_id=general_tenant.id, tenant_slug=general_tenant.slug,
     )
     await audit.record(principal, "auth.signup", entity="User",
-                       entity_id=user.id, tenant_id=tenant.id)
-
+                       entity_id=user.id, tenant_id=general_tenant.id)
     return LoginResponse(
         token=create_token(principal),
         user=SessionUser(
             id=user.id, email=user.email, full_name=user.full_name,
             role="student", scope="tenant",
-            tenant_id=tenant.id, tenant_slug=tenant.slug, tenant_name=tenant.name,
+            tenant_id=general_tenant.id, tenant_slug=general_tenant.slug,
+            tenant_name=general_tenant.name,
             must_change_password=False, preferred_theme="campus",
         ),
     )

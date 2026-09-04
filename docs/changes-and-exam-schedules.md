@@ -158,3 +158,55 @@ committed.
 - Contact-message inbox endpoints were audited: list / submit / update /
 reply all route correctly and the legacy `.sort("created_at", -1)` Beanie
 crash in the messages list was replaced with a safe Python-side sort.
+
+
+---
+
+## 6. Student Leaderboard
+
+Students can compare themselves inside their own institution or across every
+institution on the platform.
+
+- `GET /api/v1/student/leaderboard?scope=institution|global` ranks students by
+  **best overall exam score** (max of non-shadow `overall` score_records), ties
+  broken by attempt count. Only students with at least one scored exam appear;
+  the caller's own row is always included with their rank. Everything is
+  computed live — nothing is stored.
+- Frontend: **Leaderboard** page under the student rail with an *Institution /
+  All institutions* toggle, free-text search, and institution filter on the
+  global view.
+
+## 7. In-app notification centre (all roles)
+
+The header bell is fed by a backend feed (polls every 45s):
+
+- `GET /api/v1/notifications` — role-scoped, computed live:
+  - **student** → recent scored results + scheduled exams for their institution;
+  - **tenant_admin** → reviews their students left in the last 7 days;
+  - **super_admin** → open contact messages in the inbox.
+- `PATCH /api/v1/notifications` and `POST /api/v1/notifications/read-all`
+  persist read state in `notification_reads` per user + key.
+
+## 8. Single database, admin-created accounts, email sender, cleanup
+
+- **Single database.** All data lives in one MongoDB database (`CommunicationIQ`);
+  tenant isolation is by `tenant_id` filters. Legacy per-tenant databases
+  (`tenant_stmarys`, `tenant_vignan`) were dropped from the server.
+- **No domain-based signup.** Self-registration always creates a general
+  practice account; institution students are created by their tenant admin.
+- **Email sender implemented.** `app/email_sender.py` (previously missing while
+  two call sites imported it) sends via saved `smtp_configs` + `email_templates`
+  with `{{var}}` rendering; graceful when SMTP is unset.
+- **Interview/CV content removed.** The platform is LSRW + company/Versant
+  assessment only: the unused "HR questions" blueprint was renamed to spoken
+  questions copy, the login word cloud no longer says "Interview", and the
+  one-off `migrate_data.py` script was deleted.
+- **Terms & Privacy pages** added (`/terms`, `/privacy`) with footer links on
+  the landing page and app shell.
+- **Results charts:** skill scoreboard now shows ring, radar, bar and pie
+  (donut) breakdowns of the LSRW dimensions.
+- **Dead code removed.** ~2,690 commented-out lines stripped from
+  `app/routers/attempts.py`; vitest scaffolding (script, config, setup)
+  removed — no test files remain.
+- **Data checked for duplicates:** 22 users / 22 unique emails; attempt and
+  score `_id`s unique. None found.

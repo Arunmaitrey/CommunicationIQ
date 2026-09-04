@@ -417,11 +417,11 @@ EXTEMPORE = SectionBlueprint(
                   "position early and hold it -- wandering is what costs marks."),
 )
 
-HR_SHORT = SectionBlueprint(
-    title="HR questions",
+SPOKEN_QUESTIONS = SectionBlueprint(
+    title="Spoken Questions",
     task_type="short_answer", item_count=5, prep_seconds=0,
     response_seconds=45, prompt_plays_allowed=1,
-    instructions=("Standard interview questions, one play each. Answer as you "
+    instructions=("Five spoken questions, one play each. Answer as you "
                   "would to a person, not as you would write it down."),
 )
 
@@ -752,13 +752,13 @@ BLUEPRINTS: tuple[FormatBlueprint, ...] = (
                 instructions=("Put the word groups in order and say the whole "
                               "sentence aloud."),
             ),
-            HR_SHORT,
+            SPOKEN_QUESTIONS,
         ),
         verdict_bands=_BANDS,
         what_to_expect=(
             "The automated screen comes first and is unforgiving on timing.",
             "Repeat Sentence plays once -- there is no second chance.",
-            "The HR questions are scored the same way as the rest.",
+            "The spoken questions are scored the same way as the rest.",
         ),
     ),
 )

@@ -9,6 +9,7 @@ import {
 import {
   RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell,
+  PieChart, Pie,
 } from "recharts";
 import { ListenBack } from "@/components/ListenBack";
 import { RequireAuth } from "@/components/RequireAuth";
@@ -1252,7 +1253,7 @@ function Scoreboard({ dimensions, scaleMin, scaleMax }: {
 
   return (
     <Section title="Skill Scoreboard" className="mb-4">
-      <div className="grid md:grid-cols-2 gap-6">
+      <div className="grid md:grid-cols-3 gap-6">
         {/* Overall Score Badge */}
         <div className="flex flex-col items-center justify-center">
           <div
@@ -1279,6 +1280,22 @@ function Scoreboard({ dimensions, scaleMin, scaleMax }: {
               <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fontSize: 9 }} />
               <Radar name="Score" dataKey="normalised" stroke="var(--primary)" fill="var(--primary)" fillOpacity={0.2} strokeWidth={2} />
             </RadarChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Pie / Donut: share of total across skills */}
+        <div className="h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <PieChart>
+              <Pie data={normalised} dataKey="normalised" nameKey="dimension"
+                cx="50%" cy="50%" innerRadius={45} outerRadius={80} paddingAngle={2}
+                stroke="var(--surface)" strokeWidth={2}>
+                {normalised.map((d) => (
+                  <Cell key={d.dim} fill={getScoreColor(d.normalised)} />
+                ))}
+              </Pie>
+              <Tooltip formatter={(v) => `${v}/100`} />
+            </PieChart>
           </ResponsiveContainer>
         </div>
       </div>

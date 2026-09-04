@@ -248,7 +248,11 @@ export default function Index() {
             </div>
           </div>
           <div className="pt-4 text-xs flex flex-col sm:flex-row items-center justify-between gap-2" style={{ borderTop: "1px solid var(--line)", color: "var(--muted)" }}>
-            <Link href="/" className="hover:text-foreground transition-colors font-semibold">Fluenzee</Link>
+            <div className="flex items-center gap-4">
+              <Link href="/" className="hover:text-foreground transition-colors font-semibold">Fluenzee</Link>
+              <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
+              <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
+            </div>
             <span>© 2026 Fluenzee — Powered by Graymatter Technologies</span>
           </div>
         </div>

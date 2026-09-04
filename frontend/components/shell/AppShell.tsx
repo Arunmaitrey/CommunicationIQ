@@ -121,8 +121,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         {!isExamRoute && (
         <footer className="border-t border-border bg-surface/50 px-4 py-3 flex items-center justify-between text-[11px] text-muted shrink-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
             <span className="font-semibold text-foreground/70"><Link href="/" className="hover:text-foreground transition-colors">CommunicationIQ</Link></span>
+            <span className="text-muted">|</span>
+            <Link href="/terms" className="hover:text-foreground transition-colors">Terms</Link>
+            <Link href="/privacy" className="hover:text-foreground transition-colors">Privacy</Link>
+            <span className="text-muted">|</span>
             <span>&copy; {new Date().getFullYear()} Fluenzee. All rights reserved.</span>
           </div>
         </footer>

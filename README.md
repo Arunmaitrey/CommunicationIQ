@@ -245,6 +245,8 @@ Login is determined by email domain:
 - `GET /api/v1/student/profiles` — Available assessments
 - `GET /api/v1/student/attempts` — My attempts
 - `GET /api/v1/student/exam-schedules` — Exams scheduled for my institution
+- `GET /api/v1/student/leaderboard` — Student rankings (institution / global)
+- `GET /api/v1/notifications` — In-app notifications (role-scoped feed)
 - `POST /api/v1/student/consent` — Give recording consent
 
 ### Attempts
