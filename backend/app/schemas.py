@@ -417,6 +417,9 @@ class StartAttemptRequest(BaseModel):
     # When starting a practice session from a result page: the assessment
     # attempt that prescribed it, so the loop stays anchored to it.
     source_attempt_id: str | None = None
+    # Optional platform exam schedule this attempt belongs to. When present,
+    # the schedule window and per-student attempt cap are enforced server-side.
+    schedule_id: str | None = None
 
 
 
@@ -1937,4 +1940,26 @@ class ExamTestOut(BaseModel):
     is_baseline: bool
     company: str
     question_ids: dict
+    created_at: datetime | None = None
+
+
+class ScheduledExamRequest(BaseModel):
+    exam_test_id: str = Field(min_length=1)
+    tenant_ids: list[str] = Field(default_factory=list)  # empty = all institutions + general
+    starts_at: datetime
+    ends_at: datetime
+    max_attempts: int = Field(default=1, ge=0, le=50)  # 0 = unlimited
+    is_active: bool = True
+
+
+class ScheduledExamOut(BaseModel):
+    id: str
+    exam_test_id: str
+    profile_id: str = ""
+    name: str
+    tenant_ids: list[str] = []
+    starts_at: datetime
+    ends_at: datetime
+    max_attempts: int = 1
+    is_active: bool = True
     created_at: datetime | None = None

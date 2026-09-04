@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.routers import (attempts, auth, game, invitations, listening,
-                          platform_admin, platform_export,
+                          notifications, platform_admin, platform_export,
                           reading, report, writing,
                           platform_writes, practice, student, tenant_admin,
                           tenant_writes)
@@ -22,69 +22,20 @@ from app.routers import (attempts, auth, game, invitations, listening,
 log = logging.getLogger(__name__)
 
 
-@asynccontextmanager
-async def _seed_core_tests():
-    """Create the 4 core exam tests if none exist."""
-    from app.models.platform import ExamTest
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
-    core_tests = [
-        {
-            "name": "Baseline Diagnostic",
-            "description": "Short diagnostic taken once, before any training is assigned. Establishes the starting point every later attempt is measured against.",
-            "slug": "baseline-diagnostic",
-            "duration_minutes": 15,
-            "reading_questions": 10, "listening_questions": 10,
-            "writing_questions": 10, "speaking_questions": 5,
-            "reading_seconds": 300, "listening_seconds": 300,
-            "writing_seconds": 300, "speaking_seconds": 60,
-            "is_active": True, "is_baseline": True, "company": "",
-            "one_shot_audio": True, "show_timer": True, "allow_pause": False,
-        },
-        {
-            "name": "Professional English",
-            "description": "The long one: ten parts across all four skills, on workplace material throughout. Built to be sat once and read carefully, not repeated weekly.",
-            "slug": "professional-english",
-            "duration_minutes": 55,
-            "reading_questions": 10, "listening_questions": 10,
-            "writing_questions": 10, "speaking_questions": 10,
-            "reading_seconds": 600, "listening_seconds": 600,
-            "writing_seconds": 600, "speaking_seconds": 120,
-            "is_active": True, "is_baseline": False, "company": "",
-            "one_shot_audio": True, "show_timer": True, "allow_pause": False,
-        },
-        {
-            "name": "Versant-style 4 Skills",
-            "description": "Speaking, listening, reading and writing in one sitting. The report gives a score per skill, because a single number over four different abilities describes none of them.",
-            "slug": "versant-4-skills",
-            "duration_minutes": 30,
-            "reading_questions": 10, "listening_questions": 10,
-            "writing_questions": 10, "speaking_questions": 10,
-            "reading_seconds": 450, "listening_seconds": 450,
-            "writing_seconds": 450, "speaking_seconds": 90,
-            "is_active": True, "is_baseline": False, "company": "",
-            "one_shot_audio": True, "show_timer": True, "allow_pause": False,
-        },
-        {
-            "name": "Versant-style Speaking Test",
-            "description": "The Pearson Versant-style spoken test, six parts: read on cue, repeat what you hear, short answers, sentence builds, story retelling, and open questions.",
-            "slug": "versant-speaking",
-            "duration_minutes": 22,
-            "reading_questions": 0, "listening_questions": 10,
-            "writing_questions": 0, "speaking_questions": 20,
-            "reading_seconds": 0, "listening_seconds": 300,
-            "writing_seconds": 0, "speaking_seconds": 60,
-            "is_active": True, "is_baseline": False, "company": "",
-            "one_shot_audio": True, "show_timer": True, "allow_pause": False,
-        },
-    ]
-    for t in core_tests:
-        await ExamTest(**t, created_at=now, updated_at=now).create()
-    log.info("Seeded %d core exam tests", len(core_tests))
+
 
 
 async def _sync_exam_test_profiles():
-    """Create SimulationProfiles + ProfileSections for every ExamTest that lacks one."""
+    """Create SimulationProfiles + ProfileSections for every ExamTest that lacks
+    one, and keep each existing profile's published status in step with the
+    ExamTest's `is_active` flag.
+
+    The profile is the student-facing object (the tests page lists published
+    SimulationProfiles), so this routine is what makes an ExamTest visible or
+    hidden on the student side *without a restart*: toggling `is_active` in the
+    platform console and re-running this sync retires or re-publishes the linked
+    profile immediately.
+    """
     import uuid as _uuid
     from datetime import datetime as _dt, timezone as _tz
     from app.db import control_db as _cdb
@@ -102,6 +53,16 @@ async def _sync_exam_test_profiles():
     for t in tests:
         existing = await db.simulation_profiles.find_one({'name': t.name})
         if existing:
+            # Keep the student-facing profile in step with the ExamTest:
+            # inactive test -> retire profile (hidden); active test -> publish it.
+            want = 'published' if t.is_active else 'retired'
+            if existing.get('status') != want:
+                await db.simulation_profiles.update_one(
+                    {'_id': existing['_id']},
+                    {'$set': {'status': want, 'updated_at': now,
+                              'description': t.description,
+                              'company': t.company or ''}})
+                log.info("ExamTest %s -> SimulationProfile status %s", t.name, want)
             continue
         profile_id = str(_uuid.uuid4())
         sections = []
@@ -141,6 +102,38 @@ async def _sync_exam_test_profiles():
         log.info("Created SimulationProfile for ExamTest: %s", t.name)
 
 
+async def _sync_company_visibility(company_name: str, is_active: bool):
+    """Flip student-facing objects for one company in step with its activation.
+
+    A company round is shown to students through published SimulationProfiles
+    whose `company` matches, and through ExamTests tagged with that company
+    (which own the weightage/timing). Deactivating a company therefore retires
+    those profiles and deactivates those tests; reactivating reverses it — so
+    the Companies console controls student visibility live, without a restart.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    from app.db import control_db as _cdb
+
+    db = _cdb()
+    now = _dt.now(_tz.utc)
+    want_profile = 'published' if is_active else 'retired'
+    await db.simulation_profiles.update_many(
+        {'company': company_name},
+        {'$set': {'status': want_profile, 'updated_at': now}})
+    await db.exam_tests.update_many(
+        {'company': company_name},
+        {'$set': {'is_active': is_active, 'updated_at': now}})
+    # A reactivated company with no published SimulationProfile yet: make sure
+    # its ExamTests still have profiles (create + publish, matching is_active).
+    if is_active:
+        try:
+            await _sync_exam_test_profiles()
+        except Exception:  # noqa: BLE001 — never block a company toggle on this
+            log.exception("profile sync after company activation failed")
+    log.info("Company %s -> active=%s (student-facing profiles/tests synced)",
+             company_name, is_active)
+
+
 async def lifespan(_app: FastAPI):
     """Load the speech model before the first student needs it.
 
@@ -159,129 +152,6 @@ async def lifespan(_app: FastAPI):
         await init_store()
     except Exception:  # noqa: BLE001 — never block startup on this
         log.exception("MongoDB init failed")
-
-    # Seed default companies if none exist
-    try:
-        from app.db import control_db
-        from app.models.tenant import Company
-        db = control_db()
-        existing = await db.companies.count_documents({})
-        if existing == 0:
-            companies_data = [
-                {"name": "Deloitte", "slug": "deloitte", "color": "#86bc25", "description": "Deloitte Touche Tohmatsu Limited"},
-                {"name": "IBM", "slug": "ibm", "color": "#0530ad", "description": "International Business Machines Corporation"},
-                {"name": "HCL", "slug": "hcl", "color": "#0072c6", "description": "HCL Technologies Limited"},
-                {"name": "ADP", "slug": "adp", "color": "#d0271d", "description": "Automatic Data Processing, Inc."},
-                {"name": "Virtusa", "slug": "virtusa", "color": "#00a651", "description": "Virtusa Corporation"},
-                {"name": "LTI", "slug": "lti", "color": "#e4002b", "description": "Larsen & Toubro Infotech Limited"},
-            ]
-            for c in companies_data:
-                company = Company(**c)
-                await company.create()
-            log.info("Seeded %d default companies", len(companies_data))
-    except Exception:
-        log.exception("Company seeding failed")
-
-    # Seed general tenant for external users if not exists
-    try:
-        from app.models.platform import Tenant, TenantUserDirectory
-        existing = await Tenant.find_one(Tenant.slug == "general")
-        if not existing:
-            general_tenant = Tenant(
-                name="General Users",
-                slug="general",
-                tenant_type="other",
-                status="active",
-                seat_limit=10000,
-            )
-            await general_tenant.create()
-            log.info("Created general tenant for external users")
-    except Exception:
-        log.exception("General tenant seeding failed")
-
-    # Seed default subscription plans if none exist
-    try:
-        from app.db import control_db as _cdb
-        from app.models.platform import Plan
-        _db = _cdb()
-        plan_count = await _db.plans.count_documents({})
-        if plan_count == 0:
-            plans_data = [
-                {
-                    "name": "Free Trial",
-                    "slug": "free-trial",
-                    "description": "Get started with limited practice questions and basic features. Perfect for trying out CommunicationIQ.",
-                    "price_monthly": 0.0,
-                    "price_yearly": 0.0,
-                    "seat_limit": 1,
-                    "features": ["5 practice questions per day", "Basic analytics", "1 attempt per test"],
-                    "max_questions": 5,
-                    "max_exams_per_day": 1,
-                    "has_proctoring": False,
-                    "has_analytics": True,
-                    "has_custom_branding": False,
-                    "has_api_access": False,
-                    "is_active": True,
-                    "is_default": True,
-                },
-                {
-                    "name": "1-Week Trial",
-                    "slug": "weekly-trial",
-                    "description": "Full access for 7 days. Try all features including proctoring and company-specific tests.",
-                    "price_monthly": 9.99,
-                    "price_yearly": 0.0,
-                    "seat_limit": 1,
-                    "features": ["Unlimited practice questions", "Full analytics", "3 attempts per test", "Proctoring", "Company-specific tests"],
-                    "max_questions": 500,
-                    "max_exams_per_day": 3,
-                    "has_proctoring": True,
-                    "has_analytics": True,
-                    "has_custom_branding": False,
-                    "has_api_access": False,
-                    "is_active": True,
-                    "is_default": False,
-                },
-                {
-                    "name": "Monthly Pro",
-                    "slug": "monthly-pro",
-                    "description": "Unlimited access with proctoring, analytics, and all company tests. Billed monthly.",
-                    "price_monthly": 29.99,
-                    "price_yearly": 299.99,
-                    "seat_limit": 1,
-                    "features": ["Unlimited practice", "Advanced analytics", "Unlimited attempts", "Proctoring", "All company tests", "Priority support"],
-                    "max_questions": 5000,
-                    "max_exams_per_day": 50,
-                    "has_proctoring": True,
-                    "has_analytics": True,
-                    "has_custom_branding": False,
-                    "has_api_access": False,
-                    "is_active": True,
-                    "is_default": False,
-                },
-                {
-                    "name": "Custom Enterprise",
-                    "slug": "custom-enterprise",
-                    "description": "Tailored solution for institutions and enterprises. Contact us for pricing.",
-                    "price_monthly": 0.0,
-                    "price_yearly": 0.0,
-                    "seat_limit": 10000,
-                    "features": ["Everything in Monthly Pro", "Custom branding", "API access", "Dedicated support", "Bulk student management", "Custom test creation"],
-                    "max_questions": 999999,
-                    "max_exams_per_day": 999,
-                    "has_proctoring": True,
-                    "has_analytics": True,
-                    "has_custom_branding": True,
-                    "has_api_access": True,
-                    "is_active": True,
-                    "is_default": False,
-                },
-            ]
-            for p_data in plans_data:
-                plan = Plan(**p_data)
-                await plan.create()
-            log.info("Seeded %d subscription plans", len(plans_data))
-    except Exception:
-        log.exception("Plan seeding failed")
 
     # Operator-configured AI settings: create the table on an estate that
     # predates it, then fold any stored overrides onto the live settings so
@@ -316,21 +186,8 @@ async def lifespan(_app: FastAPI):
         from app.narration.worker import run_forever
         narration_task = asyncio.create_task(run_forever())
 
-    # Seed core exam tests if none exist
-    try:
-        from app.db import control_db as _cdb2
-        _db2 = _cdb2()
-        count = await _db2.exam_tests.count_documents({})
-        if count == 0:
-            await _seed_core_tests()
-    except Exception:
-        log.exception("Failed to seed core exam tests")
-
-    # Ensure SimulationProfiles exist for every ExamTest
-    try:
-        await _sync_exam_test_profiles()
-    except Exception:
-        log.exception("Failed to sync exam test profiles")
+    # No content seeding at startup: tests, companies and plans are created by
+    # the platform admin and persist in the database.
 
     # AI question generation scheduler
     question_gen_task = None
@@ -388,6 +245,7 @@ app.include_router(platform_admin.asset_router, prefix=API)
 app.include_router(platform_writes.router, prefix=API)
 app.include_router(platform_export.router, prefix=API)
 app.include_router(invitations.router, prefix=API)
+app.include_router(notifications.router, prefix=API)
 app.include_router(report.router, prefix=API)
 # Unauthenticated. A candidate arrives holding a token and nothing else, so
 # this is the one router with no session behind it -- see its module docstring

@@ -39,9 +39,9 @@ async def check_subscription(principal: Principal) -> bool:
 
     # Free plan single-use enforcement
     if plan_doc.get("slug") == "free-trial":
-        # Count attempts for this user
+        # Count attempts for this user, scoped by tenant
         attempts_count = await db.get_collection("attempts").count_documents(
-            {"user_id": principal.user_id}
+            {"user_id": principal.user_id, "tenant_id": principal.tenant_id}
         )
         max_free = plan_doc.get("max_exams_per_day", 1)
         if attempts_count >= max_free:

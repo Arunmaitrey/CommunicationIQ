@@ -7,10 +7,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, UploadFile, status
 
 from app.db import control_db
-from app.deps import Principal, ensure_tenant_models
+from app.deps import Principal, ensure_tenant_models, require_roles
 from app.models.platform import PlatformUser, Tenant, TenantUserDirectory
 from app.models.tenant import User
 from app.schemas import (ChangePasswordRequest, LoginRequest, LoginResponse,
@@ -18,7 +18,6 @@ from app.schemas import (ChangePasswordRequest, LoginRequest, LoginResponse,
 from app import audit
 from app.security import (TokenPrincipal, create_token, hash_password,
                           verify_password)
-from app.deps import Principal, require_roles
 from app.routers.login_rate_limit import (
     is_blocked, record_failure, reset, LOGIN_RATE_LIMIT_MESSAGE,
 )
@@ -240,7 +239,8 @@ async def save_preferences(body: dict, principal: Principal) -> dict:
 async def upload_avatar(file: "UploadFile", principal: Principal) -> dict:
     """Upload a student avatar image."""
     import uuid as _uuid, os
-    from app.models.platform import ensure_tenant_models, Tenant
+    from app.db import ensure_tenant_models
+    from app.models.platform import Tenant
     ext = os.path.splitext(file.filename or "avatar.jpg")[1] or ".jpg"
     key = f"avatars/{_uuid.uuid4().hex}{ext}"
     upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "avatars")

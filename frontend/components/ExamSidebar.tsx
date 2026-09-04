@@ -59,6 +59,7 @@ function playWarningSound(frequency: number = 800, duration: number = 200) {
     gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + duration / 1000);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + duration / 1000);
+    osc.onended = () => ctx.close();
   } catch {}
 }
 

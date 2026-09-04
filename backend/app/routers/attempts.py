@@ -2916,6 +2916,46 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
     if profile is None or profile.status != "published":
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Simulation not available")
 
+    # Platform exam-schedule enforcement: when this attempt is started from a
+    # scheduled exam, the institution window and the per-student attempt cap
+    # both apply. A schedule is only enforced for the institution(s) it was
+    # created for (or for everyone when tenant_ids is empty).
+    if body.schedule_id:
+        from app.models.platform import ScheduledExam
+        sched = await ScheduledExam.get(body.schedule_id)
+        if sched is None or not sched.is_active:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "This scheduled exam is no longer active")
+        if sched.exam_test_id and sched.profile_id and sched.profile_id != profile.id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Schedule does not match the selected exam")
+        now = datetime.now(timezone.utc)
+        if now < sched.starts_at:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "This exam opens on "
+                                + sched.starts_at.strftime("%d %b %Y %H:%M UTC"))
+        if now > sched.ends_at:
+            raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                "The window for this exam closed on "
+                                + sched.ends_at.strftime("%d %b %Y %H:%M UTC"))
+        if sched.tenant_ids:
+            if not principal.tenant_id or principal.tenant_id not in sched.tenant_ids:
+                raise HTTPException(status.HTTP_403_FORBIDDEN,
+                                    "This exam is not scheduled for your institution")
+        if sched.max_attempts and sched.max_attempts > 0:
+            taken = (await session.execute(
+                select(func.count()).select_from(Attempt)
+                .where(Attempt.user_id == principal.user_id,
+                       Attempt.profile_id == profile.id,
+                       Attempt.created_at >= sched.starts_at,
+                       Attempt.created_at <= sched.ends_at)
+            )).scalar_one()
+            if int(taken) >= sched.max_attempts:
+                raise HTTPException(
+                    status.HTTP_409_CONFLICT,
+                    f"You have already used your {sched.max_attempts} attempt(s) "
+                    "for this scheduled exam")
+
     # SimulationProfile carries no relationship to its sections — they are a
     # separate collection, addressed by profile_id, and were never anything
     # SQLAlchemy's selectinload could actually eager-load once this became a

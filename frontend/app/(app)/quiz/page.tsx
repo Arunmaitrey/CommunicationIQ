@@ -87,10 +87,6 @@ function Quiz() {
     }
   }, [stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (stage === "intro") {
-    return <FullscreenPrompt onStart={() => setStage("idle")} />;
-  }
-
   // The shot clock. Running out is an unanswered item, not a wrong one.
   useEffect(() => {
     if (stage !== "playing" || !item) return;
@@ -102,6 +98,10 @@ function Quiz() {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, seconds, index]);
+
+  if (stage === "intro") {
+    return <FullscreenPrompt onStart={() => setStage("idle")} />;
+  }
 
   // Difficulty selection screen
   if (stage === "select") {

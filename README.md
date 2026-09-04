@@ -2,6 +2,9 @@
 
 Communication assessment and training platform for placement readiness. AI-powered scoring of pronunciation, fluency, grammar, content, and listening comprehension. Multi-tenant SaaS with data isolation by `tenant_id` on MongoDB Atlas.
 
+> **📖 Docs** — Recent feature work and the new **Exam Scheduling** system are
+> summarised in [`docs/changes-and-exam-schedules.md`](docs/changes-and-exam-schedules.md).
+
 ## Architecture
 
 ```
@@ -241,6 +244,7 @@ Login is determined by email domain:
 - `GET /api/v1/student/home` — Dashboard data
 - `GET /api/v1/student/profiles` — Available assessments
 - `GET /api/v1/student/attempts` — My attempts
+- `GET /api/v1/student/exam-schedules` — Exams scheduled for my institution
 - `POST /api/v1/student/consent` — Give recording consent
 
 ### Attempts
@@ -267,6 +271,12 @@ Login is determined by email domain:
 - `GET /api/v1/platform/questions/items` — Question bank
 - `POST /api/v1/platform/questions/{category}` — Create question
 - `DELETE /api/v1/platform/questions/{collection}/{id}` — Delete question
+- `GET /api/v1/platform/exam-tests` — List exam tests
+- `POST /api/v1/platform/exam-tests` — Create an exam test
+- `GET /api/v1/platform/exam-schedules` — List scheduled exams
+- `POST /api/v1/platform/exam-schedules` — Schedule an exam for institutions
+- `PATCH /api/v1/platform/exam-schedules/{id}` — Update a schedule
+- `DELETE /api/v1/platform/exam-schedules/{id}` — Delete a schedule
 - `GET /api/v1/platform/audit` — Audit log
 
 ### Practice
@@ -468,3 +478,4 @@ CommunicationIQ/
 - All forms must validate before submission
 - All navigation links must resolve to existing pages
 - No emojis, no mock data, no placeholder content in production UI
+

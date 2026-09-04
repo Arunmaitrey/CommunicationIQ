@@ -13,6 +13,8 @@ const config: Config = {
         surface: "var(--surface)",
         surface2: "var(--surface-2)",
         text: "var(--text)",
+        // Legacy alias used by pages ported from a shadcn-style palette.
+        foreground: "var(--text)",
         muted: "var(--muted)",
         border: "var(--border)",
         primary: "var(--primary)",

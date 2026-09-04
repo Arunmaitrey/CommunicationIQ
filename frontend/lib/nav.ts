@@ -3,6 +3,7 @@ import {
   Home, Layers, LineChart, Mic, PenLine,
   ScrollText, Settings, ShieldCheck, Star, Target, Trophy, Users,
   CreditCard, Mail, Package, MessageSquare, ClipboardList, Contact,
+  CalendarClock,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { Role } from "@/lib/api";
@@ -48,6 +49,7 @@ export const NAV: NavSection[] = [
       { href: "/practise", label: "Practise", icon: Target, roles: STUDENT, tint: TINT.teal },
       { href: "/tests", label: "Take a test", icon: Mic, roles: STUDENT, tint: TINT.violet },
       { href: "/my-progress", label: "My progress", icon: LineChart, roles: STUDENT, tint: TINT.sky },
+      { href: "/leaderboard", label: "Leaderboard", icon: Trophy, roles: STUDENT, tint: TINT.emerald },
       { href: "/writing-reviews", label: "Writing reviews", icon: PenLine, roles: STUDENT, tint: TINT.orange },
       { href: "/plans", label: "Plans", icon: CreditCard, roles: STUDENT, tint: TINT.violet, generalOnly: true },
       { href: "/contact", label: "Contact Us", icon: Contact, roles: STUDENT, tint: TINT.sky },
@@ -84,6 +86,7 @@ export const NAV: NavSection[] = [
       { href: "/platform/content", label: "Question Bank", icon: BookOpen, roles: PLATFORM, tint: TINT.emerald },
       { href: "/platform/sets", label: "Question Sets", icon: Layers, roles: PLATFORM, tint: TINT.teal },
       { href: "/platform/exam-tests", label: "Exam Tests", icon: ClipboardList, roles: PLATFORM, tint: TINT.cyan },
+      { href: "/platform/exam-schedules", label: "Exam Schedules", icon: CalendarClock, roles: PLATFORM, tint: TINT.rose },
       { href: "/platform/companies", label: "Companies", icon: Building2, roles: PLATFORM, tint: TINT.indigo },
     ],
   },

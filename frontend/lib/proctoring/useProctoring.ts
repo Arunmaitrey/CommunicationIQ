@@ -103,15 +103,17 @@ export function useProctoring() {
       addEvent("tab_focus", "low", "Student returned to exam");
     };
 
-    document.addEventListener("visibilitychange", () => {
+    const onVisChange = () => {
       if (document.hidden) onBlur();
       else onFocus();
-    });
+    };
+
+    document.addEventListener("visibilitychange", onVisChange);
     window.addEventListener("blur", onBlur);
     window.addEventListener("focus", onFocus);
 
     return () => {
-      document.removeEventListener("visibilitychange", onBlur);
+      document.removeEventListener("visibilitychange", onVisChange);
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("focus", onFocus);
     };
@@ -306,31 +308,32 @@ export function useProctoring() {
 
   // ── Screen Recording Detection ──────────────────────────────────────────
   useEffect(() => {
-    // Check for screen recording APIs
-    const checkScreenRecording = () => {
-      // Check if getDisplayMedia is being used (screen sharing/recording)
-      if (navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices) {
-        // Monitor for screen share events
-        const origGetDisplayMedia = navigator.mediaDevices.getDisplayMedia;
-        navigator.mediaDevices.getDisplayMedia = async function(...args) {
-          addEvent("screen_share_attempt", "high", "Screen sharing/recording attempted");
-          return origGetDisplayMedia.apply(this, args);
-        };
-      }
-    };
+    let origGetDisplayMedia: typeof navigator.mediaDevices.getDisplayMedia | null = null;
 
-    checkScreenRecording();
-
-    // Monitor for media device changes (external cameras, microphones)
-    if (navigator.mediaDevices && 'devicechange' in navigator.mediaDevices) {
-      const onDeviceChange = () => {
-        addEvent("device_change", "medium", "Media device change detected");
-      };
-      navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
-      return () => {
-        navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
+    if (navigator.mediaDevices && 'getDisplayMedia' in navigator.mediaDevices) {
+      origGetDisplayMedia = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);
+      navigator.mediaDevices.getDisplayMedia = async function(...args) {
+        addEvent("screen_share_attempt", "high", "Screen sharing/recording attempted");
+        return origGetDisplayMedia!(...args);
       };
     }
+
+    const onDeviceChange = () => {
+      addEvent("device_change", "medium", "Media device change detected");
+    };
+
+    if (navigator.mediaDevices && 'devicechange' in navigator.mediaDevices) {
+      navigator.mediaDevices.addEventListener("devicechange", onDeviceChange);
+    }
+
+    return () => {
+      if (origGetDisplayMedia) {
+        navigator.mediaDevices.getDisplayMedia = origGetDisplayMedia;
+      }
+      if (navigator.mediaDevices && 'devicechange' in navigator.mediaDevices) {
+        navigator.mediaDevices.removeEventListener("devicechange", onDeviceChange);
+      }
+    };
   }, [addEvent]);
 
   // ── Summary for submission ──────────────────────────────────────────────

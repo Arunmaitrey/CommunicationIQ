@@ -1,8 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Clock, Filter, Mic, ShieldCheck } from "lucide-react";
+import { AlertTriangle, CalendarClock, Clock, Filter, Mic, ShieldCheck } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StepGuide } from "@/components/StepGuide";
 import {
@@ -38,9 +38,20 @@ export default function TestsPage() {
 function Tests() {
   const router = useRouter();
   const { data, loading, error } = useData(() => api.studentHome());
+  const [scheduled, setScheduled] = useState<any[]>([]);
   const [starting, setStarting] = useState("");
   const [startError, setStartError] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
+
+  // Platform-scheduled exams for this student's institution. Loaded beside
+  // the library so a drive window shows up without a page reload.
+  useEffect(() => {
+    let live = true;
+    api.studentExamSchedules()
+      .then((rows) => { if (live) setScheduled(rows ?? []); })
+      .catch(() => { /* schedules are additive; silence failures */ });
+    return () => { live = false; };
+  }, []);
 
   const inProgressByProfile = new Map<string, string>();
   for (const a of data?.recent_attempts ?? []) {
@@ -75,6 +86,19 @@ function Tests() {
 
   function resume(attemptId: string) {
     router.push(`/attempt/${attemptId}/run`);
+  }
+
+  async function startScheduled(sched: any) {
+    if (!sched.profile_id) return;
+    setStarting(sched.id);
+    setStartError("");
+    try {
+      const attempt = await attemptApi.start(sched.profile_id, "official", undefined, sched.id);
+      router.push(`/attempt/${attempt.attempt_id}/run`);
+    } catch (err) {
+      setStartError(err instanceof ApiError ? err.detail : "Could not start the exam");
+      setStarting("");
+    }
   }
 
   return (
@@ -114,6 +138,23 @@ function Tests() {
       )}
 
       {startError && <div className="mb-4"><ErrorNote message={startError} /></div>}
+
+      {scheduled.length > 0 && (
+        <Section title="Scheduled for your institution" className="mb-4">
+          <p className="text-xs text-muted mb-3 leading-relaxed">
+            Exams your institution has scheduled — open only inside the stated window.
+          </p>
+          <div className="grid md:grid-cols-2 gap-3">
+            {scheduled
+              .filter((s) => s.status !== "ended")
+              .map((s) => (
+                <ScheduledCard key={s.id} sched={s} consented={consented}
+                  starting={starting === s.id} anyStarting={starting !== ""}
+                  onStart={() => void startScheduled(s)} />
+              ))}
+          </div>
+        </Section>
+      )}
 
       {/* Everyone needs this first, and it is the only test that is a
           prerequisite, so it is not left for the student to infer. */}
@@ -318,6 +359,68 @@ function TestCard({ profile: p, first, consented, starting, anyStarting, inProgr
             {starting ? "Starting…" : <>Start <span aria-hidden>→</span></>}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ScheduledCard({ sched: s, consented, starting, anyStarting, onStart }: {
+  sched: any; consented: boolean; starting: boolean; anyStarting: boolean;
+  onStart: () => void;
+}) {
+  const live = s.status === "live";
+  const exhausted = s.max_attempts > 0 && s.attempts_used >= s.max_attempts;
+  const blocked = !live || exhausted || !s.profile_id;
+
+  let statusLabel = "Ended";
+  if (s.status === "upcoming") statusLabel = "Opens soon";
+  else if (s.status === "live") statusLabel = "Live now";
+
+  return (
+    <div className="ds-card p-4 flex flex-col" style={{ borderColor: live ? "var(--rag-green)" : "var(--border)" }}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-sm font-bold">{s.name}</div>
+        <Badge tone={live ? "var(--rag-green)" : "var(--rag-amber)"}>{statusLabel}</Badge>
+      </div>
+      <p className="text-[11px] text-muted mt-1.5 leading-relaxed">{s.description}</p>
+
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-3 pt-3 border-t border-border">
+        <span className="flex items-center gap-1 text-[11px] text-muted">
+          <Clock size={11} /> {s.duration_minutes} min
+        </span>
+        <span className="text-[11px] text-muted">{s.total_questions} questions</span>
+        <span className="text-[11px] text-muted">{s.total_parts} part{s.total_parts === 1 ? "" : "s"}</span>
+        {s.max_attempts > 0 && (
+          <span className="text-[11px] text-muted">
+            {s.attempts_used}/{s.max_attempts} used
+          </span>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-0.5 mt-2 text-[10px] text-muted">
+        <span className="flex items-center gap-1">
+          <CalendarClock size={10} /> Opens {new Date(s.starts_at).toLocaleString()}
+        </span>
+        <span className="flex items-center gap-1">
+          <Clock size={10} /> Closes {new Date(s.ends_at).toLocaleString()}
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-border">
+        <span className="text-[10px] text-muted leading-relaxed">
+          {blocked && !live && "This exam is not open yet — the window decides."}
+          {blocked && exhausted && "You have used your attempts for this window."}
+          {blocked && !s.profile_id && "Not ready to start — check back shortly."}
+          {!blocked && (consented ? "Mic check first, then the exam begins."
+                                  : "Locked until you have consented above.")}
+        </span>
+        <button
+          className="btn btn-primary btn-sm ds-focus shrink-0"
+          disabled={blocked || !consented || anyStarting}
+          onClick={onStart}
+        >
+          {starting ? "Starting…" : live && !exhausted ? <>Start <span aria-hidden>→</span></> : "View"}
+        </button>
       </div>
     </div>
   );

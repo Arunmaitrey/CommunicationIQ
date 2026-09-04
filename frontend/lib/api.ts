@@ -653,6 +653,13 @@ export const api = {
   updateExamTest: (id: string, body: any) => request<any>(`/platform/exam-tests/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteExamTest: (id: string) => request<any>(`/platform/exam-tests/${id}`, { method: "DELETE" }),
 
+  // Exam Schedules
+  platformExamSchedules: () => get<any[]>("/platform/exam-schedules"),
+  createExamSchedule: (body: any) => post<{ id: string; ok: boolean }>("/platform/exam-schedules", body),
+  updateExamSchedule: (id: string, body: any) => request<any>(`/platform/exam-schedules/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteExamSchedule: (id: string) => request<any>(`/platform/exam-schedules/${id}`, { method: "DELETE" }),
+  studentExamSchedules: () => get<any[]>("/student/exam-schedules"),
+
   // Question Sets
   platformQuestionSets: (module?: string) => get<any[]>(`/platform/question-sets${module ? `?module=${module}` : ""}`),
   generateQuestionSets: (module: string, count: number) => post<any>(`/platform/question-sets/generate?module=${module}&count=${count}`, {}),
@@ -663,6 +670,16 @@ export const api = {
 
   // Public plans (for student home page)
   publicPlans: () => get<any[]>("/platform/plans"),
+
+  // Leaderboard (student)
+  studentLeaderboard: (scope: "institution" | "global" = "institution") =>
+    get<any>(`/student/leaderboard?scope=${scope}`),
+
+  // In-app notifications (all roles)
+  notificationsFeed: () => get<{ items: any[]; unread: number }>("/notifications"),
+  notificationsMarkRead: (keys: string[]) =>
+    request<any>("/notifications", { method: "PATCH", body: JSON.stringify({ keys }) }),
+  notificationsReadAll: () => post<any>("/notifications/read-all", {}),
 };
 
 /** A stored secret, never returned whole. */
@@ -1155,9 +1172,10 @@ export const attemptApi = {
   },
 
   start: (profileId: string, mode: "practice" | "official" | "stress" = "practice",
-          sourceAttemptId?: string) =>
+          sourceAttemptId?: string, scheduleId?: string) =>
     post<RunnerPayload>(ATTEMPTS, { profile_id: profileId, mode,
-                                    source_attempt_id: sourceAttemptId ?? null }),
+                                    source_attempt_id: sourceAttemptId ?? null,
+                                    schedule_id: scheduleId ?? null }),
 
   runner: (attemptId: string) => get<RunnerPayload>(`${ATTEMPTS}/${attemptId}/runner`),
 

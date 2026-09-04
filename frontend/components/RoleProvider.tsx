@@ -64,13 +64,13 @@ export function RoleProvider({ children }: { children: ReactNode }) {
     void refresh().finally(() => clearTimeout(id));
   }, [refresh]);
 
-  const signIn = (u: SessionUser, token: string) => {
+  const signIn = useCallback((u: SessionUser, token: string) => {
     resetSessionExpiry();
     setToken(token);
     setUser(u);
     writeIdentity(u);
     setLoading(false);
-  };
+  }, []);
 
   const signOut = useCallback(() => {
     // Fire-and-forget: record logout in audit log before clearing token

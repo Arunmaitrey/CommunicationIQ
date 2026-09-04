@@ -13,6 +13,7 @@ The report includes:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from html import escape as _h
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
@@ -138,9 +139,9 @@ def _html_report(
             else:
                 label = str(h)
                 detail = ""
-            html += f"<li><strong>{label}</strong>"
+            html += f"<li><strong>{_h(label)}</strong>"
             if detail:
-                html += f" — {detail}"
+                html += f" — {_h(detail)}"
             html += "</li>"
         html += "</ul>"
         return html
@@ -152,11 +153,11 @@ def _html_report(
             label = rec.get("label", rec.get("text", ""))
             detail = rec.get("detail", rec.get("note", ""))
             surface = rec.get("surface", "")
-            rec_html += f'<div class="rec"><strong>{label}</strong>'
+            rec_html += f'<div class="rec"><strong>{_h(label)}</strong>'
             if detail:
-                rec_html += f'<br><span class="muted">{detail}</span>'
+                rec_html += f'<br><span class="muted">{_h(detail)}</span>'
             if surface:
-                rec_html += f'<br><a href="/{surface}" class="rec-link">Start practising →</a>'
+                rec_html += f'<br><a href="/{_h(surface)}" class="rec-link">Start practising →</a>'
             rec_html += "</div>"
 
     # Diagnosis
@@ -193,13 +194,13 @@ def _html_report(
 
     logo_html = ""
     if tenant_logo:
-        logo_html = f'<img src="{tenant_logo}" alt="{tenant_name}" class="logo" />'
+        logo_html = f'<img src="{_h(tenant_logo)}" alt="{_h(tenant_name)}" class="logo" />'
 
     return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>Exam Report — {student_name} — {profile_name}</title>
+<title>Exam Report — {_h(student_name)} — {_h(profile_name)}</title>
 <style>
   @page {{ margin: 1.5cm; size: A4; }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
@@ -260,7 +261,7 @@ def _html_report(
     {logo_html}
     <div class="header-text">
       <h1>Exam Report</h1>
-      <div class="sub">{tenant_name} — CommunicationIQ</div>
+      <div class="sub">{_h(tenant_name)} — CommunicationIQ</div>
     </div>
   </div>
 
@@ -268,11 +269,11 @@ def _html_report(
   <div class="section">
     <h2>Details</h2>
     <dl class="meta-grid">
-      <dt>Student</dt><dd>{student_name}</dd>
-      <dt>Email</dt><dd>{student_email}</dd>
-      {"<dt>Roll Number</dt><dd>" + student_roll + "</dd>" if student_roll else ""}
-      {"<dt>Branch</dt><dd>" + student_branch + "</dd>" if student_branch else ""}
-      <dt>Assessment</dt><dd>{profile_name}{" (Baseline)" if is_baseline else ""}</dd>
+      <dt>Student</dt><dd>{_h(student_name)}</dd>
+      <dt>Email</dt><dd>{_h(student_email)}</dd>
+      {"<dt>Roll Number</dt><dd>" + _h(student_roll) + "</dd>" if student_roll else ""}
+      {"<dt>Branch</dt><dd>" + _h(student_branch) + "</dd>" if student_branch else ""}
+      <dt>Assessment</dt><dd>{_h(profile_name)}{" (Baseline)" if is_baseline else ""}</dd>
       <dt>Attempt</dt><dd>#{attempt_number} — {mode.title()}</dd>
       <dt>Started</dt><dd>{_fmt_dt(started_at)}</dd>
       <dt>Submitted</dt><dd>{_fmt_dt(submitted_at)}</dd>
@@ -327,7 +328,7 @@ def _html_report(
   {"" if not summary else """
   <div class="section">
     <h2>Summary</h2>
-    <p>""" + summary + """</p>
+    <p>""" + _h(summary) + """</p>
   </div>"""}
 
   <!-- Strengths -->

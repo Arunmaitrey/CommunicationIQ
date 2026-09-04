@@ -1,9 +1,10 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
   Bell, LogOut, Mail, Menu, PanelLeftClose, PanelLeftOpen, ShieldCheck, Trophy, X,
+  FileText, Clock, AlertTriangle, CheckCircle2,
 } from "lucide-react";
 import { BrandMark, TenantLockup } from "@/components/brand/BrandMark";
 import { useRole } from "@/components/RoleProvider";
@@ -11,7 +12,7 @@ import { ThemePicker } from "@/components/shell/ThemePicker";
 import { useRailCollapsed } from "@/components/shell/useRailCollapsed";
 import { WordField } from "@/components/shell/WordField";
 import { Avatar } from "@/components/ui";
-import { assetUrl, type SessionUser } from "@/lib/api";
+import { api, assetUrl, type SessionUser } from "@/lib/api";
 import { navFor } from "@/lib/nav";
 import { ROLE_LABEL } from "@/lib/roles";
 
@@ -134,68 +135,40 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 /** Avatar + name in the header, made clickable: opens a small card with the
  *  signed-in account's basic details and sign-out, rather than sign-out
  *  living as its own icon with nothing behind the name it sits next to. */
-/** Notification bell with red badge for recent activity. */
+/** Notification bell fed by the backend /notifications feed (role-aware),
+ *  with persisted read state and click-through to the related page. */
+interface BellItem {
+  key: string;
+  type: "exam_result" | "reminder" | "achievement" | "warning" | "info";
+  title: string;
+  message: string;
+  timestamp: string;
+  read: boolean;
+  action_url?: string;
+}
+
 function NotificationBell({ user }: { user: SessionUser | null }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const [items, setItems] = useState<{
-    id: string; title: string; body: string; read: boolean; at: string;
-  }[]>([]);
+  const [items, setItems] = useState<BellItem[]>([]);
+
+  const load = async (silent = false) => {
+    if (!user) return;
+    try {
+      const data = await api.notificationsFeed();
+      setItems((data?.items ?? []).slice(0, 25));
+    } catch {
+      if (!silent) setItems([]);
+    }
+  };
 
   useEffect(() => {
-    if (!user) return;
-    const token = localStorage.getItem("commiq.token") ?? "";
-    const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8010/api/v1";
-    const headers = { Authorization: `Bearer ${token}` };
-
-    if (user.scope === "platform") {
-      // Platform admins see audit events
-      fetch(`${API}/platform/audit`, { headers })
-        .then(r => r.ok ? r.json() : [])
-        .then((rows: Array<{id: string; action: string; actor_label: string; entity: string; at: string}>) => {
-          setItems(rows.slice(0, 20).map((r) => ({
-            id: r.id, title: r.action.replace(/_/g, " "),
-            body: `${r.actor_label} — ${r.entity}`, read: false, at: r.at,
-          })));
-        }).catch(() => {});
-    } else if (user.role === "student") {
-      // Students see their attempts and streak
-      fetch(`${API}/student/home`, { headers })
-        .then(r => r.ok ? r.json() : null)
-        .then((home) => {
-          if (!home) return;
-          const n = [];
-          for (const a of (home.recent_attempts ?? []).slice(0, 10)) {
-            n.push({
-              id: a.id, title: `Exam: ${a.profile_name}`,
-              body: a.status === "scored" ? `Score: ${a.overall_score ?? "—"}` : a.status,
-              read: a.status === "scored", at: a.scored_at || a.started_at || "",
-            });
-          }
-          if (home.quest && !home.quest.completed) {
-            n.unshift({
-              id: "quest", title: home.quest.title,
-              body: home.quest.description, read: false, at: home.quest.for_date,
-            });
-          }
-          setItems(n);
-        }).catch(() => {});
-    } else {
-      // Tenant admins see their institution's users and recent logins
-      fetch(`${API}/tenant/users`, { headers })
-        .then(r => r.ok ? r.json() : [])
-        .then((rows: Array<{id: string; full_name: string; email: string; role: string; active: boolean}>) => {
-          const n = [];
-          for (const u of (rows ?? []).slice(0, 15)) {
-            n.push({
-              id: u.id, title: `${u.role === "student" ? "Student" : "Admin"}: ${u.full_name}`,
-              body: u.email, read: u.active, at: "",
-            });
-          }
-          setItems(n);
-        }).catch(() => {});
-    }
-  }, [user]);
+    void load();
+    const t = setInterval(() => void load(true), 45_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id, user?.role, user?.scope]);
 
   useEffect(() => {
     if (!open) return;
@@ -206,30 +179,42 @@ function NotificationBell({ user }: { user: SessionUser | null }) {
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
-  // Read/unread tracking via localStorage
-  const READ_KEY = "commiq.notifications.read";
-  const getReadSet = (): Set<string> => {
-    try {
-      const raw = localStorage.getItem(READ_KEY);
-      return raw ? new Set(JSON.parse(raw)) : new Set();
-    } catch { return new Set(); }
-  };
-  const markRead = (id: string) => {
-    const s = getReadSet();
-    s.add(id);      localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s)));
-    setItems((prev) => prev.map((n) => n.id === id ? { ...n, read: true } : n));
-  };
-  const markAllRead = () => {
-    const s = getReadSet();
-    items.forEach((n) => s.add(n.id));
-    localStorage.setItem(READ_KEY, JSON.stringify(Array.from(s)));
-    setItems((prev) => prev.map((n) => ({ ...n, read: true })));
+  const markRead = async (n: BellItem) => {
+    if (!n.read) {
+      setItems((prev) => prev.map((x) => x.key === n.key ? { ...x, read: true } : x));
+      api.notificationsMarkRead([n.key]).catch(() => {});
+    }
+    setOpen(false);
+    if (n.action_url) router.push(n.action_url);
   };
 
-  // Apply read state from localStorage after items load
-  const readSet = getReadSet();
-  const resolved = items.map((n) => ({ ...n, read: n.read || readSet.has(n.id) }));
-  const unread = resolved.filter((n) => !n.read).length;
+  const markAllRead = async () => {
+    setItems((prev) => prev.map((x) => ({ ...x, read: true })));
+    api.notificationsReadAll().catch(() => {});
+  };
+
+  const unread = items.filter((n) => !n.read).length;
+
+  const typeIcon = (type: BellItem["type"]) => {
+    switch (type) {
+      case "exam_result": return <FileText size={13} style={{ color: "var(--primary)" }} />;
+      case "reminder": return <Clock size={13} style={{ color: "var(--rag-amber)" }} />;
+      case "achievement": return <Trophy size={13} style={{ color: "var(--rag-green)" }} />;
+      case "warning": return <AlertTriangle size={13} style={{ color: "var(--rag-red)" }} />;
+      default: return <Bell size={13} style={{ color: "var(--muted)" }} />;
+    }
+  };
+  const timeAgo = (ts: string) => {
+    if (!ts) return "";
+    const diff = Date.now() - new Date(ts).getTime();
+    if (Number.isNaN(diff)) return "";
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs / 24)}d ago`;
+  };
 
   return (
     <div className="relative" ref={ref}>
@@ -249,30 +234,32 @@ function NotificationBell({ user }: { user: SessionUser | null }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-y-auto ds-card p-3 z-50 animate-fade-in">
+        <div className="absolute right-0 mt-2 w-96 max-h-[70vh] overflow-y-auto ds-card p-3 z-50 animate-fade-in">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold">Notifications</span>
             {unread > 0 && (
               <button onClick={markAllRead} className="text-[10px] text-primary hover:underline ds-focus">Mark all read</button>
             )}
           </div>
-          {resolved.length === 0 ? (
-            <p className="text-[11px] text-muted py-2">No recent activity.</p>
+          {items.length === 0 ? (
+            <p className="text-[11px] text-muted py-2">No notifications yet.</p>
           ) : (
             <div className="space-y-1.5">
-              {resolved.map((n) => (
+              {items.map((n) => (
                 <button
-                  key={n.id}
-                  onClick={() => markRead(n.id)}
+                  key={n.key}
+                  onClick={() => markRead(n)}
                   className="w-full text-left p-2 rounded-ds text-xs transition-colors hover:bg-surface2"
                   style={{ background: n.read ? "transparent" : "color-mix(in srgb, var(--primary) 5%, transparent)" }}
                 >
                   <div className="flex items-center gap-1.5">
+                    <span className="shrink-0">{typeIcon(n.type)}</span>
                     {!n.read && <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: "var(--primary)" }} />}
-                    <span className="font-semibold capitalize flex-1">{n.title}</span>
+                    <span className="font-semibold capitalize flex-1 truncate">{n.title}</span>
+                    {n.read && <CheckCircle2 size={12} className="shrink-0" style={{ color: "var(--rag-green)", opacity: 0.6 }} />}
                   </div>
-                  <div className="text-muted mt-0.5 ml-3">{n.body}</div>
-                  {n.at && <div className="text-[10px] text-muted mt-0.5 ml-3">{new Date(n.at).toLocaleString()}</div>}
+                  <div className="text-muted mt-0.5 ml-[22px] leading-relaxed">{n.message}</div>
+                  {n.timestamp && <div className="text-[10px] text-muted mt-0.5 ml-[22px]">{timeAgo(n.timestamp)}</div>}
                 </button>
               ))}
             </div>

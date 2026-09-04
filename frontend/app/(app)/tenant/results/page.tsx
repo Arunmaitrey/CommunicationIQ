@@ -62,7 +62,7 @@ function Results() {
                 URL.revokeObjectURL(url);
                 toast("success", "Results exported");
               } catch (e: any) {
-                toast(e.message || "Export failed", "error");
+                toast("error", e.message || "Export failed");
               }
             })()}
             className="btn btn-primary text-[12px] px-3 py-1.5"

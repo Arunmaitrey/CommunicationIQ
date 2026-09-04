@@ -396,6 +396,33 @@ class ExamTest(Document):
         name = "exam_tests"
 
 
+class ScheduledExam(Document):
+    """A platform-scheduled sitting of an ExamTest for one or more institutions.
+
+    Super admins use this to run a real drive: pick an ExamTest (its weightage
+    and per-section timing come from the test), choose which institutions may
+    sit it, and open a window (starts_at → ends_at). Students of a targeted
+    institution see the exam in their library only while the window is live,
+    and the attempt-start endpoint enforces the window, the audience and the
+    per-student attempt cap.
+    """
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    exam_test_id: str = Field(default="", index=True)
+    profile_id: str = Field(default="", index=True)  # synced SimulationProfile for the test
+    name: str = Field(default="", index=True)  # snapshot of the exam test name
+    tenant_ids: list[str] = Field(default_factory=list)  # empty = all institutions + general
+    starts_at: datetime = Field(default_factory=_now)
+    ends_at: datetime = Field(default_factory=_now)
+    max_attempts: int = 1  # per student; 0 = unlimited
+    is_active: bool = True
+    created_by: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "exam_schedules"
+
+
 class QuestionSet(Document):
     """A set of exactly 10 questions from the same module."""
     id: StrId = Field(default_factory=_uuid, alias="_id")
@@ -421,5 +448,5 @@ CONTROL_DOCUMENTS = [
     TenantUserDirectory, ProviderRegistry, ProviderConfig, ModelVersion,
     ProviderCall, GamificationConfig, FeatureFlag, AuditLog, PlatformSetting,
     Plan, SmtpConfig, PaymentConfig, EmailTemplate,
-    ContactMessage, ExamTest, QuestionSet,
+    ContactMessage, ExamTest, QuestionSet, ScheduledExam,
 ]

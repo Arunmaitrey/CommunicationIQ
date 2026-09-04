@@ -380,10 +380,11 @@ async def attempts(principal: Principal, models: TenantModels) -> list[AttemptOu
         models.Attempt.user_id == principal.user_id,
     ).sort("-created_at").to_list()
     names = {p.id: p.name for p in await models.SimulationProfile.all().to_list()}
+    attempt_ids = {a.id for a in rows}
     overall = {r.attempt_id: r.score for r in await models.ScoreRecord.find(
         models.ScoreRecord.dimension == "overall",
         models.ScoreRecord.is_shadow == False,
-    ).to_list()}
+    ).to_list() if r.attempt_id in attempt_ids}
     return [
         AttemptOut(
             id=a.id, profile_id=a.profile_id, profile_name=names.get(a.profile_id, ""),
@@ -397,6 +398,81 @@ async def attempts(principal: Principal, models: TenantModels) -> list[AttemptOu
 
 class SubscribeRequest(BaseModel):
     plan_id: str
+
+
+@router.get("/exam-schedules")
+async def student_exam_schedules(principal: Principal,
+                                 models: TenantModels) -> list[dict]:
+    """Scheduled exams for this student's institution, with window + attempts.
+
+    A platform-scheduled exam is visible only while its window is live (or
+    upcoming, so students can see what is coming) and only to students whose
+    institution is targeted (or everyone, when the schedule targets all).
+    """
+    from app.models.platform import ScheduledExam, ExamTest
+    from app.db import control_db
+    from datetime import datetime, timezone
+
+    db = control_db()
+    now = datetime.now(timezone.utc)
+    schedules = await ScheduledExam.find(
+        ScheduledExam.is_active == True,
+        ScheduledExam.ends_at >= now,
+    ).sort("starts_at").to_list()
+
+    tests = {t.id: t for t in await ExamTest.find_all().to_list()}
+    out = []
+    for s in schedules:
+        # Institution audience check: empty tenant_ids = everyone (incl general)
+        if s.tenant_ids and (not principal.tenant_id
+                             or principal.tenant_id not in s.tenant_ids):
+            continue
+        test = tests.get(s.exam_test_id)
+        # A deactivated exam test must not surface, even when scheduled:
+        # its SimulationProfile is retired and students could not start it.
+        if test is None or not test.is_active:
+            continue
+        taken = 0
+        if s.profile_id:
+            taken = await models.Attempt.find(
+                models.Attempt.user_id == principal.user_id,
+                models.Attempt.profile_id == s.profile_id,
+                models.Attempt.created_at >= s.starts_at,
+                models.Attempt.created_at <= s.ends_at,
+            ).count()
+        out.append({
+            "id": s.id,
+            "exam_test_id": s.exam_test_id,
+            "profile_id": s.profile_id,
+            "name": test.name,
+            "description": test.description,
+            "slug": test.slug,
+            "duration_minutes": test.duration_minutes,
+            "reading_questions": test.reading_questions,
+            "listening_questions": test.listening_questions,
+            "writing_questions": test.writing_questions,
+            "speaking_questions": test.speaking_questions,
+            "reading_seconds": test.reading_seconds,
+            "listening_seconds": test.listening_seconds,
+            "writing_seconds": test.writing_seconds,
+            "speaking_seconds": test.speaking_seconds,
+            "one_shot_audio": test.one_shot_audio,
+            "is_baseline": test.is_baseline,
+            "company": test.company,
+            "total_questions": (test.reading_questions + test.listening_questions
+                                 + test.writing_questions + test.speaking_questions),
+            "total_parts": sum(1 for v in [test.reading_questions,
+                                            test.listening_questions,
+                                            test.writing_questions,
+                                            test.speaking_questions] if v > 0),
+            "starts_at": s.starts_at.isoformat(),
+            "ends_at": s.ends_at.isoformat(),
+            "max_attempts": s.max_attempts,
+            "attempts_used": int(taken),
+            "status": "ended" if now > s.ends_at else (
+                "live" if now >= s.starts_at else "upcoming"),
+        })
+    return out
 
 
 @router.get("/plans")
@@ -466,3 +542,97 @@ async def subscribe_to_plan(body: SubscribeRequest, principal: Principal) -> dic
     )
     
     return {"ok": True, "plan": plan_doc.get("name", "")}
+
+
+# ---------------------------------------------------------------------------
+# Leaderboard
+# ---------------------------------------------------------------------------
+
+@router.get("/leaderboard")
+async def leaderboard(principal: Principal, scope: str = "institution",
+                      limit: int = 50) -> dict:
+    """Student rankings by best overall exam score.
+
+    scope=institution ranks students of the caller's own institution;
+    scope=global ranks students across every institution on the platform.
+    Ranking is computed live from score_records (best overall, non-shadow)
+    and attempts — nothing is stored, so it is always current.
+    """
+    from app.db import control_db
+    db = control_db()
+
+    q: dict = {"role": "student"}
+    if scope == "institution":
+        if not principal.tenant_id:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                "Institution ranking needs an institution account")
+        q["tenant_id"] = principal.tenant_id
+    users = await db.users.find(q).to_list()
+    if not users:
+        return {"rows": [], "updated_at": datetime.now(timezone.utc).isoformat()}
+
+    uids = [u["_id"] for u in users]
+
+    # Best overall score per student.
+    best: dict = {}
+    agg = db.score_records.aggregate([
+        {"$match": {"user_id": {"$in": uids}, "dimension": "overall",
+                    "is_shadow": {"$ne": True}}},
+        {"$group": {"_id": "$user_id", "best": {"$max": "$score"}}},
+    ])
+    async for r in agg:
+        best[r["_id"]] = r["best"]
+
+    # Attempt counts + last scored date per student.
+    counts: dict = {}
+    last_at: dict = {}
+    agg2 = db.attempts.aggregate([
+        {"$match": {"user_id": {"$in": uids}}},
+        {"$group": {"_id": "$user_id", "n": {"$sum": 1},
+                    "last": {"$max": "$created_at"}}},
+    ])
+    async for r in agg2:
+        counts[r["_id"]] = r["n"]
+        last_at[r["_id"]] = r["last"]
+
+    # Institution names (only needed for the global view).
+    tenant_names: dict = {}
+    if scope == "global":
+        async for t in db.tenants.find({}):
+            tenant_names[t["_id"]] = t.get("name", "")
+
+    rows = []
+    for u in users:
+        uid = u["_id"]
+        score = best.get(uid)
+        if score is None:
+            continue  # only students with a scored exam appear on the board
+        rows.append({
+            "user_id": uid,
+            "full_name": u.get("full_name", ""),
+            "email": u.get("email", ""),
+            "roll_number": u.get("roll_number", ""),
+            "institution": tenant_names.get(u.get("tenant_id")) if scope == "global"
+                           else "",
+            "best_score": round(float(score), 1),
+            "attempts": counts.get(uid, 0),
+            "last_attempt_at": last_at.get(uid),
+            "is_me": uid == principal.user_id,
+        })
+
+    rows.sort(key=lambda r: (-r["best_score"], -r["attempts"],
+                             r["full_name"].lower()))
+    for i, r in enumerate(rows):
+        r["rank"] = i + 1
+
+    me = next((r for r in rows if r["is_me"]), None)
+    top = rows[:max(limit, 1)]
+    if me and me["rank"] > len(top):
+        top = top + [me]
+    return {
+        "rows": top,
+        "total": len(rows),
+        "me": {"rank": me["rank"], "best_score": me["best_score"]} if me else None,
+        "scope": scope,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
