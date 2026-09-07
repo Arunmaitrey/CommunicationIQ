@@ -236,7 +236,7 @@ function QuestionSets() {
                   )}
                   {(s.status === "draft" || s.status === "inactive") && (
                     <button onClick={() => deleteSet(s.id)}
-                      className="p-1.5 rounded hover:bg-surface2 text-muted hover:text-red-500" title="Delete">
+                      className="p-1.5 rounded hover:bg-surface2 text-muted hover:text-ragRed" title="Delete">
                       <Trash2 size={12} />
                     </button>
                   )}

@@ -252,7 +252,7 @@ function QuestionBank() {
               s.key === "speaking" ? "task_items" : s.key === "writing" ? "writing_prompts" : "quiz_items";
             const count = activeCounts[countKey] || 0;
             return (
-              <div key={s.key} className="ds-card p-3 text-center cursor-pointer hover:bg-surface2 transition-colors"
+              <div key={s.key} className="ds-card card-interactive p-3 text-center cursor-pointer"
                 onClick={() => { toggleSection(s.key); if (!expanded[s.key]) setTimeout(() => document.getElementById(`section-${s.key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}>
                 <Icon size={18} style={{ color: s.color }} className="mx-auto mb-1" />
                 <div className="text-2xl font-bold" style={{ color: s.color }}>{count}</div>
@@ -412,7 +412,7 @@ function QuestionBank() {
                                 )}
                                 <span className="text-[10px] text-muted shrink-0">{typeof item.difficulty === "number" ? item.difficulty.toFixed(1) : "—"}</span>
                                 <button onClick={(e) => { e.stopPropagation(); handleDelete(item._collection, item.id); }}
-                                  className="text-muted hover:text-red-500 transition-colors shrink-0" title="Delete">
+                                  className="text-muted hover:text-ragRed transition-colors shrink-0" title="Delete">
                                   <Trash2 size={12} />
                                 </button>
                                 {isQExpanded ? <ChevronDown size={14} className="text-muted shrink-0" /> : <ChevronRight size={14} className="text-muted shrink-0" />}
@@ -763,7 +763,7 @@ return (
               <label className="block">
                 <span className="text-[11px] text-muted font-medium flex items-center gap-1"><Upload size={11} /> Audio File (optional)</span>
                 <input type="file" accept="audio/*" onChange={(e) => set("audioFile", e.target.files?.[0] || null)} className="w-full text-xs mt-1" />
-                {form.audioKey && <span className="text-[10px] text-green-600 mt-1 block">Uploaded: {form.audioKey}</span>}
+                {form.audioKey && <span className="text-[10px] text-success mt-1 block">Uploaded: {form.audioKey}</span>}
               </label>
             </>
           )}
@@ -824,7 +824,7 @@ return (
               <label className="block">
                 <span className="text-[11px] text-muted font-medium flex items-center gap-1"><Upload size={11} /> Audio File *</span>
                 <input type="file" accept="audio/*" onChange={(e) => set("audioFile", e.target.files?.[0] || null)} className="w-full text-xs mt-1" />
-                {form.audioKey && <span className="text-[10px] text-green-600 mt-1 block">Uploaded: {form.audioKey}</span>}
+                {form.audioKey && <span className="text-[10px] text-success mt-1 block">Uploaded: {form.audioKey}</span>}
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
@@ -1148,7 +1148,7 @@ function BulkUploadModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 <div className="text-[11px] font-semibold mb-1">Issues</div>
                 {preview.problems.slice(0, 20).map((p: any, i: number) => (
                   <div key={i} className="text-[10px] flex items-start gap-2 py-0.5">
-                    <span className={p.severity === "error" ? "text-red-500" : "text-amber-500"}>
+                    <span className={p.severity === "error" ? "text-ragRed" : "text-ragAmber"}>
                       {p.severity === "error" ? "❌" : "⚠"}
                     </span>
                     <span>Row {p.row}: {p.field} — {p.message}</span>

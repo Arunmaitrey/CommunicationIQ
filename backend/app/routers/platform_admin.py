@@ -22,7 +22,7 @@ from app.engine.contracts import CONTRACT_FOR, Capability
 from app import audit as audit_log
 from app.models.platform import (AuditLog, GamificationConfig,
                                  ProviderCall, ProviderConfig,
-                                 ProviderRegistry, Tenant)
+                                 ProviderRegistry, Tenant, ScheduledExam)
 from app.routers.platform_writes import _tenant_out
 from app.schemas import (AuditOut, CapabilityOut, GamificationConfigOut,
                          PlatformOverview, ProviderOut, TenantOut)
@@ -214,23 +214,6 @@ async def get_payment_config(gateway: str = "stripe") -> dict | None:
         "currency": doc.get("currency", "INR"),
         "is_active": doc.get("is_active", False),
     }
-
-
-@router.get("/email-templates")
-async def list_email_templates() -> list[dict]:
-    from app.db import control_db
-    db = control_db()
-    rows = await db["email_templates"].find().sort("created_at", -1).to_list(100)
-    return [
-        {
-            "id": str(r["_id"]), "key": r.get("key", ""), "name": r.get("name", ""),
-            "subject": r.get("subject", ""), "body_html": r.get("body_html", ""),
-            "body_text": r.get("body_text", ""),
-            "category": r.get("category", "transactional"),
-            "is_active": r.get("is_active", True),
-        }
-        for r in rows
-    ]
 
 
 @router.get("/narration/settings")
@@ -543,64 +526,8 @@ async def _create_speaking(body):
 
 
 # --------------------------------------------------------------------------
-# Database export
+# Reviews
 # --------------------------------------------------------------------------
-
-@router.get("/export-db")
-async def export_db() -> HttpResponse:
-    """Export the entire project database (CommunicationIQ + all tenant_*) as JSON."""
-    import json
-    from bson import ObjectId, Decimal128, Regex
-    from datetime import date
-    from app.db import client, CONTROL_DB_NAME
-
-    def serialize(obj):
-        if isinstance(obj, ObjectId):
-            return str(obj)
-        if isinstance(obj, Decimal128):
-            return float(obj)
-        if isinstance(obj, Regex):
-            return obj.pattern
-        if isinstance(obj, datetime):
-            return obj.isoformat()
-        if isinstance(obj, date):
-            return obj.isoformat()
-        if isinstance(obj, bytes):
-            return obj.decode('utf-8', errors='replace')
-        raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
-
-    export = {"databases": {}, "exported_at": datetime.now(timezone.utc).isoformat()}
-
-    # Control plane
-    cp_db = client[CONTROL_DB_NAME]
-    cp_data = {}
-    for coll_name in await cp_db.list_collection_names():
-        docs = await cp_db[coll_name].find().to_list()
-        cp_data[coll_name] = [{k: v for k, v in doc.items() if k != '_id'} for doc in docs]
-    export["databases"][CONTROL_DB_NAME] = cp_data
-
-    # All tenant databases
-    for db_name in await client.list_database_names():
-        if db_name.startswith("tenant_") and db_name not in ('admin', 'local', 'config'):
-            t_db = client[db_name]
-            t_data = {}
-            for coll_name in await t_db.list_collection_names():
-                docs = await t_db[coll_name].find().to_list()
-                t_data[coll_name] = [{k: v for k, v in doc.items() if k != '_id'} for doc in docs]
-            export["databases"][db_name] = t_data
-
-    content = json.dumps(export, default=serialize, ensure_ascii=False)
-
-    await audit_log.record_system("platform.export_db", entity="database")
-
-    return HttpResponse(
-        content=content,
-        media_type="application/json",
-        headers={
-            "Content-Disposition": f'attachment; filename="fluenzee-db-export.json"',
-        },
-    )
-
 
 @router.get("/reviews")
 async def platform_reviews(limit: int = 100) -> list[dict]:
@@ -1180,7 +1107,7 @@ async def import_template(category: str) -> HttpResponse:
 async def list_companies() -> list[dict]:
     """List all companies with question counts."""
     from app.models.tenant import Company, QuizItem, ReadingPassage, WritingPrompt, ListeningPassage, TaskItem
-    companies = await Company.find(Company.is_active == True).sort(Company.name).to_list()
+    companies = await Company.find_all().sort(Company.name).to_list()
     result = []
     for c in companies:
         quiz_count = await QuizItem.find(QuizItem.company == c.name).count()
@@ -1219,17 +1146,32 @@ async def create_company(body: dict) -> dict:
         description=body.get("description", ""),
     )
     await company.create()
+    # A freshly created company should be reachable from the student side right
+    # away: publish any profiles/tests already carrying its name.
+    try:
+        from app.main import _sync_company_visibility
+        await _sync_company_visibility(name, True)
+    except Exception:  # noqa: BLE001 — never block creation on the sync
+        pass
     await audit_log.record_system("platform.create_company", entity=name)
     return {"id": company.id, "name": company.name, "ok": True}
 
 
 @router.patch("/companies/{company_id}")
 async def update_company(company_id: str, body: dict) -> dict:
-    """Update a company's details."""
+    """Update a company's details.
+
+    Renaming retires the old name's student-facing objects (so nothing keeps
+    the previous name visible) and syncs the new name; toggling is_active
+    publishes/retires profiles + tests live.
+    """
+    from datetime import datetime as _dt, timezone as _tz
     from app.models.tenant import Company
+    from app.db import control_db
     company = await Company.get(company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    old_name = company.name
     if "name" in body:
         company.name = body["name"]
     if "slug" in body:
@@ -1239,8 +1181,27 @@ async def update_company(company_id: str, body: dict) -> dict:
     if "description" in body:
         company.description = body["description"]
     if "is_active" in body:
-        company.is_active = body["is_active"]
+        company.is_active = bool(body["is_active"])
     await company.save()
+    # Keep student-facing objects in step with the change (no orphans):
+    #   * rename -> retire whatever still carried the old name
+    #   * activation -> publish profiles/tests under the (new) name
+    if "name" in body and body["name"] != old_name:
+        try:
+            db = control_db()
+            await db.simulation_profiles.update_many(
+                {"company": old_name},
+                {"$set": {"status": "retired", "updated_at": _dt.now(_tz.utc)}})
+            await db.exam_tests.update_many(
+                {"company": old_name},
+                {"$set": {"is_active": False, "updated_at": _dt.now(_tz.utc)}})
+        except Exception:  # noqa: BLE001
+            pass
+    try:
+        from app.main import _sync_company_visibility
+        await _sync_company_visibility(company.name, company.is_active)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 
@@ -1253,6 +1214,13 @@ async def delete_company(company_id: str) -> dict:
         raise HTTPException(404, "Company not found")
     company.is_active = False
     await company.save()
+    # Retire the company's student-facing profiles + tests so deactivation is
+    # visible immediately (no backend restart needed).
+    try:
+        from app.main import _sync_company_visibility
+        await _sync_company_visibility(company.name, False)
+    except Exception:  # noqa: BLE001
+        pass
     return {"ok": True}
 
 
@@ -1347,6 +1315,91 @@ async def list_exam_tests() -> list[dict]:
         }
         for t in tests
     ]
+
+
+# --------------------------------------------------------------------------
+# Exam Schedules
+# --------------------------------------------------------------------------
+
+@router.get("/exam-schedules")
+async def list_exam_schedules() -> list[dict]:
+    """List all scheduled exams with resolved test + institution names and
+    live results (attempts started, students who started, average score)."""
+    from app.models.platform import ExamTest as ET
+    from app.db import control_db as _cdb
+    schedules = await ScheduledExam.find_all().sort("-starts_at").to_list()
+    tests = {t.id: t for t in await ET.find_all().to_list()}
+    tenants = {t.id: t for t in await Tenant.find_all().to_list()}
+    db = _cdb()
+    now = datetime.now(timezone.utc)
+
+    # One aggregation per schedule — small lists, never a scan per row.
+    def _attempt_stats(profile_id: str, starts_at, ends_at) -> dict:
+        if not profile_id:
+            return {"started": 0, "students": 0, "average_score": None}
+        match = {"profile_id": profile_id,
+                 "status": {"$nin": ["created"]},
+                 "created_at": {"$gte": starts_at, "$lte": ends_at}}
+        started = db.attempts.count_documents(match)
+        students = len(db.attempts.distinct("user_id", match))
+        avg = db.attempts.aggregate([
+            {"$match": match},
+            {"$lookup": {"from": "score_records",
+                          "localField": "_id", "foreignField": "attempt_id",
+                          "as": "scores"}},
+            {"$unwind": {"path": "$scores", "preserveNullAndEmptyArrays": False}},
+            {"$match": {"scores.dimension": "overall",
+                          "scores.is_shadow": False}},
+            {"$group": {"_id": None, "avg": {"$avg": "$scores.score"}}},
+        ]).to_list(1)
+        avg_score = round(float(avg[0]["avg"]), 1) if avg and avg[0].get("avg") is not None else None
+        return {"started": int(started), "students": int(students),
+                "average_score": avg_score}
+
+    out = []
+    for s in schedules:
+        test = tests.get(s.exam_test_id)
+        if s.tenant_ids:
+            inst = [
+                {"id": tid, "name": tenants.get(tid).name if tenants.get(tid) else tid}
+                for tid in s.tenant_ids
+            ]
+        else:
+            inst = [{"id": "", "name": "All institutions + general"}]
+        status = ("ended" if now > s.ends_at
+                  else "live" if now >= s.starts_at
+                  else "upcoming")
+        if not s.is_active:
+            status = "cancelled" if status in ("upcoming", "live") else "ended"
+        out.append({
+            "id": s.id,
+            "exam_test_id": s.exam_test_id,
+            "profile_id": s.profile_id,
+            "name": s.name,
+            "test": {
+                "name": test.name if test else "",
+                "description": test.description if test else "",
+                "duration_minutes": test.duration_minutes if test else 0,
+                "reading_questions": test.reading_questions if test else 0,
+                "listening_questions": test.listening_questions if test else 0,
+                "writing_questions": test.writing_questions if test else 0,
+                "speaking_questions": test.speaking_questions if test else 0,
+                "reading_seconds": test.reading_seconds if test else 0,
+                "listening_seconds": test.listening_seconds if test else 0,
+                "writing_seconds": test.writing_seconds if test else 0,
+                "speaking_seconds": test.speaking_seconds if test else 0,
+                "is_baseline": test.is_baseline if test else False,
+            } if test else None,
+            "institutions": inst,
+            "starts_at": s.starts_at.isoformat(),
+            "ends_at": s.ends_at.isoformat(),
+            "max_attempts": s.max_attempts,
+            "is_active": s.is_active,
+            "status": status,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+            "results": _attempt_stats(s.profile_id, s.starts_at, s.ends_at),
+        })
+    return out
 
 
 # --------------------------------------------------------------------------

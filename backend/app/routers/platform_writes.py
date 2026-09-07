@@ -27,9 +27,10 @@ from app.deps import Principal, require_platform
 from app.engine.contracts import Capability
 from app.engine.registry import clear_provider_cache
 from app.models.platform import (GamificationConfig,
-                                 TENANT_TYPES,
+                                 TENANT_TYPES, TENANT_TYPE_KEYS,
                                  ProviderConfig, ProviderRegistry,
-                                 Tenant, TenantUserDirectory)
+                                 Tenant, TenantUserDirectory, ExamTest,
+                                 ScheduledExam)
 from app.provisioning import create_tenant_schema, validate_slug
 from app.routers.tenant_writes import temporary_password
 from app.schemas import (CapabilityConfigRequest, GamificationConfigOut,
@@ -40,7 +41,7 @@ from app.schemas import (CapabilityConfigRequest, GamificationConfigOut,
                          TenantBranding, TenantCreateRequest, TenantOut,
                          TenantProfile, TenantTypeOut, TenantUpdateRequest,
                          ContactMessageRequest, ContactMessageReplyRequest,
-                         ExamTestRequest)
+                         ExamTestRequest, ScheduledExamRequest, ScheduledExamOut)
 from app.security import hash_password
 from app.storage import get_storage
 
@@ -792,51 +793,6 @@ async def save_payment_config(body: dict, principal: Principal) -> dict:
     return {"ok": True}
 
 
-# ---------------------------------------------------------------------------
-# Email Templates
-# ---------------------------------------------------------------------------
-
-@router.post("/email-templates")
-async def create_email_template(body: dict, principal: Principal) -> dict:
-    from app.db import control_db
-    db = control_db()
-    import uuid
-    tpl_id = str(uuid.uuid4())
-    doc = {
-        "_id": tpl_id,
-        "key": body.get("key", ""),
-        "name": body.get("name", ""),
-        "subject": body.get("subject", ""),
-        "body_html": body.get("body_html", ""),
-        "body_text": body.get("body_text", ""),
-        "category": body.get("category", "transactional"),
-        "is_active": body.get("is_active", True),
-    }
-    await db["email_templates"].insert_one(doc)
-    await audit.record(principal, "template.created", entity="EmailTemplate", entity_id=tpl_id)
-    return {"id": tpl_id, "ok": True}
-
-
-@router.patch("/email-templates/{template_id}")
-async def update_email_template(template_id: str, body: dict, principal: Principal) -> dict:
-    from app.db import control_db
-    db = control_db()
-    updates = {k: v for k, v in body.items() if k not in ("_id", "id")}
-    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db["email_templates"].update_one({"_id": template_id}, {"$set": updates})
-    await audit.record(principal, "template.updated", entity="EmailTemplate", entity_id=template_id)
-    return {"ok": True}
-
-
-@router.delete("/email-templates/{template_id}")
-async def delete_email_template(template_id: str, principal: Principal) -> dict:
-    from app.db import control_db
-    db = control_db()
-    await db["email_templates"].delete_one({"_id": template_id})
-    await audit.record(principal, "template.deleted", entity="EmailTemplate", entity_id=template_id)
-    return {"ok": True}
-
-
 # --------------------------------------------------------------------------
 # Contact Messages
 # --------------------------------------------------------------------------
@@ -971,9 +927,23 @@ async def update_exam_test(test_id: str, body: ExamTestRequest,
 
 @router.delete("/exam-tests/{test_id}")
 async def delete_exam_test(test_id: str, principal: Principal) -> dict:
-    """Delete an exam test."""
+    """Delete an exam test and retire its student-facing SimulationProfile so
+    it stops appearing for students (no orphaned published profile)."""
+    from datetime import datetime as _dt, timezone as _tz
     from app.models.platform import ExamTest
+    from app.db import control_db
+    test = await ExamTest.get(test_id)
+    if test is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Test not found")
     await ExamTest.delete(ExamTest.id == test_id)
+    try:
+        db = control_db()
+        await db.simulation_profiles.update_many(
+            {"name": test.name},
+            {"$set": {"status": "retired",
+                      "updated_at": _dt.now(_tz.utc)}})
+    except Exception:  # noqa: BLE001
+        pass
     await audit.record(principal, "exam_test.deleted", entity="ExamTest",
                        entity_id=test_id)
     return {"ok": True}
@@ -1149,3 +1119,132 @@ async def auto_create_sets(principal: Principal) -> dict:
     await audit.record(principal, "question_sets.auto_created", entity="QuestionSet",
                        after=results)
     return {"results": results, "ok": True}
+
+
+# --------------------------------------------------------------------------
+# Exam Schedules — platform-scheduled sittings for institutions
+# --------------------------------------------------------------------------
+
+async def _resolve_profile_id_for_test(exam_test: ExamTest) -> str:
+    """Return the published SimulationProfile id that backs an ExamTest.
+
+    ExamTests are turned into SimulationProfiles (with ProfileSections) so
+    they can be sat through the normal attempt engine — `_sync_exam_test_profiles`
+    does that at startup and after every exam-test create/update. A schedule
+    needs to know which profile its students will actually start, so we look
+    it up by name and fall back to a re-sync if it has not been created yet.
+    """
+    from app.models.tenant import SimulationProfile
+    profile = await SimulationProfile.find_one(
+        SimulationProfile.name == exam_test.name,
+        SimulationProfile.status == "published",
+    )
+    if profile is None:
+        try:
+            from app.main import _sync_exam_test_profiles
+            await _sync_exam_test_profiles()
+        except Exception:
+            pass
+        profile = await SimulationProfile.find_one(
+            SimulationProfile.name == exam_test.name,
+            SimulationProfile.status == "published",
+        )
+    return profile.id if profile else ""
+
+
+@router.post("/exam-schedules", status_code=status.HTTP_201_CREATED)
+async def create_exam_schedule(body: ScheduledExamRequest,
+                               principal: Principal) -> dict:
+    """Schedule an ExamTest for one or more institutions within a window."""
+    test = await ExamTest.get(body.exam_test_id)
+    if not test:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam test not found")
+    if not test.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "An inactive exam test cannot be scheduled")
+    if body.ends_at <= body.starts_at:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "The schedule must end after it starts")
+    if body.ends_at < datetime.now(timezone.utc):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "That window is already in the past")
+
+    # Validate institution ids if any were supplied
+    if body.tenant_ids:
+        existing = {t.id for t in await Tenant.find(
+            Tenant.id.in_(body.tenant_ids)).to_list()}
+        missing = [t for t in body.tenant_ids if t not in existing]
+        if missing:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Unknown institution(s): {', '.join(missing)}")
+
+    profile_id = await _resolve_profile_id_for_test(test)
+    schedule = ScheduledExam(
+        exam_test_id=test.id,
+        profile_id=profile_id,
+        name=test.name,
+        tenant_ids=body.tenant_ids,
+        starts_at=body.starts_at,
+        ends_at=body.ends_at,
+        max_attempts=body.max_attempts,
+        is_active=body.is_active,
+        created_by=principal.user_id,
+    )
+    await schedule.create()
+    await audit.record(principal, "exam_schedule.created", entity="ScheduledExam",
+                       entity_id=schedule.id,
+                       after={"exam_test": test.name,
+                              "window": f"{body.starts_at.isoformat()} → {body.ends_at.isoformat()}",
+                              "tenant_ids": body.tenant_ids})
+    return {"id": schedule.id, "ok": True}
+
+
+@router.patch("/exam-schedules/{schedule_id}")
+async def update_exam_schedule(schedule_id: str, body: ScheduledExamRequest,
+                               principal: Principal) -> dict:
+    """Update a schedule — window, audience, attempt cap or activation."""
+    schedule = await ScheduledExam.get(schedule_id)
+    if not schedule:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Schedule not found")
+    test = await ExamTest.get(body.exam_test_id)
+    if not test:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam test not found")
+    if not test.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "An inactive exam test cannot be scheduled")
+    if body.ends_at <= body.starts_at:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "The schedule must end after it starts")
+    if body.tenant_ids:
+        existing = {t.id for t in await Tenant.find(
+            Tenant.id.in_(body.tenant_ids)).to_list()}
+        missing = [t for t in body.tenant_ids if t not in existing]
+        if missing:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Unknown institution(s): {', '.join(missing)}")
+
+    schedule.exam_test_id = test.id
+    schedule.name = test.name
+    schedule.profile_id = await _resolve_profile_id_for_test(test)
+    schedule.tenant_ids = body.tenant_ids
+    schedule.starts_at = body.starts_at
+    schedule.ends_at = body.ends_at
+    schedule.max_attempts = body.max_attempts
+    schedule.is_active = body.is_active
+    schedule.updated_at = datetime.now(timezone.utc)
+    await schedule.save()
+    await audit.record(principal, "exam_schedule.updated", entity="ScheduledExam",
+                       entity_id=schedule.id)
+    return {"ok": True}
+
+
+@router.delete("/exam-schedules/{schedule_id}")
+async def delete_exam_schedule(schedule_id: str, principal: Principal) -> dict:
+    """Delete a schedule. Attempts already started are untouched."""
+    schedule = await ScheduledExam.get(schedule_id)
+    if not schedule:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Schedule not found")
+    await schedule.delete()
+    await audit.record(principal, "exam_schedule.deleted", entity="ScheduledExam",
+                       entity_id=schedule_id)
+    return {"ok": True}

@@ -203,7 +203,7 @@ function SetsManager() {
                         ) : null}
                         {(s.status === "draft" || (s.status === "active" && !s.usage_count)) && (
                           <button onClick={() => deleteSet(s.id)}
-                            className="p-1.5 rounded hover:bg-surface2 text-muted hover:text-red-500" title="Delete">
+                            className="p-1.5 rounded hover:bg-surface2 text-muted hover:text-ragRed" title="Delete">
                             <Trash2 size={13} />
                           </button>
                         )}
