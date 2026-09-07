@@ -121,6 +121,38 @@ function ExamTests() {
     load();
   };
 
+  /** Flip a test's visibility. Only active tests are published to students —
+   *  deactivating retires the synced SimulationProfile so the change shows up
+   *  on the student side immediately, without a backend restart. */
+  const toggleActive = async (t: any) => {
+    const token = getToken();
+    try {
+      const body = {
+        name: t.name, description: t.description || "", duration_minutes: t.duration_minutes,
+        reading_questions: t.reading_questions, listening_questions: t.listening_questions,
+        writing_questions: t.writing_questions, speaking_questions: t.speaking_questions,
+        reading_seconds: t.reading_seconds, listening_seconds: t.listening_seconds,
+        writing_seconds: t.writing_seconds, speaking_seconds: t.speaking_seconds,
+        allow_pause: t.allow_pause, show_timer: t.show_timer, one_shot_audio: t.one_shot_audio,
+        is_active: !t.is_active, is_baseline: t.is_baseline, company: t.company || "",
+        question_ids: t.question_ids || {},
+      };
+      const res = await fetch(`${API_BASE}/platform/exam-tests/${t.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Failed to update");
+      }
+      toast("success", t.is_active ? "Test deactivated — hidden from students" : "Test activated — live for students");
+      load();
+    } catch (e: any) {
+      toast("error", e.message || "Failed to update");
+    }
+  };
+
   const startEdit = (t: any) => {
     setEditing(t);
     setForm({
@@ -268,9 +300,9 @@ function ExamTests() {
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-sm font-bold">{t.name}</span>
-                    {!t.is_active && <span className="px-1.5 py-0.5 rounded text-[9px] bg-gray-100 text-gray-600">Inactive</span>}
-                    {t.is_baseline && <span className="px-1.5 py-0.5 rounded text-[9px] bg-blue-100 text-blue-700">Baseline</span>}
-                    {t.company && <span className="px-1.5 py-0.5 rounded text-[9px] bg-violet-100 text-violet-700">{t.company}</span>}
+                    {!t.is_active && <span className="px-1.5 py-0.5 rounded text-[9px] bg-surface2 text-muted">Inactive</span>}
+                    {t.is_baseline && <span className="px-1.5 py-0.5 rounded text-[9px] status-pill status-info">Baseline</span>}
+                    {t.company && <span className="px-1.5 py-0.5 rounded text-[9px] status-pill status-brand">{t.company}</span>}
                   </div>
                   {t.description && <div className="text-[11px] text-muted mb-2">{t.description}</div>}
                   <div className="flex flex-wrap gap-3 text-[10px] text-muted">
@@ -304,12 +336,20 @@ function ExamTests() {
                     })}
                   </div>
                 </div>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => startEdit(t)} className="p-1.5 rounded hover:bg-surface2 text-muted">
-                    <Edit size={13} />
-                  </button>
-                  <button onClick={() => remove(t.id)} className="p-1.5 rounded hover:bg-surface2 text-muted hover:text-red-500">
-                    <Trash2 size={13} />
+                <div className="flex flex-col items-end gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => startEdit(t)} className="p-1.5 rounded hover:bg-surface2 text-muted" title="Edit">
+                      <Edit size={13} />
+                    </button>
+                    <button onClick={() => remove(t.id)} className="p-1.5 rounded hover:bg-surface2 text-muted hover:text-ragRed" title="Delete">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                  <button onClick={() => toggleActive(t)}
+                    className="px-2 py-1 rounded text-[10px] font-semibold text-white"
+                    style={{ background: t.is_active ? "var(--rag-red)" : "var(--rag-green)" }}
+                    title={t.is_active ? "Hide from students" : "Publish to students"}>
+                    {t.is_active ? "Deactivate" : "Activate"}
                   </button>
                 </div>
               </div>

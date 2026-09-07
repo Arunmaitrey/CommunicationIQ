@@ -127,6 +127,27 @@ function Companies() {
     }
   }
 
+  /** Flip a company between active and inactive. Deactivating retires its
+   *  SimulationProfiles + ExamTests so the student side updates immediately;
+   *  activating re-publishes them — no backend restart required. */
+  async function toggleActive(company: Company) {
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/companies/${company.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ is_active: !company.is_active }),
+      });
+      if (!res.ok) throw new Error("Failed to update");
+      toast("success", company.is_active
+        ? `Company "${company.name}" deactivated — rounds hidden from students`
+        : `Company "${company.name}" activated — rounds live for students`);
+      loadCompanies();
+    } catch (e: any) {
+      toast("error", e.message);
+    }
+  }
+
   const totalQuestions = companies.reduce((sum, c) => sum + (c.question_counts?.total || 0), 0);
 
   if (loading) return <Skeleton rows={5} />;
@@ -188,7 +209,7 @@ function Companies() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-bold">{company.name}</span>
                     {!company.is_active && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-200 text-gray-500">Inactive</span>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-surface2 text-muted">Inactive</span>
                     )}
                     <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
                       style={{ background: company.color + "20", color: company.color }}>
@@ -216,14 +237,20 @@ function Companies() {
                   {isExpanded
                     ? <ChevronDown size={16} className="text-muted" />
                     : <ChevronRight size={16} className="text-muted" />}
+                  <button onClick={(e) => { e.stopPropagation(); toggleActive(company); }}
+                    className="px-2 py-1.5 rounded text-[10px] font-semibold text-white"
+                    style={{ background: company.is_active ? "var(--rag-red)" : "var(--rag-green)" }}
+                    title={company.is_active ? "Hide company rounds from students" : "Show company rounds to students"}>
+                    {company.is_active ? "Deactivate" : "Activate"}
+                  </button>
                   <button onClick={(e) => { e.stopPropagation(); setEditing(company); }}
                     className="p-2 rounded hover:bg-surface2 transition-colors text-muted hover:text-text"
                     title="Edit">
                     <Pencil size={14} />
                   </button>
                   <button onClick={(e) => { e.stopPropagation(); handleDelete(company.id, company.name); }}
-                    className="p-2 rounded hover:bg-surface2 transition-colors text-muted hover:text-red-500"
-                    title="Deactivate">
+                    className="p-2 rounded hover:bg-surface2 transition-colors text-muted hover:text-ragRed"
+                    title="Delete">
                     <Trash2 size={14} />
                   </button>
                 </div>
