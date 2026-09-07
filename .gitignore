@@ -35,3 +35,9 @@ backend/certs/
 
 # Logs
 *.log
+
+# macOS
+.DS_Store
+
+# Claude Code local session state — worktrees, launch config: this machine's, not the repo's
+.claude/

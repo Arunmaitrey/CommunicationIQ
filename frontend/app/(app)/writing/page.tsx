@@ -11,6 +11,9 @@ import {
   type WritingPromptRow, type WritingResult,
 } from "@/lib/api";
 import { useData } from "@/lib/useData";
+import { ReviewCard } from "@/components/ReviewCard";
+import { setExamMode } from "@/lib/examMode";
+import { filterUnattempted, markAttempted } from "@/lib/setTracker";
 
 export default function WritingPage() {
   return (
@@ -62,7 +65,17 @@ function Writing() {
 
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
 
+  // Nav rail during an active write session is dead weight, same as every
+  // other practice mode.
+  useEffect(() => {
+    setExamMode(stage === "write");
+    return () => setExamMode(false);
+  }, [stage]);
+
+  const prompts = data ? filterUnattempted("writing", data) : [];
+
   function begin(p: WritingPromptRow) {
+    markAttempted("writing", p.id);
     setPrompt(p);
     setText("");
     setResult(null);
@@ -70,6 +83,8 @@ function Writing() {
     openedAt.current = Date.now();
     setStage("write");
   }
+
+  const backToBrowse = () => setStage("browse");
 
   async function submit() {
     if (!prompt) return;
@@ -145,7 +160,7 @@ function Writing() {
         {problem && <div className="mt-4"><ErrorNote message={problem} /></div>}
 
         <div className="flex gap-2 mt-4">
-          <button onClick={() => setStage("browse")}
+          <button onClick={backToBrowse}
                   className="btn btn-ghost ds-focus">Back</button>
           <button onClick={submit} disabled={busy || words === 0}
                   className="btn btn-primary flex-1 ds-focus">
@@ -164,12 +179,15 @@ function Writing() {
           title={result.overall != null ? `Overall ${result.overall}` : "Not scored"}
           sub={`${result.title} · ${result.word_count} words`}
           action={
-            <button onClick={() => setStage("browse")}
+            <button onClick={backToBrowse}
                     className="btn btn-primary btn-sm ds-focus">
               Another task
             </button>
           }
         />
+
+        <ReviewCard label="writing task" onNext={backToBrowse} onBack={backToBrowse}
+                    nextLabel="Another task →" />
 
         {result.too_short && (
           <div className="ds-card p-4 mb-4" style={{ borderColor: "var(--rag-amber)" }}>
@@ -257,9 +275,12 @@ function Writing() {
       {!data || data.length === 0 ? (
         <EmptyState icon={PenLine} title="No prompts yet"
                     desc="The writing bank is empty for this institution." />
+      ) : prompts.length === 0 ? (
+        <EmptyState icon={PenLine} title="You have done today's prompts"
+                    desc="Check back tomorrow for a fresh set." />
       ) : (
         <div className="grid md:grid-cols-2 gap-3">
-          {data.map((p) => (
+          {prompts.map((p) => (
             <button key={p.id} onClick={() => begin(p)}
                     className="ds-card p-4 text-left hover:bg-surface2 transition-colors ds-focus">
               <div className="flex items-start justify-between gap-2">

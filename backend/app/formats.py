@@ -285,8 +285,8 @@ def typical_minutes(blueprint: "FormatBlueprint") -> int:
 # The engine's own scale. Mirrored rather than imported so this module stays
 # free of the scoring path -- ``test_formats_vendor.py`` asserts the two agree,
 # so a change to the engine cannot silently desynchronise the presentation.
-INTERNAL_MIN = 20.0
-INTERNAL_MAX = 80.0
+INTERNAL_MIN = 0.0
+INTERNAL_MAX = 100.0
 
 
 def _fraction(internal: float) -> float:
@@ -312,13 +312,11 @@ class ScaleBlueprint:
     bands: tuple[tuple[float, str], ...]
     # Whether a *number* on this scale can be justified at all.
     #
-    # True only where the internal scale was built on this range, which is the
-    # case for exactly one format: the engine's 20-80 was designed Versant-like
-    # from the start, so restating a score on it is arithmetic rather than a
-    # claim.
+    # True only where a numeric projection is part of this product's own
+    # presentation. Vendor concordance is never implied by this flag.
     #
     # False everywhere else, and then no number is published. Stretching our
-    # 20-80 linearly onto somebody else's 0-100 asserts that our floor is their
+    # 0-100 linearly onto somebody else's range asserts that our floor is their
     # floor and our ceiling is their ceiling -- a perfect concordance, which is
     # the one thing we know we have not established. It also inflates: an
     # internal 70, respectable and barely above the ready threshold, would come
@@ -400,11 +398,11 @@ class FormatBlueprint:
 # counts as ready. A single definition also means one place to refit them when
 # the study comes back.
 _BANDS: tuple[tuple[float, str, str], ...] = (
-    (72.0, "Likely to clear",
+    (86.7, "Likely to clear",
      "On this evidence you would probably get through a round of this shape."),
-    (60.0, "Borderline",
+    (66.7, "Borderline",
      "Could go either way on the day. The gap below is the one to close first."),
-    (45.0, "Not yet",
+    (41.7, "Not yet",
      "A round of this shape would probably stop you today. It is closeable, "
      "and the diagnosis below says where to start."),
     (0.0, "Well short",
@@ -794,15 +792,6 @@ _VENDOR_BANDS: tuple[tuple[float, str], ...] = (
     (0.75, "Strong"),
 )
 
-# Sub-scores, grouped from our internal dimensions. Same caveat every time:
-# the grouping is ours, not the vendor's.
-_SPEAKING_SUBSCORES: tuple[SubScore, ...] = (
-    SubScore("Sentence Mastery", ("accuracy", "grammar")),
-    SubScore("Vocabulary", ("content",)),
-    SubScore("Fluency", ("fluency", "latency", "disfluency")),
-    SubScore("Pronunciation", ("pronunciation",)),
-)
-
 # Derived from the scoring model, as SVAR's is: the hand-typed tuple named
 # "Active Listening" while the model that scores the format says
 # "Comprehension", and a card and a result that disagree is a trust defect.
@@ -1161,77 +1150,6 @@ TEMPLATE_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
         subscores=_SVAR_SUBSCORES,
     ),
     FormatBlueprint(
-        code="versant_style_speaking_listening",
-        name="Versant-style Speaking Test",
-        style="versant_style", company="", estimated_minutes=22,
-        description=("The Pearson Versant-style spoken test, six parts: read on "
-                     "cue, repeat what you hear, short answers, sentence builds, "
-                     "story retelling, and open questions."),
-        sections=(
-            SectionBlueprint(
-                title="Part A - Reading", task_type="read_aloud",
-                item_count=6, prep_seconds=3, response_seconds=20,
-                selection={"difficulty_max": 1.0},
-                # Instruction truthfulness (PM increment 2026-08-24): the
-                # old wording promised a spoken sentence number and an
-                # end-of-window beep; this product plays neither -- the
-                # sentence appears on screen and a start tone begins the
-                # recording. The claim changed, not the assessment.
-                instructions=("Read the sentence on screen aloud, clearly "
-                              "and at a natural pace. Recording starts "
-                              "after the tone."),
-            ),
-            SectionBlueprint(
-                title="Part B - Repeat", task_type="repeat_sentence",
-                item_count=8, prep_seconds=0, response_seconds=15,
-                prompt_plays_allowed=1,
-                instructions="You will hear each sentence once. Repeat it word-for-word.",
-            ),
-            SectionBlueprint(
-                title="Part C - Questions", task_type="short_answer",
-                item_count=6, prep_seconds=0, response_seconds=12,
-                prompt_plays_allowed=1,
-                instructions=("Give a simple answer to each question -- one to "
-                              "four words, not a full sentence."),
-            ),
-            SectionBlueprint(
-                title="Part D - Sentence Builds", task_type="sentence_build",
-                item_count=4, prep_seconds=5, response_seconds=25,
-                instructions=("Rearrange the word groups into a sentence and say "
-                              "it aloud in the time provided."),
-            ),
-            SectionBlueprint(
-                title="Part E - Story Retelling", task_type="story_retell",
-                item_count=3, prep_seconds=0, response_seconds=30,
-                prompt_plays_allowed=1,
-                instructions=("You will hear a story once. Retell it, including "
-                              "the names, the action and the ending."),
-            ),
-            SectionBlueprint(
-                title="Part F - Open Questions", task_type="open_response",
-                item_count=2, prep_seconds=0, response_seconds=40,
-                prompt_plays_allowed=1,
-                instructions=("You will hear a question about a familiar "
-                              "situation. Speak for up to forty seconds."),
-            ),
-        ),
-        what_to_expect=(
-            "Six parts, from reading on cue to open questions.",
-            "Every heard prompt plays exactly once.",
-            "Story retelling and open questions want a whole answer, not a word.",
-        ),
-        scale=ScaleBlueprint(20, 80, _VENDOR_BANDS, anchored=True),
-        subscores=_SPEAKING_SUBSCORES,
-        not_included=(
-            "Every part of this is listening -- you hear the prompt and speak "
-            "the answer -- but the report shows one skill, Speaking, because "
-            "that is what is measured: how well you answered, not whether you "
-            "followed. There is no reading and no writing here at all. "
-            "Versant-style 4 Skills covers all four and scores each "
-            "separately."
-        ),
-    ),
-    FormatBlueprint(
         code="versant_style_four_skills",
         name="Versant-style 4 Skills",
         style="versant_style", company="", estimated_minutes=31,
@@ -1292,7 +1210,7 @@ TEMPLATE_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
             "The reconstruction passages disappear - that is the point of them.",
             "One score per skill, not one score for the lot.",
         ),
-        scale=ScaleBlueprint(20, 80, _VENDOR_BANDS, anchored=True),
+        scale=ScaleBlueprint(0, 100, _VENDOR_BANDS, anchored=True),
         # No vendor sub-scores on purpose. This format's report is the
         # four-skill rollup, and publishing both would put two different
         # numbers labelled Listening on the same page.
@@ -1379,7 +1297,7 @@ TEMPLATE_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
             "All four skills, workplace material in every part.",
             "The writing parts are the longest and carry the most weight.",
         ),
-        scale=ScaleBlueprint(20, 80, _VENDOR_BANDS, anchored=True),
+        scale=ScaleBlueprint(0, 100, _VENDOR_BANDS, anchored=True),
         subscores=(),
         not_included=_FOUR_SKILL_NOTE,
     ),
@@ -1409,6 +1327,11 @@ WITHDRAWN_CODES: frozenset[str] = frozenset({
     # than to svar_full_simulation -- so the real, mockup-verified simulation
     # reported no sub-scores while the stand-in did. One SVAR, the real one.
     "svar_style_spoken_english",
+    # Speaking-only imitation of a test that, in reality, covers four skills.
+    # versant_style_four_skills already reports Speaking as one of its four
+    # scored skills, so this one added a second, narrower "Versant" card
+    # beside it rather than anything a candidate needed.
+    "versant_style_speaking_listening",
 })
 
 

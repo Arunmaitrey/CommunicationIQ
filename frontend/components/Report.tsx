@@ -5,6 +5,7 @@ import { Section } from "@/components/ui";
 import { DIMENSION_LABEL } from "@/lib/dimensions";
 import type { AttemptResult, EvidenceRow, Highlight, Narration, SectionResult,
               SkillScore } from "@/lib/api";
+import { getToken } from "@/lib/api";
 
 /**
  *  The parts of a result that are not a number.
@@ -47,9 +48,11 @@ export function NarrationCard({ narration }: { narration: Narration | null }) {
     || narration.status === "retry_pending";
 
   return (
-    <div className="ds-card p-4 mb-4" style={{ borderColor: "var(--primary)" }}>
-      <div className="flex items-center gap-2 mb-2">
-        <Sparkles size={15} style={{ color: "var(--primary)" }} />
+    <div className="ai-feedback-card">
+      <div className="flex items-center gap-2 mb-3">
+        <span className="ai-feedback-icon shrink-0">
+          <Sparkles size={13} />
+        </span>
         <span className="text-[11px] font-bold uppercase tracking-wider"
               style={{ color: "var(--primary)" }}>
           What your assessment says
@@ -83,14 +86,16 @@ export function NarrationCard({ narration }: { narration: Narration | null }) {
           <p className="text-base font-bold mb-1">{narration.headline}</p>
           <p className="text-sm leading-relaxed mb-3">{narration.summary}</p>
           <div className="grid sm:grid-cols-2 gap-3">
-            <div className="ds-inset p-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1">
+            <div className="ai-feedback-note">
+              <div className="text-[10px] font-bold uppercase tracking-wider mb-1"
+                   style={{ color: "var(--primary)" }}>
                 Focus on
               </div>
               <p className="text-xs leading-relaxed">{narration.primary_focus}</p>
             </div>
-            <div className="ds-inset p-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1">
+            <div className="ai-feedback-note">
+              <div className="text-[10px] font-bold uppercase tracking-wider mb-1"
+                   style={{ color: "var(--primary)" }}>
                 Try this
               </div>
               <p className="text-xs leading-relaxed">{narration.practice_action}</p>
@@ -320,11 +325,35 @@ function EvidenceItem({ row }: { row: EvidenceRow }) {
  *  are looking at, which is exactly what printing produces.
  */
 export function Export({ csvUrl }: { csvUrl: string }) {
+  // A plain <a href download> can't carry an Authorization header, so on an
+  // API that requires one this silently downloaded an HTML error page named
+  // results.csv instead of the report. Fetching with the token and handing
+  // the browser a blob URL is the fix; window.open is only the fallback if
+  // that fetch itself fails.
+  const handleCsvDownload = async () => {
+    const token = getToken();
+    try {
+      const res = await fetch(csvUrl, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Failed to download");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "results.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.open(csvUrl, "_blank");
+    }
+  };
+
   return (
     <div className="flex flex-wrap gap-2 mb-4 print:hidden">
-      <a href={csvUrl} className="btn btn-ghost btn-sm ds-focus" download>
+      <button onClick={handleCsvDownload} className="btn btn-ghost btn-sm ds-focus">
         <Download size={13} /> Download as a spreadsheet
-      </a>
+      </button>
       <button onClick={() => window.print()} className="btn btn-ghost btn-sm ds-focus">
         Print or save as PDF
       </button>

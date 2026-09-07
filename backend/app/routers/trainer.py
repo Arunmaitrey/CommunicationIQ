@@ -83,7 +83,7 @@ async def cohorts(principal: Principal,
                   models: TenantModels) -> list[CohortOut]:
     rows = await _visible_cohorts(models, principal)
 
-    coll = models.CohortMember.get_pymongo_collection()
+    coll = models.CohortMember.get_motor_collection()
     counts = {doc["_id"]: doc["count"] for doc in await coll.aggregate([
         {"$group": {"_id": "$cohort_id", "count": {"$sum": 1}}},
     ]).to_list(None)}
@@ -150,7 +150,7 @@ async def cohort_students(cohort_id: str, principal: Principal,
     ids = [u.id for u in users]
     latest = await _latest_overall(models, ids)
 
-    coll = models.Attempt.get_pymongo_collection()
+    coll = models.Attempt.get_motor_collection()
     attempt_docs = await coll.aggregate([
         {"$match": {"user_id": {"$in": ids or [""]}}},
         {"$group": {"_id": "$user_id", "count": {"$sum": 1},

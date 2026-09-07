@@ -37,7 +37,6 @@ CANONICAL = (
     "company_round_wipro",
     "company_round_cognizant",
     "speechx_style_full",
-    "versant_style_speaking_listening",
 )
 
 

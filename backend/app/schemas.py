@@ -20,6 +20,12 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str
+    full_name: str = Field(min_length=1, max_length=120)
+
+
 class SessionUser(BaseModel):
     id: str
     email: str
@@ -39,6 +45,7 @@ class SessionUser(BaseModel):
     must_change_password: bool = False
     ui_language: str = "en"
     preferred_theme: str = ""
+    onboarding_completed: bool = False
 
 
 class LoginResponse(BaseModel):
@@ -49,6 +56,21 @@ class LoginResponse(BaseModel):
 class ChangePasswordRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=8)
+
+
+class UpdateProfileRequest(BaseModel):
+    """Self-service, unlike ``UpdateUserRequest`` -- no ``active``/``role``,
+    which only an admin may change, and only on someone else."""
+    full_name: str | None = Field(default=None, min_length=1, max_length=120)
+    # Tenant users only; ignored for platform staff, who have no such field.
+    l1_language: str | None = None
+
+
+class PreferencesRequest(BaseModel):
+    """Appearance/locale, persisted server-side so they follow the account
+    rather than the browser. Tenant users only."""
+    ui_language: str | None = None
+    preferred_theme: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -211,6 +233,11 @@ class ConsentRequest(BaseModel):
     scopes: list[str]
     notice_version: str = "1.0"
     notice_language: str = "en"
+
+
+class ConsentOut(BaseModel):
+    """Which scopes are currently granted — the latest record per scope."""
+    granted: list[str] = []
 
 
 # --------------------------------------------------------------------------
@@ -545,6 +572,11 @@ class RunnerPayload(BaseModel):
     # silence and an empty recording is never caught (hardware UAT, D1).
     noise_dbfs: float | None = None
     noise_ceiling_dbfs: float | None = None
+    # Told to the client up front so the check page can ask for camera
+    # permission itself -- without this, the check screen had no way to know
+    # to ask, so env-check's own camera_ok requirement below could never be
+    # satisfied and the assessment could never be started.
+    camera_check: bool = False
     items: list[RunnerItem]
 
     # -- the whole-sitting clock -------------------------------------------
@@ -581,9 +613,15 @@ class WordTimingOut(BaseModel):
 
 class ResponseMetrics(BaseModel):
     response_id: str
+    section_id: str = ""
     position: int
     task_type: str
     prompt_text: str = ""
+    submitted_answer: str = ""
+    correct_answer: str = ""
+    question_score: float | None = None
+    word_count: int | None = None
+    content_score: float | None = None
     skipped: bool = False
     onset_ms: int | None = None
     speech_ms: int | None = None
@@ -828,9 +866,9 @@ class ProfileRequest(BaseModel):
     # Empty means "use the engine's own weights", which is what every existing
     # profile does and what practice should keep doing.
     scoring_weights: dict[str, float] = {}
-    # Overall, on the internal 20-80 scale. None means this assessment does
+    # Overall, on the native 0-100 scale. None means this assessment does
     # not pass or fail anybody -- right for practice, wrong for a hiring round.
-    pass_threshold: float | None = Field(default=None, ge=20, le=80)
+    pass_threshold: float | None = Field(default=None, ge=0, le=100)
     # {dimension: floor}. Failing any floor fails the assessment even when the
     # weighted overall clears the bar.
     skill_thresholds: dict[str, float] = {}
@@ -859,9 +897,9 @@ class ProfileRequest(BaseModel):
                 raise ValueError(
                     f"Not a measured dimension: {dimension}. "
                     f"Available: {', '.join(sorted(ENGINE_WEIGHTS))}.")
-            if not 20 <= float(floor) <= 80:
+            if not 0 <= float(floor) <= 100:
                 raise ValueError(
-                    f"A floor is on the same 20-80 scale as the scores. "
+                    f"A floor is on the same 0-100 scale as the scores. "
                     f"{dimension} was given {floor}.")
         return v
 
@@ -963,7 +1001,7 @@ class PrimaryDiagnosisOut(BaseModel):
     label: str = ""
     score: float | None = None
     responses: int = 0
-    scale_max: float = 80.0
+    scale_max: float = 100.0
     confidence: str = ""
     # The tied group (status "tied") or the eligible set, weakest first.
     candidates: list[dict] = []
@@ -1046,8 +1084,8 @@ class AttemptResult(BaseModel):
     attempt_number: int
     overall: float | None
     band: str = ""
-    scale_min: float = 20
-    scale_max: float = 80
+    scale_min: float = 0
+    scale_max: float = 100
     dimensions: dict[str, float] = {}
     confidence: dict[str, float] = {}
     # Dimension → why it is not scored yet. Shown, not hidden.
@@ -1331,6 +1369,27 @@ class SeatUsage(BaseModel):
     trainers: int
     admins: int
     remaining: int
+
+
+class ContentBankSummaryRow(BaseModel):
+    """One row of the item bank's shape: how many published items a source
+    (quiz/task/writing_prompt/passage table) holds under one key (category,
+    task_type, or kind)."""
+    source: str
+    key: str
+    count: int
+
+
+class ContentBankItemOut(BaseModel):
+    """One item bank row, whatever table it actually lives in -- enough to
+    list and filter, not the full record."""
+    id: str
+    source: str
+    key: str
+    title: str
+    status: str
+    difficulty: float
+    created_at: datetime | None = None
 
 
 # --------------------------------------------------------------------------
@@ -1972,3 +2031,105 @@ class GamificationConfigRequest(BaseModel):
     quiz_xp_cap_percent: int = 40
     leagues_enabled: bool = True
     max_engagement_notifications_per_day: int = 1
+
+
+# --------------------------------------------------------------------------
+# Attempt reviews
+# --------------------------------------------------------------------------
+
+class ReviewRequest(BaseModel):
+    rating: int = Field(ge=1, le=5)
+    difficulty: str = Field(default="just_right")
+    comment: str = Field(default="", max_length=2000)
+
+
+class ReviewOut(BaseModel):
+    id: str
+    attempt_id: str
+    user_id: str
+    user_name: str = ""
+    user_email: str = ""
+    profile_name: str = ""
+    rating: int
+    difficulty: str
+    comment: str
+    created_at: datetime | None = None
+
+
+# --------------------------------------------------------------------------
+# Contact messages
+# --------------------------------------------------------------------------
+
+class ContactMessageRequest(BaseModel):
+    subject: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=5000)
+    priority: str = "normal"
+
+
+class ContactMessageReplyRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=2000)
+
+
+# --------------------------------------------------------------------------
+# Exam tests, question sets and exam scheduling
+# --------------------------------------------------------------------------
+
+class ExamTestRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    description: str = Field(default="", max_length=1000)
+    duration_minutes: int = Field(default=30, ge=5, le=300)
+    reading_questions: int = Field(default=10, ge=0, le=50)
+    listening_questions: int = Field(default=10, ge=0, le=50)
+    writing_questions: int = Field(default=10, ge=0, le=50)
+    speaking_questions: int = Field(default=0, ge=0, le=50)
+    reading_seconds: int = Field(default=600, ge=60)
+    listening_seconds: int = Field(default=600, ge=60)
+    writing_seconds: int = Field(default=600, ge=60)
+    speaking_seconds: int = Field(default=0, ge=0)
+    allow_pause: bool = False
+    show_timer: bool = True
+    one_shot_audio: bool = True
+    is_active: bool = True
+    is_baseline: bool = False
+    company: str = ""
+    question_ids: dict = Field(default_factory=dict)
+
+
+class ExamTestOut(BaseModel):
+    id: str
+    name: str
+    description: str
+    slug: str
+    duration_minutes: int
+    reading_questions: int
+    listening_questions: int
+    writing_questions: int
+    speaking_questions: int
+    reading_seconds: int
+    listening_seconds: int
+    writing_seconds: int
+    speaking_seconds: int
+    allow_pause: bool
+    show_timer: bool
+    one_shot_audio: bool
+    is_active: bool
+    is_baseline: bool
+    company: str
+    question_ids: dict
+    created_at: datetime | None = None
+
+
+class ScheduledExamRequest(BaseModel):
+    """Open one ExamTest to a set of institutions for a fixed window.
+
+    Defined here because the merged feat/exam-section PR referenced this
+    schema from platform_writes.py without ever declaring it -- an import
+    that would have raised ImportError at startup. Field shape matches what
+    the exam-schedules admin page actually sends.
+    """
+    exam_test_id: str = Field(min_length=1)
+    tenant_ids: list[str] = Field(default_factory=list)  # empty = all institutions + general
+    starts_at: datetime
+    ends_at: datetime
+    max_attempts: int = Field(default=1, ge=0, le=50)
+    is_active: bool = True

@@ -1,18 +1,20 @@
-"""MongoDB data layer — Beanie ODM over Motor, database-per-tenant.
+"""MongoDB data layer — Beanie ODM over Motor, single shared database.
 
-Two kinds of documents:
-
-* Control-plane documents (``app.models.platform``) live in one database,
-  ``CommunicationIQ`` (taken from the URI). Registered once at startup.
-* Per-institution documents (``app.models.tenant``) live in a database named
-  ``tenant_<slug>`` each.
+Everything — control-plane documents (``app.models.platform``) and
+per-institution documents (``app.models.tenant``) alike — lives in one
+database, ``CommunicationIQ`` (taken from the URI). Registered once at
+startup. Tenant isolation is by the ``tenant_id`` field on each document,
+applied at query time by callers (see ``app.deps``), not by a database
+boundary — there used to be a separate ``tenant_<slug>`` database per
+institution; that's gone, because the real data was never actually stored
+that way (confirmed against the live cluster), only the code assumed it.
 """
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from beanie import Document, init_beanie
 
@@ -21,7 +23,13 @@ from app.config import settings
 
 client = AsyncIOMotorClient(
     settings.mongo_uri, uuidRepresentation="standard",
-    serverSelectionTimeoutMS=15000)
+    serverSelectionTimeoutMS=15000,
+    # This Python build's default SSL context ships with no CA certs loaded
+    # (a known python.org-framework-build gap on macOS), which makes Atlas's
+    # TLS handshake fail with "unable to get local issuer certificate" even
+    # though the connection itself is fine. Pointing at certifi's bundle
+    # sidesteps the system trust store entirely.
+    tlsCAFile=certifi.where())
 
 CONTROL_DB_NAME = settings.control_db_name
 
@@ -30,104 +38,70 @@ def control_db() -> AsyncIOMotorDatabase:
     return client[CONTROL_DB_NAME]
 
 
-def tenant_db_name(slug: str) -> str:
-    return f"{settings.tenant_schema_prefix}{slug}"
-
-
-def tenant_db(slug: str) -> AsyncIOMotorDatabase:
-    return client[tenant_db_name(slug)]
-
-
 # ---------------------------------------------------------------------------
-# Beanie init (control plane — called once at startup)
+# Beanie init — one database, one registration, at startup.
 # ---------------------------------------------------------------------------
 
 _client_inited = False
+_tenant_bundle: SimpleNamespace | None = None
 
 
 async def init_mongo() -> None:
-    """Ping and register the control-plane documents. Idempotent."""
+    """Ping and register every document model against the one database.
+
+    Idempotent. Runs once at process startup; every request after that reads
+    the already-registered classes rather than re-initialising anything.
+    """
     global _client_inited
     if _client_inited:
         return
     await client.admin.command("ping")
     from app.models.platform import CONTROL_DOCUMENTS
-    await init_beanie(database=control_db(), document_models=CONTROL_DOCUMENTS)
+    from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
+    await init_beanie(
+        database=control_db(),
+        document_models=list(CONTROL_DOCUMENTS) + list(TENANT_DOCUMENTS) + list(SHARED_DOCUMENTS))
     _client_inited = True
     _stamp_platform_owners()
+    _stamp_tenant_owners()
 
 
 # ---------------------------------------------------------------------------
-# Tenant document bundles (lazy per-slug init)
+# Tenant document bundle
 #
-# Beanie 2.0 stores the DB reference on the class object itself.  When we
-# call init_beanie(db_A, [User, Attempt, ...]) and then later
-# init_beanie(db_B, [User, Attempt, ...]) the second call overwrites the
-# first's binding.  We fix this by creating per-tenant subclasses that each
-# carry their own _database reference.
+# There is no more per-tenant database binding to create — every tenant's
+# documents live in the same collections, distinguished by tenant_id. This
+# just hands back the plain, already-registered Document classes, kept as a
+# SimpleNamespace so every existing `models.User`/`models.QuizItem` call site
+# across the routers keeps working unchanged.
 # ---------------------------------------------------------------------------
-
-_tenant_bundles: dict[str, SimpleNamespace] = {}
-_tenant_locks: dict[str, asyncio.Lock] = {}
-
-
-def _make_tenant_subclasses(slug: str, base_docs: list) -> list:
-    """Create per-tenant Document subclasses.
-
-    Each subclass is created via ``type()`` *without* putting ``Settings``
-    in the namespace (which would trigger a Pydantic field-detection error),
-    then we patch ``Settings`` as a plain class attribute after creation.
-    """
-    subclasses = []
-    for cls in base_docs:
-        orig_name = cls.__name__
-        sub = type(
-            orig_name,
-            (cls,),
-            {
-                "__qualname__": f"{orig_name}_{slug}",
-                "__module__": cls.__module__,
-            },
-        )
-        # Patch Settings after class creation — Pydantic won't re-inspect.
-        sub.Settings = type("Settings", (), {"name": cls.Settings.name})
-        subclasses.append(sub)
-    return subclasses
 
 
 async def ensure_tenant_models(slug: str) -> SimpleNamespace:
-    """Return a namespace of Beanie Document classes bound to ``tenant_<slug>``.
+    """Return the tenant + shared-content Document classes.
 
-    The bundle is created and its documents registered with Beanie on first
-    use, then cached.  Each tenant gets distinct document subclasses so that
-    multiple tenants coexist without init_beanie clobbering DB bindings.
+    ``slug`` is accepted (every caller still passes one) but no longer
+    changes what comes back — there is one set of classes now, not one per
+    institution. Callers still must filter their own queries by
+    ``tenant_id``; that boundary moved from the database to the query.
     """
-    cached = _tenant_bundles.get(slug)
-    if cached is not None:
-        return cached
-    lock = _tenant_locks.setdefault(slug, asyncio.Lock())
-    async with lock:
-        cached = _tenant_bundles.get(slug)
-        if cached is not None:
-            return cached
-        from app.models.tenant import TENANT_DOCUMENTS
+    await init_mongo()
+    return _get_tenant_bundle()
 
-        db = tenant_db(slug)
-        tenant_docs = _make_tenant_subclasses(slug, list(TENANT_DOCUMENTS))
-        await init_beanie(database=db, document_models=tenant_docs)
-        # Beanie sets each field's ExpressionField on every class in the new
-        # subclass's MRO, the shared base included — so this only needs to
-        # run once, off the very first tenant, for every tenant's queries on
-        # the base classes to resolve their owner correctly from here on.
-        _stamp_tenant_owners()
-        bundle = SimpleNamespace(**{cls.__name__: cls for cls in tenant_docs})
-        _tenant_bundles[slug] = bundle
-        return bundle
+
+def _get_tenant_bundle() -> SimpleNamespace:
+    global _tenant_bundle
+    if _tenant_bundle is None:
+        from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
+        classes = list(TENANT_DOCUMENTS) + list(SHARED_DOCUMENTS)
+        _tenant_bundle = SimpleNamespace(**{cls.__name__: cls for cls in classes})
+    return _tenant_bundle
 
 
 def get_tenant_models(slug: str) -> SimpleNamespace:
-    """Synchronous accessor — only valid after ``ensure_tenant_models`` ran."""
-    return _tenant_bundles[slug]
+    """Synchronous accessor — only valid after ``ensure_tenant_models`` ran
+    at least once for any tenant (it always has, by request time)."""
+    return _get_tenant_bundle()
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +111,15 @@ def get_tenant_models(slug: str) -> SimpleNamespace:
 async def ensure_platform_models() -> SimpleNamespace:
     from app.models.platform import CONTROL_DOCUMENTS
     return SimpleNamespace(**{cls.__name__: cls for cls in CONTROL_DOCUMENTS})
+
+
+async def ensure_shared_models() -> SimpleNamespace:
+    """The shared-content classes only (QuizItem, ReadingPassage, ...), for
+    callers that have no tenant slug to hand ``ensure_tenant_models`` — the
+    question-bank admin routes, which write shared content directly rather
+    than through a tenant-scoped session."""
+    from app.models.tenant import SHARED_DOCUMENTS
+    return SimpleNamespace(**{cls.__name__: cls for cls in SHARED_DOCUMENTS})
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +177,6 @@ _EF.asc = _ef_asc
 
 
 _platform_owners_stamped = False
-_tenant_owners_stamped = False
 
 
 def _stamp_platform_owners() -> None:
@@ -219,19 +201,18 @@ def _stamp_platform_owners() -> None:
     _platform_owners_stamped = True
 
 
-def _stamp_tenant_owners() -> None:
-    """Same idea as ``_stamp_platform_owners``, for the tenant side.
+_tenant_owners_stamped = False
 
-    Beanie sets a field's ExpressionField on every class in a subclass's MRO
-    when it initialises that subclass — the shared base included — so
-    stamping once, after the very first tenant's ``init_beanie`` call, is
-    enough for every tenant's queries on the base classes to resolve.
-    """
+
+def _stamp_tenant_owners() -> None:
+    """Same idea as ``_stamp_platform_owners``, for the tenant + shared-content
+    side — now a single `init_beanie` call like the platform side, so this
+    also only needs to run once per process."""
     global _tenant_owners_stamped
     if _tenant_owners_stamped:
         return
-    from app.models.tenant import TENANT_DOCUMENTS
-    for model in TENANT_DOCUMENTS:
+    from app.models.tenant import TENANT_DOCUMENTS, SHARED_DOCUMENTS
+    for model in list(TENANT_DOCUMENTS) + list(SHARED_DOCUMENTS):
         for name in model.model_fields:
             field = getattr(model, name, None)
             if isinstance(field, _EF):
@@ -345,6 +326,18 @@ class Session:
     def add_all(self, objs: list) -> None:
         self._new.extend(objs)
 
+    def track(self, obj: Any) -> None:
+        """Mark an already-fetched row as dirty-tracked.
+
+        ``get()`` does this automatically; a row that came back from
+        ``execute(select(...))`` does not (see ``_run`` -- it is a plain
+        ``to_list()``, no tracking). A caller that mutates such a row and
+        expects the next ``commit()`` to save it needs this, or the change
+        is silently lost -- the same failure mode ``get()``'s tracking
+        exists to prevent, just for a row fetched the other way.
+        """
+        self._tracked.append(obj)
+
     async def flush(self) -> None:
         for obj in self._new:
             if not getattr(obj, 'id', None):
@@ -359,7 +352,7 @@ class Session:
     async def commit(self) -> None:
         await self.flush()
 
-    def rollback(self) -> None:
+    async def rollback(self) -> None:
         self._new.clear()
         self._tracked.clear()
 
@@ -368,6 +361,18 @@ class Session:
         if obj is not None:
             self._tracked.append(obj)
         return obj
+
+    async def refresh(self, obj: Any) -> None:
+        """Reload `obj`'s fields in place from the database, mirroring
+        SQLAlchemy's session.refresh() -- the caller keeps the same object
+        identity, but its attributes now match what another write (e.g. a
+        different session.get() of the same row, mutated and saved
+        elsewhere in this same request) actually persisted.
+        """
+        fresh = await self._resolve(type(obj)).get(obj.id)
+        if fresh is not None:
+            for field in type(fresh).model_fields:
+                setattr(obj, field, getattr(fresh, field))
 
     async def execute(self, stmt: _Stmt):
         if stmt.kind == _Stmt.DELETE:

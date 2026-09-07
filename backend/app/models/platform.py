@@ -2,7 +2,10 @@
 
 Tenant registry, plans and subscriptions, platform staff, the Provider
 Registry, model versions, gamification economy config, feature flags and the
-immutable audit log. No student, attempt, recording or score data appears here.
+immutable audit log. Also the question bank's own control surface: exam
+tests, question sets, exam scheduling, SMTP/payment/email-template config and
+inbound contact messages. No student, attempt, recording or score data
+appears here.
 """
 from __future__ import annotations
 
@@ -11,6 +14,8 @@ from datetime import date, datetime, timezone
 
 from beanie import Document, Indexed
 from pydantic import Field
+
+from app.models._common import CreatedAt, StrId
 
 
 def _uuid() -> str:
@@ -25,10 +30,14 @@ def _now() -> datetime:
 # Tenancy, plans, billing
 # --------------------------------------------------------------------------
 
-class Plan(Document):
-    """Versioned pricing template (PLAT-03)."""
+class BillingPlan(Document):
+    """Versioned pricing template used only by the GST invoicing flow
+    (PLAT-03, BILL-04) -- a separate collection from the customer-facing
+    ``Plan`` below. The two were briefly the same class pointed at the same
+    "plans" collection with incompatible field shapes; this is the half that
+    was never wired to real data (tracked separately, left as-is)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     code: str = Field(default="", index=True)
     name: str
     version: int = 1
@@ -41,7 +50,33 @@ class Plan(Document):
     attempt_allowance: int = 3
     features: dict = Field(default_factory=dict)
     active: bool = True
-    created_at: datetime = Field(default_factory=_now)
+    created_at: CreatedAt = Field(default_factory=_now)
+
+    class Settings:
+        name = "billing_plans"
+
+
+class Plan(Document):
+    """Subscription plan that controls feature access and limits -- the one
+    the platform-admin plans UI and student subscription flow actually read
+    and write."""
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    name: str = ""
+    slug: str = Field(default="", unique=True, index=True)
+    description: str = ""
+    price_monthly: float = 0.0
+    price_yearly: float = 0.0
+    seat_limit: int = 50
+    features: list[str] = Field(default_factory=list)
+    max_questions: int = 500
+    max_exams_per_day: int = 10
+    has_proctoring: bool = True
+    has_analytics: bool = True
+    has_custom_branding: bool = False
+    has_api_access: bool = False
+    is_active: bool = True
+    is_default: bool = False
+    created_at: CreatedAt = Field(default_factory=_now)
 
     class Settings:
         name = "plans"
@@ -71,9 +106,16 @@ TENANT_TYPE_KEYS = frozenset(key for key, _ in TENANT_TYPES)
 class Tenant(Document):
     """A customer. Routing record for its database (PLAT-01/02)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     name: str
     slug: str = Field(unique=True, index=True)
+    # Email domain for self-service student signup (e.g. "stmarys.edu") —
+    # empty for a tenant that only admits students by admin-created account
+    # or invitation. "" rather than unique-indexed: two tenants sharing one
+    # domain is a real, if rare, case (a group of colleges under one mail
+    # system), and signup already falls back to "no institution found" for
+    # an empty domain, so there is nothing to enforce uniqueness against yet.
+    domain: str = ""
     tenant_type: str = "engineering_college"
     # active | trial | suspended | offboarding | closed
     status: str = "trial"
@@ -85,7 +127,7 @@ class Tenant(Document):
     season_start: datetime | None = None
     season_end: datetime | None = None
     settings: dict = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=_now)
+    created_at: CreatedAt = Field(default_factory=_now)
 
     class Settings:
         name = "tenants"
@@ -94,7 +136,7 @@ class Tenant(Document):
 class Subscription(Document):
     __tablename__ = "subscriptions"
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     tenant_id: str = Field(default="", index=True)
     plan_id: str
     status: str = "trialing"
@@ -111,7 +153,7 @@ class Subscription(Document):
 class Invoice(Document):
     """GST-compliant invoice record (BILL-04)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     tenant_id: str = Field(default="", index=True)
     number: str = Field(unique=True, index=True)
     period_start: datetime
@@ -123,7 +165,7 @@ class Invoice(Document):
     currency: str = "INR"
     status: str = "draft"
     issued_at: datetime | None = None
-    created_at: datetime = Field(default_factory=_now)
+    created_at: CreatedAt = Field(default_factory=_now)
 
     class Settings:
         name = "invoices"
@@ -136,7 +178,7 @@ class Invoice(Document):
 class PlatformUser(Document):
     """Internal staff account (PLAT-16)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     email: str = Field(unique=True, index=True)
     full_name: str
     password_hash: str
@@ -144,7 +186,7 @@ class PlatformUser(Document):
     mfa_enabled: bool = False
     active: bool = True
     last_login_at: datetime | None = None
-    created_at: datetime = Field(default_factory=_now)
+    created_at: CreatedAt = Field(default_factory=_now)
 
     class Settings:
         name = "platform_users"
@@ -153,11 +195,11 @@ class PlatformUser(Document):
 class InvitationDirectory(Document):
     """Redemption lookup: token -> which institution to open a session against."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     token: str = Field(unique=True, index=True)
     tenant_id: str = Field(default="", index=True)
     tenant_slug: str = Field(default="", index=True)
-    created_at: datetime = Field(default_factory=_now)
+    created_at: CreatedAt = Field(default_factory=_now)
 
     class Settings:
         name = "invitation_directory"
@@ -166,12 +208,12 @@ class InvitationDirectory(Document):
 class TenantUserDirectory(Document):
     """Sign-in lookup: email -> which institution to open a session against."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     email: str = Field(unique=True, index=True)
     tenant_id: str = Field(default="", index=True)
     tenant_slug: str = Field(default="", index=True)
     active: bool = True
-    created_at: datetime = Field(default_factory=_now)
+    created_at: CreatedAt = Field(default_factory=_now)
 
     class Settings:
         name = "tenant_user_directory"
@@ -184,7 +226,7 @@ class TenantUserDirectory(Document):
 class ProviderRegistry(Document):
     """One registered implementation of one capability."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     capability: str = Field(default="", index=True)
     provider_key: str
     name: str
@@ -193,7 +235,7 @@ class ProviderRegistry(Document):
     entrypoint: str = ""
     config_schema: dict = Field(default_factory=dict)
     active: bool = True
-    created_at: datetime = Field(default_factory=_now)
+    created_at: CreatedAt = Field(default_factory=_now)
 
     class Settings:
         name = "provider_registry"
@@ -202,7 +244,7 @@ class ProviderRegistry(Document):
 class ProviderConfig(Document):
     """Which provider serves a capability, for whom, and what happens on failure."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     capability: str = Field(default="", index=True)
     tenant_id: str | None = Field(default=None, index=True)
     primary_provider_id: str
@@ -220,13 +262,13 @@ class ProviderConfig(Document):
 class ModelVersion(Document):
     """A promotable version of a model behind a provider."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     provider_id: str = Field(default="", index=True)
     version: str
     notes: str = ""
     eval_metrics: dict = Field(default_factory=dict)
     promoted_at: datetime | None = None
-    created_at: datetime = Field(default_factory=_now)
+    created_at: CreatedAt = Field(default_factory=_now)
 
     class Settings:
         name = "model_versions"
@@ -235,7 +277,7 @@ class ModelVersion(Document):
 class ProviderCall(Document):
     """Per-call telemetry feeding the provider performance dashboard (PLAT-13)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     capability: str = Field(default="", index=True)
     provider_id: str = Field(default="", index=True)
     provider_version: str = ""
@@ -258,7 +300,7 @@ class ProviderCall(Document):
 class GamificationConfig(Document):
     """The game economy, tunable without a deploy (PLAT-17)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     tenant_id: str | None = Field(default=None, index=True, unique=True)
     xp_table: dict = Field(default_factory=dict)
     difficulty_multipliers: dict = Field(default_factory=dict)
@@ -275,7 +317,7 @@ class GamificationConfig(Document):
 
 
 class FeatureFlag(Document):
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     key: str = Field(default="", index=True)
     tenant_id: str | None = Field(default=None, index=True)
     enabled: bool = False
@@ -288,7 +330,7 @@ class FeatureFlag(Document):
 class AuditLog(Document):
     """Append-only record of admin and score-affecting actions (PLAT-14, NFR-11)."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     actor_type: str = "system"
     actor_id: str = ""
     actor_label: str = ""
@@ -307,7 +349,7 @@ class AuditLog(Document):
 class PlatformSetting(Document):
     """Operator-editable configuration, one JSON document per key."""
 
-    id: str = Field(default_factory=_uuid)
+    id: StrId = Field(default_factory=_uuid)
     key: str = Field(unique=True, index=True)
     value: dict = Field(default_factory=dict)
     updated_at: datetime = Field(default_factory=_now)
@@ -316,8 +358,165 @@ class PlatformSetting(Document):
         name = "platform_settings"
 
 
+# --------------------------------------------------------------------------
+# Question bank, exam tests and scheduling, operator communication
+# --------------------------------------------------------------------------
+
+class SmtpConfig(Document):
+    """SMTP settings for sending emails."""
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    tenant_id: str | None = None
+    host: str = ""
+    port: int = 587
+    username: str = ""
+    password: str = ""
+    from_email: str = ""
+    from_name: str = "CommunicationIQ"
+    use_tls: bool = True
+    use_ssl: bool = False
+    is_active: bool = True
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "smtp_configs"
+
+
+class PaymentConfig(Document):
+    """Payment gateway credentials."""
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    gateway: str = ""
+    test_mode: bool = True
+    stripe_publishable: str = ""
+    stripe_secret: str = ""
+    stripe_webhook_secret: str = ""
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    currency: str = "INR"
+    is_active: bool = False
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "payment_configs"
+
+
+class EmailTemplate(Document):
+    """Reusable email templates."""
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    key: str = Field(default="", unique=True, index=True)
+    name: str = ""
+    subject: str = ""
+    body_html: str = ""
+    body_text: str = ""
+    category: str = "transactional"
+    is_active: bool = True
+    created_at: CreatedAt = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "email_templates"
+
+
+class ContactMessage(Document):
+    """Messages from users to platform super admins (contact form submissions)."""
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    from_user_id: str = ""
+    from_email: str = ""
+    from_name: str = ""
+    from_role: str = ""  # student, tenant_admin, or empty
+    from_tenant_id: str | None = None
+    subject: str = ""
+    body: str = ""
+    status: str = "open"  # open, read, resolved
+    priority: str = "normal"  # low, normal, high, urgent
+    replies: list[dict] = Field(default_factory=list)  # [{from: "admin", text: "...", at: "..."}]
+    created_at: CreatedAt = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "contact_messages"
+
+
+class ExamTest(Document):
+    """Custom test configurations created by super admin."""
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    name: str = ""
+    description: str = ""
+    slug: str = Field(default="", index=True)
+    duration_minutes: int = 30
+    # Weightage per section
+    reading_questions: int = 10
+    listening_questions: int = 10
+    writing_questions: int = 10
+    speaking_questions: int = 0
+    # Timing per section in seconds
+    reading_seconds: int = 600
+    listening_seconds: int = 600
+    writing_seconds: int = 600
+    speaking_seconds: int = 0
+    # Restrictions
+    allow_pause: bool = False
+    show_timer: bool = True
+    one_shot_audio: bool = True
+    is_active: bool = True
+    is_baseline: bool = False
+    company: str = ""  # empty = general (no company)
+    # Question IDs organized by section
+    question_ids: dict = Field(default_factory=dict)  # {reading: [...], listening: [...], writing: [...]}
+    created_at: CreatedAt = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "exam_tests"
+
+
+class QuestionSet(Document):
+    """A set of exactly 10 questions from the same module."""
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    set_number: str = Field(default="", index=True)  # e.g. "READSET-001", "WRITESET-003"
+    module: str = Field(default="", index=True)  # reading, writing, listening, speaking, quiz
+    company: str = Field(default="", index=True)  # empty = general
+    question_ids: list[str] = Field(default_factory=list)  # exactly 10 question IDs
+    question_numbers: list[str] = Field(default_factory=list)  # human-readable numbers
+    question_count: int = 10
+    status: str = Field(default="draft", index=True)  # draft, active, inactive, archived
+    is_used: bool = False
+    usage_count: int = 0
+    last_used_at: datetime | None = None
+    created_at: CreatedAt = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "question_sets"
+
+
+class ScheduledExam(Document):
+    """An ExamTest opened to one or more institutions for a fixed window
+    (Phase 4 of the exam-scheduling feature). Referenced by the merged
+    feat/exam-section PR's routers but never actually defined there -- the
+    import would have raised ImportError at startup. Field shape below is
+    reconstructed from every read/write site in platform_admin.py and
+    platform_writes.py (create/update/list/delete), not guessed."""
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    exam_test_id: str = Field(default="", index=True)
+    profile_id: str = ""
+    name: str = ""
+    tenant_ids: list[str] = Field(default_factory=list)  # empty = all institutions + general
+    starts_at: datetime
+    ends_at: datetime
+    max_attempts: int = 1
+    is_active: bool = True
+    created_by: str = ""
+    created_at: CreatedAt = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "scheduled_exams"
+
+
 CONTROL_DOCUMENTS = [
-    Plan, Tenant, Subscription, Invoice, PlatformUser, InvitationDirectory,
-    TenantUserDirectory, ProviderRegistry, ProviderConfig, ModelVersion,
-    ProviderCall, GamificationConfig, FeatureFlag, AuditLog, PlatformSetting,
+    BillingPlan, Plan, Tenant, Subscription, Invoice, PlatformUser,
+    InvitationDirectory, TenantUserDirectory, ProviderRegistry, ProviderConfig,
+    ModelVersion, ProviderCall, GamificationConfig, FeatureFlag, AuditLog,
+    PlatformSetting, SmtpConfig, PaymentConfig, EmailTemplate, ContactMessage,
+    ExamTest, QuestionSet, ScheduledExam,
 ]

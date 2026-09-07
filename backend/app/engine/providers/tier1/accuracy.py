@@ -22,8 +22,8 @@ from difflib import SequenceMatcher
 from app.engine.contracts.types import (AccuracyResult, ProviderMeta,
                                         TranscriptResult)
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 # Tasks with a right answer to align against.
 #

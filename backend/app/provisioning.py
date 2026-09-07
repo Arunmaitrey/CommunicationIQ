@@ -1,22 +1,24 @@
-"""Creating and destroying institution databases.
+"""Onboarding and offboarding institutions.
 
-Provisioning is the only code allowed to name a real institution database.
-Everything else speaks the ``tenant`` placeholder (here: asks for the bundle
-bound to ``tenant_<slug>``) and Beanie routes it to the right database.
+There's no per-institution database to create or drop anymore — every tenant
+shares the same collections, distinguished by ``tenant_id``. What this module
+still does: validate a new slug, and — for offboarding — actually erase one
+institution's documents (a bulk delete across every tenant-scoped collection)
+rather than the single `drop_database` call that used to do the whole job.
 """
 from __future__ import annotations
 
 import re
 
-from app.db import (client, ensure_tenant_models, get_platform_bundle,
-                    tenant_db, tenant_db_name)
+from app.db import ensure_tenant_models, get_platform_bundle
 from app.models.platform import TenantUserDirectory
 
 SLUG = re.compile(r"^[a-z][a-z0-9_]{1,40}$")
 
 
 def validate_slug(slug: str) -> str:
-    """A slug becomes part of a database name, so it is validated, never escaped."""
+    """Still validated even though it no longer becomes a database name —
+    the slug remains part of sign-in routing and audit trails."""
     if not SLUG.match(slug):
         raise ValueError(
             f"invalid tenant slug {slug!r} — lowercase letters, digits and underscores only"
@@ -25,29 +27,38 @@ def validate_slug(slug: str) -> str:
 
 
 def tenant_schema_name(slug: str) -> str:
-    """Kept for call-site compatibility; the database name is the schema name."""
-    return tenant_db_name(slug)
+    """Kept for call-site compatibility. There's no separate schema/database
+    per tenant anymore; this just echoes the slug back."""
+    return slug
 
 
 async def create_tenant_schema(slug: str) -> str:
-    """Create ``tenant_<slug>`` and bind its documents (collections + indexes)."""
+    """Nothing to create — the shared collections already exist. Kept so
+    existing callers (onboarding a new institution) don't need to change."""
     validate_slug(slug)
-    # Touching the bundle creates the database's collections and indexes on
-    # first use. The database itself is created implicitly by MongoDB on the
-    # first write.
     await ensure_tenant_models(slug)
-    return tenant_db_name(slug)
+    return slug
 
 
 async def drop_tenant_schema(slug: str, *, purge_media: bool = True) -> int:
-    """Remove an institution's database and its sign-in routing (offboarding)."""
+    """Erase an institution's data (offboarding): every document across the
+    tenant-scoped collections whose ``tenant_id`` matches, plus its sign-in
+    routing. Content collections (QuizItem, ReadingPassage, ...) are shared
+    across institutions and are never touched here."""
     validate_slug(slug)
-    name = tenant_db_name(slug)
-    await client.drop_database(name)
+    from app.models.platform import Tenant
+    from app.models.tenant import TENANT_DOCUMENTS
 
-    # Use the platform bundle to access the properly initialized Beanie models
     platform_bundle = await get_platform_bundle()
-    # Use string field name for query since Beanie field attributes may not be set up as class attrs
+    tenant = await platform_bundle.Tenant.find_one(Tenant.slug == slug)
+    if tenant is None:
+        return 0
+
+    models = await ensure_tenant_models(slug)
+    for cls in TENANT_DOCUMENTS:
+        model = getattr(models, cls.__name__)
+        await model.find(model.tenant_id == tenant.id).delete()
+
     await platform_bundle.TenantUserDirectory.find(
         {"tenant_slug": slug}
     ).delete()
@@ -77,17 +88,18 @@ async def upgrade_tenant_schema(slug: str) -> list[str]:
 
 async def upgrade_all_tenant_schemas() -> dict[str, list[str]]:
     """Bring every provisioned institution's indexes current."""
-    platform = platform_sessionmaker()
-    async with platform() as platform_bundle:
-        slugs = [t.slug async for t in platform_bundle.Tenant.find_all()]
+    platform_bundle = await get_platform_bundle()
+    slugs = [t.slug async for t in platform_bundle.Tenant.find_all()]
     return {slug: await upgrade_tenant_schema(slug) for slug in slugs}
 
 
 async def tenant_schema_exists(slug: str) -> bool:
+    """Whether this institution is registered — there's no separate database
+    to check for anymore, so this checks the ``Tenant`` registry instead."""
     validate_slug(slug)
-    db = tenant_db(slug)
-    names = await db.list_collection_names()
-    return bool(names)
+    platform_bundle = await get_platform_bundle()
+    tenant = await platform_bundle.Tenant.find_one({"slug": slug})
+    return tenant is not None
 
 
 async def missing_columns(slug: str) -> list[str]:

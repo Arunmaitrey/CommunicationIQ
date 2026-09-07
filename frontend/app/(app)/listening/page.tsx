@@ -17,6 +17,9 @@ import {
   type ListeningResult, type ListeningStart,
 } from "@/lib/api";
 import { useData } from "@/lib/useData";
+import { ReviewCard } from "@/components/ReviewCard";
+import { setExamMode } from "@/lib/examMode";
+import { filterUnattempted, markAttempted } from "@/lib/setTracker";
 
 export default function ListeningPage() {
   return (
@@ -64,11 +67,21 @@ function Listening() {
   }, []);
   useEffect(() => cancelSpeech, [cancelSpeech]);
 
+  // Nav rail during an active listen/answer session is dead weight, same
+  // as every other practice mode.
+  useEffect(() => {
+    setExamMode(stage === "listen" || stage === "answer");
+    return () => setExamMode(false);
+  }, [stage]);
+
+  const passages = data ? filterUnattempted("listening", data) : [];
+
   async function begin(passage: ListeningPassageRow) {
     setProblem("");
     setBusy(true);
     try {
       const started = await listeningApi.start(passage.id);
+      markAttempted("listening", passage.id);
       setSession(started);
       setQuestions([]);
       setAnswers({});
@@ -314,6 +327,10 @@ function Listening() {
           </div>
         </div>
 
+        <ReviewCard attemptId={session?.attempt_id} label="listening passage"
+                    onNext={backToList} onBack={backToList}
+                    nextLabel="Another passage →" />
+
         <Section title="Every question, with the reasoning" className="mb-4">
           <div className="space-y-2">
             {result.items.map((row) => (
@@ -377,9 +394,12 @@ function Listening() {
       {!data || data.length === 0 ? (
         <EmptyState icon={Ear} title="No passages yet"
                     desc="The listening bank is empty for this institution." />
+      ) : passages.length === 0 ? (
+        <EmptyState icon={Ear} title="You have done today's passages"
+                    desc="Check back tomorrow for a fresh set." />
       ) : (
         <div className="grid md:grid-cols-2 gap-3">
-          {data.map((p) => (
+          {passages.map((p) => (
             <button key={p.id} onClick={() => begin(p)} disabled={busy}
                     className="ds-card p-4 text-left hover:bg-surface2 transition-colors ds-focus">
               <div className="flex items-start justify-between gap-2">

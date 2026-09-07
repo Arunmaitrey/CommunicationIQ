@@ -1,10 +1,11 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, Mic, ShieldCheck, Trash2 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { ErrorNote, PageHeader, Section } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
+import { useData } from "@/lib/useData";
 
 export default function ConsentPage() {
   return (
@@ -23,12 +24,25 @@ export default function ConsentPage() {
  */
 function Consent() {
   const router = useRouter();
+  const { data: consent } = useData(() => api.getConsent());
   const [recording, setRecording] = useState(false);
   const [training, setTraining] = useState(false);
   const [outcome, setOutcome] = useState(false);
   const [notifications, setNotifications] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  // Consent records are append-only on the server (a fresh "granted" row per
+  // save) — without this, a student who already agreed sees every choice
+  // reset to unchecked on every visit, including the required one, which
+  // reads as being asked to consent again from scratch.
+  useEffect(() => {
+    if (!consent) return;
+    setRecording(consent.granted.includes("recording"));
+    setTraining(consent.granted.includes("training_data"));
+    setOutcome(consent.granted.includes("outcome_sharing"));
+    setNotifications(consent.granted.includes("notifications"));
+  }, [consent]);
 
   async function submit() {
     setBusy(true);
@@ -41,7 +55,7 @@ function Consent() {
     ];
     try {
       await api.giveConsent(scopes);
-      router.push("/simulate");
+      router.push("/tests");
     } catch (err) {
       setError(err instanceof ApiError ? err.detail : "Could not save your choices");
       setBusy(false);

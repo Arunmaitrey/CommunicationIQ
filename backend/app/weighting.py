@@ -34,9 +34,9 @@ from dataclasses import dataclass, field
 # comparison between "engine default" and "what you configured" needs a
 # stable reference. Kept in step by a test.
 ENGINE_WEIGHTS: dict[str, float] = {
-    "pronunciation": 0.20, "accuracy": 0.20, "fluency": 0.17,
-    "latency": 0.11, "disfluency": 0.08, "grammar": 0.09, "content": 0.07,
-    "completeness": 0.08,
+    "accuracy": 0.25, "fluency": 0.2125, "latency": 0.1375,
+    "grammar": 0.1125, "disfluency": 0.10,
+    "completeness": 0.10, "content": 0.0875,
 }
 
 # A weight set has to be close to 1. Not exactly, because an admin typing

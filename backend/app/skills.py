@@ -52,20 +52,18 @@ class SkillModule:
 
 async def _count_tasks(models: SimpleNamespace, types: tuple[str, ...]) -> int:
     """Count published task items of the given types using Beanie."""
-    items = await models.TaskItem.find(
+    return await models.TaskItem.find(
         In(models.TaskItem.task_type, list(types)),
         models.TaskItem.status == "published",
-    ).to_list()
-    return len(items)
+    ).count()
 
 
 async def _count_quiz(models: SimpleNamespace, categories: tuple[str, ...]) -> int:
     """Count published quiz items in the given categories using Beanie."""
-    items = await models.QuizItem.find(
+    return await models.QuizItem.find(
         In(models.QuizItem.category, list(categories)),
         models.QuizItem.status == "published",
-    ).to_list()
-    return len(items)
+    ).count()
 
 
 async def _mastery(models: SimpleNamespace, user_id: str,
@@ -81,9 +79,10 @@ async def _mastery(models: SimpleNamespace, user_id: str,
 
 
 async def _count_writing_prompts(models: SimpleNamespace) -> int:
-    return len(await models.WritingPrompt.find(
-        models.WritingPrompt.status == "published"
-    ).to_list())
+    """Count published writing prompts."""
+    return await models.WritingPrompt.find(
+        models.WritingPrompt.status == "published",
+    ).count()
 
 
 async def modules_for(models: SimpleNamespace, user_id: str) -> list[SkillModule]:

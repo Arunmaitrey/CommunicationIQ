@@ -3,16 +3,20 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import {
-  LogOut, Mail, Menu, PanelLeftClose, PanelLeftOpen, ShieldCheck, X,
+  HelpCircle, LogOut, Mail, Menu, PanelLeftClose, PanelLeftOpen, ShieldCheck, X,
 } from "lucide-react";
 import { BrandMark, TenantLockup } from "@/components/brand/BrandMark";
 import { PoweredByFloat } from "@/components/brand/PoweredBy";
 import { useRole } from "@/components/RoleProvider";
+import { OnboardingProvider, useOnboarding } from "@/components/onboarding/OnboardingProvider";
+import { WelcomeModal } from "@/components/onboarding/WelcomeModal";
+import { ProductTour } from "@/components/onboarding/ProductTour";
 import { ThemePicker } from "@/components/shell/ThemePicker";
 import { useRailCollapsed } from "@/components/shell/useRailCollapsed";
 import { WordField } from "@/components/shell/WordField";
 import { Avatar } from "@/components/ui";
 import { assetUrl, type SessionUser } from "@/lib/api";
+import { isExamMode, onExamModeChange } from "@/lib/examMode";
 import { navFor } from "@/lib/nav";
 import { ROLE_LABEL } from "@/lib/roles";
 
@@ -32,23 +36,58 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
+    <OnboardingProvider>
+      <AppShellInner
+        sections={sections} pathname={pathname} brand={brand}
+        collapsed={collapsed} toggleRail={toggleRail}
+        mobileOpen={mobileOpen} setMobileOpen={setMobileOpen}
+        user={user} signOut={signOut}
+      >
+        {children}
+      </AppShellInner>
+    </OnboardingProvider>
+  );
+}
+
+function AppShellInner({
+  sections, pathname, brand, collapsed, toggleRail, mobileOpen, setMobileOpen, user, signOut, children,
+}: {
+  sections: ReturnType<typeof navFor>;
+  pathname: string;
+  brand: { logoUrl?: string | null; displayName?: string | null; tenantName?: string | null };
+  collapsed: boolean;
+  toggleRail: () => void;
+  mobileOpen: boolean;
+  setMobileOpen: (open: boolean) => void;
+  user: SessionUser | null;
+  signOut: () => void;
+  children: React.ReactNode;
+}) {
+  // A practice/exam session in progress hides the nav rail — one sidebar at
+  // a time, matching the standard exam interface. Off everywhere else.
+  const [examMode, setExamModeState] = useState(isExamMode());
+  useEffect(() => onExamModeChange(() => setExamModeState(isExamMode())), []);
+
+  return (
     <div className="min-h-screen flex">
       <div className="bgfx" />
       <WordField />
 
       {/* Rail — hidden on small screens, where the same nav appears as a sheet. */}
-      <aside
-        id="app-rail"
-        className={`app-shell-nav hidden md:flex shrink-0 flex-col ${
-          collapsed ? "is-collapsed" : ""
-        }`}
-        style={{ background: "var(--rail)", borderRight: "1px solid var(--rail-line)" }}
-      >
-        <RailContent sections={sections} pathname={pathname} brand={brand}
-                     collapsed={collapsed} />
-      </aside>
+      {!examMode && (
+        <aside
+          id="app-rail"
+          className={`app-shell-nav hidden md:flex shrink-0 flex-col ${
+            collapsed ? "is-collapsed" : ""
+          }`}
+          style={{ background: "var(--rail)", borderRight: "1px solid var(--rail-line)" }}
+        >
+          <RailContent sections={sections} pathname={pathname} brand={brand}
+                       collapsed={collapsed} />
+        </aside>
+      )}
 
-      {mobileOpen && (
+      {!examMode && mobileOpen && (
         <div className="fixed inset-0 z-40 md:hidden" onClick={() => setMobileOpen(false)}>
           <div className="absolute inset-0 bg-black/50" />
           <aside
@@ -98,6 +137,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
 
           <ThemePicker />
+          <HelpButton />
 
           {user && <ProfileMenu user={user} onSignOut={signOut} />}
         </header>
@@ -108,7 +148,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <PoweredByFloat />
+      <WelcomeModal />
+      <ProductTour />
     </div>
+  );
+}
+
+/** Reopens the product tour on demand. Hidden for roles the tour doesn't
+ *  cover yet (platform staff, candidates never reach the shell at all). */
+function HelpButton() {
+  const { available, restartTour } = useOnboarding();
+  if (!available) return null;
+  return (
+    <button
+      type="button"
+      onClick={restartTour}
+      className="btn btn-icon btn-ghost ds-focus"
+      data-tour="help-button"
+      aria-label="Take a product tour"
+      title="Take a product tour"
+    >
+      <HelpCircle size={16} />
+    </button>
   );
 }
 

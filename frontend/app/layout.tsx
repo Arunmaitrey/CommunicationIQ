@@ -1,8 +1,22 @@
 import type { Metadata } from "next";
+import { Sora } from "next/font/google";
 import "./globals.css";
 import { RoleProvider } from "@/components/RoleProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { ToastProvider } from "@/components/Toast";
+
+/* Display face for the Aurora theme's headings — self-hosted at build time
+ * via next/font (downloaded once, served from our own origin), exactly the
+ * property the file comment below already asks for. Only the weights the
+ * theme actually uses. Every other theme's headings are unaffected: the
+ * variable this produces is only referenced from `[data-theme="aurora"]`
+ * selectors in globals.css. */
+const sora = Sora({
+  subsets: ["latin"],
+  weight: ["600", "700", "800"],
+  variable: "--font-sora",
+  display: "swap",
+});
 
 /* Typefaces for the Campus theme.
  *
@@ -26,7 +40,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="en"
-      data-theme="campus"
+      data-theme="aurora"
+      className={sora.variable}
       suppressHydrationWarning
     >
       <body>

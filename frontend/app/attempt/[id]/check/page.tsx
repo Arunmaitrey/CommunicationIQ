@@ -2,10 +2,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
-  AlertTriangle, ArrowRight, CheckCircle2, Headphones, Mic, Volume2,
+  AlertTriangle, ArrowRight, CheckCircle2, Headphones, Mic, Video, Volume2,
 } from "lucide-react";
 import { PoweredBy } from "@/components/brand/PoweredBy";
 import { RequireAuth } from "@/components/RequireAuth";
+import { useRole } from "@/components/RoleProvider";
 import { SITTING_ROLES } from "@/lib/nav";
 import { attemptApi, ApiError, type Capability } from "@/lib/api";
 import {
@@ -32,6 +33,7 @@ type Stage = "intro" | "mic" | "ambient" | "playback" | "ready" | "blocked";
 function EnvironmentCheck() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
+  const { user } = useRole();
 
   const [stage, setStage] = useState<Stage>("intro");
   const [level, setLevel] = useState(-90);
@@ -46,6 +48,38 @@ function EnvironmentCheck() {
 
   const recorder = useRef<MicRecorder | null>(null);
   const [capability, setCapability] = useState<Capability | null>(null);
+
+  // Whether this specific profile's env-check will reject a missing camera.
+  // Read from the attempt itself rather than assumed, since it varies per
+  // assessment (a client's proctoring requirement, not ours). Camera state
+  // is separate from cameraOk's true/false: null means "not tried yet", so
+  // the ready screen can tell "haven't checked" from "checked and failed".
+  const [needsCamera, setNeedsCamera] = useState(false);
+  const [cameraOk, setCameraOk] = useState<boolean | null>(null);
+  const [cameraError, setCameraError] = useState("");
+
+  useEffect(() => {
+    let live = true;
+    attemptApi.runner(id)
+      .then((r) => { if (live) setNeedsCamera(r.camera_check); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [id]);
+
+  const checkCamera = useCallback(async () => {
+    setCameraError("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      // Confirmed a camera exists and is permitted -- nothing here is
+      // recorded, watched, or kept, so the stream is stopped immediately.
+      stream.getTracks().forEach((t) => t.stop());
+      setCameraOk(true);
+    } catch {
+      setCameraOk(false);
+      setCameraError("Your browser blocked the camera, or none was found. "
+        + "Allow it in the address bar, then try again.");
+    }
+  }, []);
 
   useEffect(() => () => recorder.current?.close(), []);
 
@@ -124,6 +158,7 @@ function EnvironmentCheck() {
         device_label: recorder.current?.deviceLabel ?? "",
         user_agent: navigator.userAgent,
         diagnostics: recorder.current?.diagnostics() ?? {},
+        camera_ok: needsCamera ? cameraOk : null,
       });
       if (res.warning) {
         setWarning(res.warning);
@@ -142,7 +177,10 @@ function EnvironmentCheck() {
   function quit() {
     recorder.current?.close();
     recorder.current = null;
-    router.push("/simulate");
+    // A candidate has no /tests — no account, no nav, one link and one
+    // sitting (see lib/nav.ts's landingFor()). Sending them to a student-only
+    // page here would eject them to a login screen they have no account for.
+    router.push(user?.role === "candidate" ? "/login" : "/tests");
   }
 
   function proceed() {
@@ -205,6 +243,13 @@ function EnvironmentCheck() {
                         : `noisy (${noise} dBFS)`} />
             <Step done={playbackOk} icon={Headphones} title="Playback"
                   note={playbackOk ? "you heard the test tone" : "not checked yet"} />
+            {needsCamera && (
+              <Step done={cameraOk === true} icon={Video} title="Camera" note={
+                cameraOk === true ? "found and permitted"
+                : cameraOk === false ? "blocked or not found"
+                : "this assessment requires one"
+              } />
+            )}
             {recorder.current && (
               <div className="text-[10px] text-muted pl-6 pt-1">
                 {recorder.current.captureMode} · {recorder.current.sampleRate} Hz
@@ -302,6 +347,26 @@ function EnvironmentCheck() {
                 real test works.
               </div>
 
+              {needsCamera && cameraOk !== true && (
+                <div className="ds-inset p-4">
+                  <div className="text-xs font-semibold mb-2">
+                    This assessment needs a working camera.
+                  </div>
+                  <p className="text-[11px] text-muted mb-3 leading-relaxed">
+                    Nothing is recorded or watched — the check only confirms
+                    one is there and permitted.
+                  </p>
+                  <button onClick={checkCamera} className="btn btn-primary w-full ds-focus">
+                    <Video size={15} /> Allow camera
+                  </button>
+                  {cameraError && (
+                    <div className="text-[11px] mt-2" style={{ color: "var(--rag-red)" }}>
+                      {cameraError}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {warning && (
                 <div className="ds-card p-3 text-xs" style={{ borderColor: "var(--rag-amber)" }}>
                   {warning}
@@ -311,7 +376,7 @@ function EnvironmentCheck() {
                 </div>
               )}
 
-              {!warning && (
+              {!warning && (!needsCamera || cameraOk === true) && (
                 <button onClick={begin} disabled={busy}
                         className="btn btn-primary w-full ds-focus">
                   {busy ? "Starting…" : "Start the simulation"}

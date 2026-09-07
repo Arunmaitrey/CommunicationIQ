@@ -176,6 +176,12 @@ class Settings(BaseSettings):
     # API has finite RAM/VRAM and will thrash past its batch capacity.
     oss_max_concurrency: int = 4
 
+    # Question bank auto-generation (app/question_generator.py). The
+    # scheduler only starts if both a key is present and the flag is on --
+    # an empty key alone already keeps it off, this is the explicit switch.
+    groq_api_key: str = ""
+    auto_question_generation: bool = True
+
     @property
     def media_path(self) -> Path:
         root = Path(self.media_root)

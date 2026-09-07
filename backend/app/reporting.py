@@ -35,20 +35,20 @@ from dataclasses import dataclass, field
 # `weighting.ENGINE_WEIGHTS` uses: this module must keep working if the frozen
 # set is re-cut, and a test asserts the two agree.
 WEIGHTS: dict[str, float] = {
-    "pronunciation": 0.20, "accuracy": 0.20, "fluency": 0.17,
-    "latency": 0.11, "disfluency": 0.08, "grammar": 0.09, "content": 0.07,
-    "completeness": 0.08,
+    "accuracy": 0.25, "fluency": 0.2125, "latency": 0.1375,
+    "grammar": 0.1125, "disfluency": 0.10,
+    "completeness": 0.10, "content": 0.0875,
 }
 
 # How far above your own average a dimension has to sit before calling it a
 # strength. Below this it is noise, and a "strength" that is really rounding
 # teaches a student to distrust the whole report.
-STRENGTH_MARGIN = 3.0
+STRENGTH_MARGIN = 5.0
 
 # How far below before it is worth a recommendation. Deliberately smaller --
 # the cost of mentioning something not worth fixing is a wasted paragraph, and
 # the cost of missing something is a student who never fixes it.
-LEVER_MARGIN = 2.0
+LEVER_MARGIN = 3.3
 
 # At most this many recommendations. A list of seven is not a plan; it is the
 # same information as the chart, retyped.
@@ -115,10 +115,10 @@ def _advice_for(dimension: str) -> str:
 # Said in the student's own words. Ordered from lowest to highest.
 BANDS: tuple[tuple[float, str], ...] = (
     (0.0, "a long way from ready"),
-    (35.0, "some way off"),
+    (25.0, "some way off"),
     (50.0, "close, with work to do"),
-    (65.0, "about where a placement round expects you to be"),
-    (75.0, "comfortably above what most rounds ask for"),
+    (75.0, "about where a placement round expects you to be"),
+    (91.7, "comfortably above what most rounds ask for"),
 )
 
 
@@ -290,7 +290,7 @@ def summary(overall: float | None, dimensions: dict[str, float],
         return ("There was not enough here to score. Nothing has been guessed "
                 "at," + kept + ".")
 
-    parts = [f"You scored {round(overall, 1)} out of 80, which is "
+    parts = [f"You scored {round(overall, 1)} out of 100, which is "
              f"{band_phrase(overall)}."]
 
     scored_skills = {s: v for s, v in (skills or {}).items() if v is not None}
@@ -447,7 +447,7 @@ def evidence_index(responses: list[dict]) -> dict[str, list[dict]]:
 # the same treatment the vendor-format presentation already gets: shown, named
 # for what it is, and never allowed to stand in for the number we can defend.
 #
-# The boundaries come from where the internal 20-80 scale was built to sit
+# The boundaries preserve the positions of the former scale on native 0-100
 # against placement expectations, not from a mapping study. B1 begins at the
 # point the report already calls "close, with work to do", and B2 at the point
 # it calls "about where a placement round expects you to be", because those
@@ -457,12 +457,12 @@ def evidence_index(responses: list[dict]) -> dict[str, list[dict]]:
 # thresholds eventually would.
 CEFR_BANDS: tuple[tuple[float, str, str], ...] = (
     (0.0, "A1", "Can handle a few familiar phrases with heavy support."),
-    (35.0, "A2", "Can manage short, routine exchanges on familiar topics."),
+    (25.0, "A2", "Can manage short, routine exchanges on familiar topics."),
     (50.0, "B1", "Can hold a conversation on familiar matters and explain a "
                  "point of view, with effort."),
-    (65.0, "B2", "Can interact with some fluency and argue a position in "
+    (75.0, "B2", "Can interact with some fluency and argue a position in "
                  "detail on familiar subjects."),
-    (75.0, "C1", "Can use the language flexibly for professional purposes "
+    (91.7, "C1", "Can use the language flexibly for professional purposes "
                  "with little obvious searching."),
 )
 

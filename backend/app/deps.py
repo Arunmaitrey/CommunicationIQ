@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.db import Session, ensure_tenant_models, ensure_platform_models, tenant_db_name
+from app.db import Session, ensure_tenant_models, ensure_platform_models
 from app.models.platform import Tenant
 from app.security import TokenPrincipal, decode_token
 
@@ -30,10 +30,13 @@ Principal = Annotated[TokenPrincipal, Depends(_principal)]
 
 
 async def tenant_models(principal: Principal) -> AsyncIterator[SimpleNamespace]:
-    """The Beanie document bundle bound to the caller's own institution.
+    """The tenant + shared-content Document classes.
 
-    The slug comes from the verified token, never from the caller, so
-    cross-tenant access is structurally impossible (TEN-12).
+    All institutions share one database now (TEN-12 no longer holds): this
+    bundle is the same set of classes for every caller. Isolation is each
+    router's own responsibility — every query against a tenant-scoped
+    document must filter by ``principal.tenant_id`` explicitly; nothing here
+    does it for you anymore.
     """
     if principal.scope != "tenant" or not principal.tenant_slug:
         raise HTTPException(
@@ -72,11 +75,12 @@ PlatformSession = Annotated[Session, Depends(platform_session)]
 
 
 async def tenant_models_for(tenant: Tenant) -> SimpleNamespace:
-    """The tenant document bundle for platform code that already holds a Tenant.
-
-    The only sanctioned way for a platform-scope endpoint to enter an
-    institution database. Requiring the registry row (not a slug) keeps TEN-12
-    structural on this side of the wall too.
+    """The tenant + shared-content Document classes, for platform code that
+    already holds a ``Tenant`` row. Same bundle ``tenant_models()`` returns —
+    kept as a separate entry point so platform-scope code still has to prove
+    it holds a real registry row, not an arbitrary slug, before touching
+    tenant-scoped documents. Any query still needs its own ``tenant_id``
+    filter; this doesn't apply one.
     """
     if not isinstance(tenant, Tenant):
         raise TypeError(

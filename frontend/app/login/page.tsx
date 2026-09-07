@@ -1,6 +1,7 @@
 "use client";
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { LogIn } from "lucide-react";
 import { BrandLockup } from "@/components/brand/BrandMark";
 import { HeroMic } from "@/components/brand/HeroMic";
@@ -115,6 +116,10 @@ function LoginForm() {
             </button>
           </form>
 
+          <p className="text-xs text-muted mt-4 text-center">
+            New student?{" "}
+            <Link href="/signup" className="underline ds-focus">Create an account</Link>
+          </p>
           </div>
         </div>
       </div>

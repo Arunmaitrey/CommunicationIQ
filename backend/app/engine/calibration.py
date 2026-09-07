@@ -3,7 +3,7 @@
 Every number this engine produces is a rescaled heuristic until somebody has
 checked it against human judgement. That is not a defect — it is the state of
 any assessment engine before its validation study — but presenting an
-uncalibrated number on a 20-80 scale that looks like a vendor band is how a
+uncalibrated number on a 0-100 scale that looks like a vendor result is how a
 placement officer ends up quoting it to a recruiter.
 
 So the state lives here, in one place, and travels with every score:
@@ -27,7 +27,7 @@ from datetime import datetime
 MIN_RATER_AGREEMENT = 0.70      # ICC across human raters
 MIN_CORRELATION = 0.60          # AI versus human, per dimension
 MIN_OVERALL_CORRELATION = 0.65
-MAX_MEAN_ABSOLUTE_ERROR = 8.0   # points on the 20-80 scale
+MAX_MEAN_ABSOLUTE_ERROR = 13.3  # equivalent tolerance on the 0-100 scale
 MAX_L1_GROUP_BIAS = 3.0         # mean residual spread across L1 groups
 
 # Below this many measured dimensions, a composite is an average of too little

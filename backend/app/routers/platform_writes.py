@@ -1,9 +1,10 @@
 """Operator console — the write half.
 
-Switching a provider, onboarding an institution, changing the game economy and
-issuing an invoice all live here. Every one of them is audit-logged with the
-before and after, because "who changed the ASR provider on the morning of the
-drive" is a question somebody will eventually ask.
+Switching a provider, onboarding an institution, changing the game economy,
+issuing an invoice, and running the question bank (question sets, exam
+tests, exam schedules) all live here. Every one of them is audit-logged with
+the before and after, because "who changed the ASR provider on the morning
+of the drive" is a question somebody will eventually ask.
 
 Two things this file will not do:
 
@@ -26,19 +27,23 @@ from app.db import ensure_tenant_models
 from app.deps import Principal, require_platform
 from app.engine.contracts import Capability
 from app.engine.registry import clear_provider_cache
-from app.models.platform import (GamificationConfig, Invoice, Plan,
-                                 TENANT_TYPES,
-                                 ProviderConfig, ProviderRegistry, Subscription,
-                                 Tenant, TenantUserDirectory)
+from app.models._common import get_tolerant
+from app.models.platform import (BillingPlan, GamificationConfig, Invoice,
+                                 TENANT_TYPES, TENANT_TYPE_KEYS,
+                                 ProviderConfig, ProviderRegistry,
+                                 Tenant, TenantUserDirectory, ExamTest,
+                                 ScheduledExam)
 from app.provisioning import create_tenant_schema, validate_slug
 from app.routers.tenant_writes import temporary_password
 from app.schemas import (CapabilityConfigRequest, GamificationConfigOut,
                          GamificationConfigRequest, InvoiceOut,
-                         LogoByUrlRequest, PlanOut, PlanRequest,
+                         LogoByUrlRequest,
                          ProviderOut, ProviderRegisterRequest,
-                         PlanUpdateRequest, ProviderUpdateRequest,
+                         ProviderUpdateRequest,
                          TenantBranding, TenantCreateRequest, TenantOut,
-                         TenantProfile, TenantTypeOut, TenantUpdateRequest)
+                         TenantProfile, TenantTypeOut, TenantUpdateRequest,
+                         ContactMessageRequest, ContactMessageReplyRequest,
+                         ExamTestRequest, ScheduledExamRequest)
 from app.security import hash_password
 from app.storage import get_storage
 
@@ -173,7 +178,7 @@ def _importable(entrypoint: str) -> str:
     with the fallback quietly carrying the load.
     """
     if ":" not in entrypoint:
-        return "Expected module:attribute, e.g. app.engine.providers.tier1.asr:WhisperASR"
+        return "Expected module:attribute, e.g. app.engine.providers.tier1.pronunciation:Wav2VecGOP"
     module_name, _, attribute = entrypoint.partition(":")
     try:
         module = importlib.import_module(module_name)
@@ -353,13 +358,6 @@ def _branding_of(tenant: Tenant) -> TenantBranding:
 
 async def _tenant_out(tenant: Tenant, *, seats_used: int | None = None
                       ) -> TenantOut:
-    plan = await Plan.get(tenant.plan_id) if tenant.plan_id else None
-    subscription = await Subscription.find_one(
-        Subscription.tenant_id == tenant.id)
-    if subscription is not None:
-        subscription = await Subscription.find(
-            Subscription.tenant_id == tenant.id).sort("-id").limit(1).first_or_none()
-
     if seats_used is None:
         seats_used = 0
         try:
@@ -372,15 +370,13 @@ async def _tenant_out(tenant: Tenant, *, seats_used: int | None = None
     labels = dict(TENANT_TYPES)
     return TenantOut(
         id=tenant.id, name=tenant.name, slug=tenant.slug,
+        domain=tenant.domain,
         tenant_type=tenant.tenant_type,
         tenant_type_label=labels.get(tenant.tenant_type, tenant.tenant_type),
         status=tenant.status,
-        plan_id=tenant.plan_id, plan_name=plan.name if plan else "",
         seat_limit=tenant.seat_limit, seats_used=seats_used,
         region=tenant.region, branding=_branding_of(tenant),
         profile=_profile_of(tenant),
-        subscription_status=subscription.status if subscription else "",
-        trial_ends_at=subscription.trial_ends_at if subscription else None,
         season_start=tenant.season_start, season_end=tenant.season_end,
         created_at=tenant.created_at,
     )
@@ -421,7 +417,7 @@ async def upload_logo(tenant_id: str, principal: Principal,
     get_storage().put(key, data, kind)
 
     branding = dict(tenant.branding or {})
-    branding["logo_url"] = f"/api/v1/platform/assets/{key}"
+    branding["logo_url"] = f"/platform/assets/{key}"
     tenant.branding = branding
     await tenant.save()
 
@@ -479,10 +475,16 @@ async def create_tenant(body: TenantCreateRequest, principal: Principal) -> Tena
         raise HTTPException(status.HTTP_400_BAD_REQUEST,
                             f"Unknown tenant type {body.tenant_type!r}")
 
-    plan = await Plan.get(body.plan_id) if body.plan_id else None
-    tenant = Tenant(name=body.name, slug=slug, status=body.status,
+    domain = body.domain.lower().strip() if body.domain else ""
+    if domain:
+        existing = await Tenant.find_one(Tenant.domain == domain)
+        if existing:
+            raise HTTPException(status.HTTP_409_CONFLICT,
+                                f"Domain {domain} is already registered")
+
+    tenant = Tenant(name=body.name, slug=slug, domain=domain,
+                    status=body.status,
                     tenant_type=body.tenant_type,
-                    plan_id=plan.id if plan else None,
                     seat_limit=body.seat_limit,
                     branding=body.branding.model_dump() if body.branding else {},
                     profile=body.profile.model_dump() if body.profile else {})
@@ -490,18 +492,9 @@ async def create_tenant(body: TenantCreateRequest, principal: Principal) -> Tena
         tenant.region = body.region
     await tenant.create()
 
-    if plan is not None:
-        await Subscription(
-            tenant_id=tenant.id, plan_id=plan.id,
-            status="trialing" if body.status == "trial" else "active",
-            seats=body.seat_limit,
-            trial_ends_at=(datetime.now(timezone.utc) + timedelta(days=30)
-                           if body.status == "trial" else None),
-        ).create()
-
     await create_tenant_schema(slug)
 
-    password = temporary_password()
+    password = body.admin_password.strip() if body.admin_password and body.admin_password.strip() else temporary_password()
     models = await ensure_tenant_models(slug)
     await models.User(email=body.admin_email.lower(), full_name=body.admin_name,
                       role="tenant_admin", password_hash=hash_password(password),
@@ -513,9 +506,13 @@ async def create_tenant(body: TenantCreateRequest, principal: Principal) -> Tena
     await audit.record(principal, "tenant.created", entity="Tenant",
                        entity_id=tenant.id, tenant_id=tenant.id,
                        after={"name": tenant.name, "slug": slug,
+                              "domain": domain,
                               "seat_limit": body.seat_limit})
 
-    return await _tenant_out(tenant, seats_used=1)
+    out = await _tenant_out(tenant, seats_used=1)
+    out.temp_password = password
+    out.admin_email = body.admin_email.lower()
+    return out
 
 
 @router.patch("/tenants/{tenant_id}", response_model=TenantOut)
@@ -527,7 +524,7 @@ async def update_tenant(tenant_id: str, body: TenantUpdateRequest,
 
     before = {"name": tenant.name, "status": tenant.status,
               "tenant_type": tenant.tenant_type,
-              "seat_limit": tenant.seat_limit, "plan_id": tenant.plan_id}
+              "seat_limit": tenant.seat_limit}
 
     if body.name is not None:
         tenant.name = body.name.strip()
@@ -567,11 +564,6 @@ async def update_tenant(tenant_id: str, body: TenantUpdateRequest,
                 status.HTTP_409_CONFLICT,
                 f"{in_use} accounts are active — the seat limit cannot go below that.")
         tenant.seat_limit = body.seat_limit
-    if body.plan_id is not None:
-        plan = await Plan.get(body.plan_id)
-        if plan is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
-        tenant.plan_id = plan.id
     if body.season_start is not None:
         tenant.season_start = body.season_start
     if body.season_end is not None:
@@ -581,202 +573,12 @@ async def update_tenant(tenant_id: str, body: TenantUpdateRequest,
     await audit.record(principal, "tenant.updated", entity="Tenant",
                        entity_id=tenant.id, tenant_id=tenant.id, before=before,
                        after={"status": tenant.status,
-                              "seat_limit": tenant.seat_limit,
-                              "plan_id": tenant.plan_id})
+                              "seat_limit": tenant.seat_limit})
 
     return await _tenant_out(tenant)
 
 
-# --------------------------------------------------------------------------
-# Plans and billing
-# --------------------------------------------------------------------------
 
-@router.post("/plans", response_model=PlanOut, status_code=status.HTTP_201_CREATED)
-async def create_plan(body: PlanRequest, principal: Principal) -> PlanOut:
-    """Create a plan, or a new version of one.
-
-    Versions rather than edits: an institution's subscription keeps pointing
-    at the version it was sold, so changing a template never silently
-    re-prices a live customer.
-    """
-    latest = await Plan.find_one(Plan.code == body.code)
-    latest_version = latest.version if latest else 0
-
-    plan = Plan(code=body.code, name=body.name, version=latest_version + 1,
-                billing_model=body.billing_model, currency=body.currency,
-                price_per_seat=body.price_per_seat, price_flat=body.price_flat,
-                attempt_allowance=body.attempt_allowance,
-                features=body.features or {}, active=True)
-    await plan.create()
-
-    await audit.record(principal, "plan.created", entity="Plan", entity_id=plan.id,
-                       after={"code": plan.code, "version": plan.version})
-    return PlanOut(
-        id=plan.id, code=plan.code, name=plan.name, version=plan.version,
-        billing_model=plan.billing_model, currency=plan.currency,
-        price_per_seat=plan.price_per_seat, price_flat=plan.price_flat,
-        attempt_allowance=plan.attempt_allowance, active=plan.active,
-    )
-
-
-def _plan_out(plan: Plan) -> PlanOut:
-    return PlanOut(
-        id=plan.id, code=plan.code, name=plan.name, version=plan.version,
-        billing_model=plan.billing_model, currency=plan.currency,
-        price_per_seat=plan.price_per_seat, price_flat=plan.price_flat,
-        attempt_allowance=plan.attempt_allowance, active=plan.active,
-    )
-
-
-@router.patch("/plans/{plan_id}", response_model=PlanOut)
-async def update_plan(plan_id: str, body: PlanUpdateRequest,
-                      principal: Principal) -> PlanOut:
-    """Edit a plan template, or retire it.
-
-    Price and billing model cannot change here -- see PlanUpdateRequest. A
-    template whose price differs from what its customers are paying is worse
-    than no template at all.
-    """
-    plan = await Plan.get(plan_id)
-    if plan is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
-
-    before = {"name": plan.name, "attempt_allowance": plan.attempt_allowance,
-              "active": plan.active}
-
-    if body.active is False:
-        # Retiring a plan is fine; retiring one that customers are on, and
-        # saying nothing, is how a renewal quietly fails later.
-        in_use = await Tenant.find(Tenant.plan_id == plan.id).count()
-        if in_use:
-            raise HTTPException(
-                status.HTTP_409_CONFLICT,
-                f"{in_use} tenant(s) are on this plan. Move them to another "
-                "plan first, or publish a new version and migrate them.")
-
-    if body.name is not None:
-        plan.name = body.name
-    if body.attempt_allowance is not None:
-        plan.attempt_allowance = body.attempt_allowance
-    if body.features is not None:
-        plan.features = body.features
-    if body.active is not None:
-        plan.active = body.active
-
-    await plan.save()
-    await audit.record(principal, "plan.updated", entity="Plan",
-                       entity_id=plan.id, before=before,
-                       after={"name": plan.name,
-                              "attempt_allowance": plan.attempt_allowance,
-                              "active": plan.active})
-    return _plan_out(plan)
-
-
-@router.post("/plans/{plan_id}/version", response_model=PlanOut,
-             status_code=status.HTTP_201_CREATED)
-async def new_plan_version(plan_id: str, body: PlanRequest,
-                           principal: Principal) -> PlanOut:
-    """Publish a new version of a plan under the same code.
-
-    The way to change a price. The old version stays exactly as it is, so
-    every customer already on it keeps the terms they agreed to, and new
-    assignments pick up the new one.
-    """
-    source = await Plan.get(plan_id)
-    if source is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Plan not found")
-
-    highest = await Plan.find_one(Plan.code == source.code)
-    highest_version = highest.version if highest else source.version
-
-    plan = Plan(
-        code=source.code, name=body.name, version=highest_version + 1,
-        billing_model=body.billing_model, currency=body.currency,
-        price_per_seat=body.price_per_seat, price_flat=body.price_flat,
-        attempt_allowance=body.attempt_allowance,
-        features=body.features or {}, active=True,
-    )
-    await plan.create()
-
-    await audit.record(principal, "plan.versioned", entity="Plan",
-                       entity_id=plan.id,
-                       before={"from": source.id, "version": source.version},
-                       after={"code": plan.code, "version": plan.version})
-    return _plan_out(plan)
-
-
-@router.post("/tenants/{tenant_id}/invoice", response_model=InvoiceOut,
-             status_code=status.HTTP_201_CREATED)
-async def issue_invoice(tenant_id: str, principal: Principal) -> InvoiceOut:
-    """Issue a GST invoice for the current cycle (BILL-04).
-
-    Seats are counted from the institution's actual active accounts, not from
-    the plan's headline number — billing for seats nobody is using is how a
-    pilot becomes a dispute.
-    """
-    tenant = await Tenant.get(tenant_id)
-    if tenant is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Institution not found")
-    plan = await Plan.get(tenant.plan_id) if tenant.plan_id else None
-    if plan is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            "This institution has no plan assigned")
-
-    models = await ensure_tenant_models(tenant.slug)
-    seats = await models.User.find(
-        models.User.active == True).count()
-
-    if plan.billing_model == "per_seat":
-        subtotal = plan.price_per_seat * seats
-    elif plan.billing_model == "flat":
-        subtotal = plan.price_flat
-    else:
-        subtotal = 0.0
-
-    now = datetime.now(timezone.utc)
-    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    period_end = (period_start + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
-
-    count = await Invoice.find_all().count()
-    number = f"INV-{now:%Y%m}-{count + 1:04d}"
-
-    gst_amount = round(subtotal * GST_RATE / 100, 2)
-    invoice = Invoice(
-        tenant_id=tenant.id, number=number, period_start=period_start,
-        period_end=period_end, subtotal=round(subtotal, 2), gst_rate=GST_RATE,
-        gst_amount=gst_amount, total=round(subtotal + gst_amount, 2),
-        currency=plan.currency, status="issued", issued_at=now,
-    )
-    await invoice.create()
-
-    await audit.record(principal, "invoice.issued", entity="Invoice",
-                       entity_id=invoice.id, tenant_id=tenant.id,
-                       after={"number": number, "total": invoice.total,
-                              "seats": seats})
-
-    return InvoiceOut(
-        id=invoice.id, tenant_id=tenant.id, tenant_name=tenant.name,
-        number=number, period_start=period_start, period_end=period_end,
-        seats=seats, subtotal=invoice.subtotal, gst_rate=GST_RATE,
-        gst_amount=gst_amount, total=invoice.total, currency=invoice.currency,
-        status=invoice.status, issued_at=now,
-    )
-
-
-@router.get("/invoices", response_model=list[InvoiceOut])
-async def invoices() -> list[InvoiceOut]:
-    rows = await Invoice.find_all().sort("-created_at").limit(100).to_list()
-    names = {t.id: t.name for t in await Tenant.find_all().to_list()}
-    return [
-        InvoiceOut(
-            id=i.id, tenant_id=i.tenant_id, tenant_name=names.get(i.tenant_id, ""),
-            number=i.number, period_start=i.period_start, period_end=i.period_end,
-            seats=0, subtotal=i.subtotal, gst_rate=i.gst_rate,
-            gst_amount=i.gst_amount, total=i.total, currency=i.currency,
-            status=i.status, issued_at=i.issued_at,
-        )
-        for i in rows
-    ]
 
 
 # --------------------------------------------------------------------------
@@ -850,3 +652,737 @@ async def update_gamification(body: GamificationConfigRequest, principal: Princi
         leagues_enabled=row.leagues_enabled,
         max_engagement_notifications_per_day=row.max_engagement_notifications_per_day,
     )
+
+
+# ---------------------------------------------------------------------------
+# Subscription Plans
+# ---------------------------------------------------------------------------
+
+@router.post("/plans")
+async def create_plan(body: dict, principal: Principal) -> dict:
+    from app.db import control_db
+    db = control_db()
+    import uuid
+    plan_id = str(uuid.uuid4())
+    doc = {
+        "_id": plan_id,
+        "name": body.get("name", ""),
+        "slug": body.get("slug", ""),
+        "description": body.get("description", ""),
+        "price_monthly": body.get("price_monthly", 0),
+        "price_yearly": body.get("price_yearly", 0),
+        "seat_limit": body.get("seat_limit", 50),
+        "features": body.get("features", []),
+        "max_questions": body.get("max_questions", 500),
+        "max_exams_per_day": body.get("max_exams_per_day", 10),
+        "has_proctoring": body.get("has_proctoring", True),
+        "has_analytics": body.get("has_analytics", True),
+        "has_custom_branding": body.get("has_custom_branding", False),
+        "has_api_access": body.get("has_api_access", False),
+        "is_active": body.get("is_active", True),
+        "is_default": body.get("is_default", False),
+    }
+    await db["plans"].insert_one(doc)
+    await audit.record(principal, "plan.created", entity="Plan", entity_id=plan_id)
+    return {"id": plan_id, "ok": True}
+
+
+@router.patch("/plans/{plan_id}")
+async def update_plan(plan_id: str, body: dict, principal: Principal) -> dict:
+    from app.db import control_db
+    db = control_db()
+    updates = {k: v for k, v in body.items() if k not in ("_id", "id")}
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    await db["plans"].update_one({"_id": plan_id}, {"$set": updates})
+    await audit.record(principal, "plan.updated", entity="Plan", entity_id=plan_id)
+    return {"ok": True}
+
+
+@router.delete("/plans/{plan_id}")
+async def delete_plan(plan_id: str, principal: Principal) -> dict:
+    from app.db import control_db
+    db = control_db()
+    await db["plans"].delete_one({"_id": plan_id})
+    await audit.record(principal, "plan.deleted", entity="Plan", entity_id=plan_id)
+    return {"ok": True}
+
+
+@router.post("/plans/{plan_id}/assign/{tenant_id}")
+async def assign_plan(plan_id: str, tenant_id: str, principal: Principal) -> dict:
+    from app.db import control_db
+    db = control_db()
+    await db["tenants"].update_one({"_id": tenant_id}, {"$set": {"plan_id": plan_id}})
+    await audit.record(principal, "plan.assigned", entity="Tenant", entity_id=tenant_id)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# SMTP Configuration
+# ---------------------------------------------------------------------------
+
+@router.post("/smtp")
+async def save_smtp(body: dict, principal: Principal) -> dict:
+    from app.db import control_db
+    db = control_db()
+    tenant_id = body.get("tenant_id")  # null = platform default
+    existing = await db["smtp_configs"].find_one({"tenant_id": tenant_id})
+    doc = {
+        "host": body.get("host", ""),
+        "port": body.get("port", 587),
+        "username": body.get("username", ""),
+        "password": body.get("password", ""),
+        "from_email": body.get("from_email", ""),
+        "from_name": body.get("from_name", "CommunicationIQ"),
+        "use_tls": body.get("use_tls", True),
+        "use_ssl": body.get("use_ssl", False),
+        "is_active": body.get("is_active", True),
+        "tenant_id": tenant_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if existing:
+        await db["smtp_configs"].update_one({"_id": existing["_id"]}, {"$set": doc})
+    else:
+        import uuid
+        doc["_id"] = str(uuid.uuid4())
+        await db["smtp_configs"].insert_one(doc)
+    await audit.record(principal, "smtp.configured", entity="SmtpConfig")
+    return {"ok": True}
+
+
+@router.post("/smtp/test")
+async def test_smtp(body: dict, principal: Principal) -> dict:
+    """Send a test email to verify SMTP configuration."""
+    from app.email_sender import send_email
+    to = body.get("to_email", "")
+    if not to:
+        return {"ok": False, "message": "No test email address provided"}
+    ok = await send_email(
+        to_email=to,
+        subject="CommunicationIQ — SMTP Test",
+        body_html="<h2>SMTP configured successfully!</h2><p>Your email system is working.</p>",
+        body_text="SMTP configured successfully! Your email system is working.",
+        tenant_id=body.get("tenant_id"),
+    )
+    return {"ok": ok, "message": "Test email sent" if ok else "Failed to send — check SMTP settings"}
+
+
+# ---------------------------------------------------------------------------
+# Payment Gateway Configuration
+# ---------------------------------------------------------------------------
+
+@router.post("/payment")
+async def save_payment_config(body: dict, principal: Principal) -> dict:
+    from app.db import control_db
+    db = control_db()
+    gateway = body.get("gateway", "stripe")
+    existing = await db["payment_configs"].find_one({"gateway": gateway})
+    doc = {
+        "gateway": gateway,
+        "test_mode": body.get("test_mode", True),
+        "stripe_publishable": body.get("stripe_publishable", ""),
+        "stripe_secret": body.get("stripe_secret", ""),
+        "stripe_webhook_secret": body.get("stripe_webhook_secret", ""),
+        "razorpay_key_id": body.get("razorpay_key_id", ""),
+        "razorpay_key_secret": body.get("razorpay_key_secret", ""),
+        "currency": body.get("currency", "INR"),
+        "is_active": body.get("is_active", False),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if existing:
+        await db["payment_configs"].update_one({"_id": existing["_id"]}, {"$set": doc})
+    else:
+        import uuid
+        doc["_id"] = str(uuid.uuid4())
+        await db["payment_configs"].insert_one(doc)
+    await audit.record(principal, "payment.configured", entity="PaymentConfig")
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Email Templates
+# --------------------------------------------------------------------------
+
+@router.post("/email-templates", status_code=status.HTTP_201_CREATED)
+async def create_email_template(body: dict, principal: Principal) -> dict:
+    from app.models.platform import EmailTemplate
+    existing = await EmailTemplate.find_one(EmailTemplate.key == body.get("key", ""))
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"A template with key {body.get('key')!r} already exists")
+    tpl = EmailTemplate(
+        key=body.get("key", ""), name=body.get("name", "") or body.get("key", ""),
+        subject=body.get("subject", ""), body_html=body.get("body_html", ""),
+        body_text=body.get("body_text", ""),
+        category=body.get("category", "transactional"),
+    )
+    await tpl.create()
+    await audit.record(principal, "email_template.created", entity="EmailTemplate",
+                       entity_id=tpl.id, after={"key": tpl.key})
+    return {"id": tpl.id, "ok": True}
+
+
+@router.patch("/email-templates/{template_id}")
+async def update_email_template(template_id: str, body: dict,
+                                principal: Principal) -> dict:
+    from app.models.platform import EmailTemplate
+    tpl = await EmailTemplate.get(template_id)
+    if not tpl:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
+    for field_name in ("name", "subject", "body_html", "body_text", "category", "is_active"):
+        if field_name in body:
+            setattr(tpl, field_name, body[field_name])
+    tpl.updated_at = datetime.now(timezone.utc)
+    await tpl.save()
+    await audit.record(principal, "email_template.updated", entity="EmailTemplate",
+                       entity_id=template_id)
+    return {"ok": True}
+
+
+@router.delete("/email-templates/{template_id}")
+async def delete_email_template(template_id: str, principal: Principal) -> dict:
+    from app.models.platform import EmailTemplate
+    tpl = await EmailTemplate.get(template_id)
+    if not tpl:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Template not found")
+    await tpl.delete()
+    await audit.record(principal, "email_template.deleted", entity="EmailTemplate",
+                       entity_id=template_id)
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Contact Messages
+# --------------------------------------------------------------------------
+
+@router.post("/messages")
+async def submit_contact_message(body: ContactMessageRequest,
+                                 principal: Principal) -> dict:
+    """Submit a contact message from any user to super admins."""
+    from app.models.platform import ContactMessage
+    msg = ContactMessage(
+        from_user_id=principal.user_id,
+        from_email=principal.email,
+        from_name=principal.full_name or "",
+        from_role=principal.role,
+        from_tenant_id=getattr(principal, "tenant_id", None),
+        subject=body.subject,
+        body=body.body,
+        priority=body.priority,
+    )
+    await msg.create()
+    await audit.record(principal, "contact.submitted", entity="ContactMessage",
+                       entity_id=msg.id)
+    return {"id": msg.id, "ok": True}
+
+
+@router.patch("/messages/{message_id}")
+async def update_contact_message(message_id: str, body: dict,
+                                 principal: Principal) -> dict:
+    """Update message status (super admin)."""
+    from app.models.platform import ContactMessage
+    msg = await ContactMessage.get(message_id)
+    if not msg:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    if "status" in body:
+        msg.status = body["status"]
+    if "priority" in body:
+        msg.priority = body["priority"]
+    msg.updated_at = datetime.now(timezone.utc)
+    await msg.save()
+    await audit.record(principal, "contact.updated", entity="ContactMessage",
+                       entity_id=message_id, after={"status": msg.status})
+    return {"ok": True}
+
+
+@router.post("/messages/{message_id}/reply")
+async def reply_to_message(message_id: str, body: ContactMessageReplyRequest,
+                           principal: Principal) -> dict:
+    """Reply to a contact message (super admin)."""
+    from app.models.platform import ContactMessage
+    msg = await ContactMessage.get(message_id)
+    if not msg:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Message not found")
+    msg.replies.append({
+        "from": principal.full_name or "Admin",
+        "text": body.text,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+    msg.updated_at = datetime.now(timezone.utc)
+    await msg.save()
+    await audit.record(principal, "contact.replied", entity="ContactMessage",
+                       entity_id=message_id)
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Exam Tests (Custom tests created by super admin)
+# --------------------------------------------------------------------------
+
+@router.post("/exam-tests", status_code=status.HTTP_201_CREATED)
+async def create_exam_test(body: ExamTestRequest, principal: Principal) -> dict:
+    """Create a new custom exam test."""
+    from app.models.platform import ExamTest
+    import re as _re
+    slug = _re.sub(r"[^a-z0-9]+", "-", body.name.lower()).strip("-")
+    test = ExamTest(
+        name=body.name, description=body.description, slug=slug,
+        duration_minutes=body.duration_minutes,
+        reading_questions=body.reading_questions,
+        listening_questions=body.listening_questions,
+        writing_questions=body.writing_questions,
+        speaking_questions=body.speaking_questions,
+        reading_seconds=body.reading_seconds,
+        listening_seconds=body.listening_seconds,
+        writing_seconds=body.writing_seconds,
+        speaking_seconds=body.speaking_seconds,
+        allow_pause=body.allow_pause, show_timer=body.show_timer,
+        one_shot_audio=body.one_shot_audio, is_active=body.is_active,
+        is_baseline=body.is_baseline, company=body.company,
+        question_ids=body.question_ids,
+    )
+    await test.create()
+    await audit.record(principal, "exam_test.created", entity="ExamTest",
+                       entity_id=test.id, after={"name": test.name})
+    # Auto-sync SimulationProfile for this exam test
+    try:
+        from app.main import _sync_exam_test_profiles
+        await _sync_exam_test_profiles()
+    except Exception:
+        pass
+    return {"id": test.id, "ok": True}
+
+
+@router.patch("/exam-tests/{test_id}")
+async def update_exam_test(test_id: str, body: ExamTestRequest,
+                           principal: Principal) -> dict:
+    """Update an exam test."""
+    from app.models._common import get_tolerant
+    from app.models.platform import ExamTest
+    test = await get_tolerant(ExamTest, test_id)
+    if not test:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Test not found")
+    for field in ["name", "description", "duration_minutes",
+                  "reading_questions", "listening_questions",
+                  "writing_questions", "speaking_questions",
+                  "reading_seconds", "listening_seconds",
+                  "writing_seconds", "speaking_seconds",
+                  "allow_pause", "show_timer", "one_shot_audio",
+                  "is_active", "is_baseline", "company", "question_ids"]:
+        if hasattr(body, field):
+            setattr(test, field, getattr(body, field))
+    test.updated_at = datetime.now(timezone.utc)
+    await test.save()
+    await audit.record(principal, "exam_test.updated", entity="ExamTest",
+                       entity_id=test_id)
+    # Auto-sync SimulationProfile for this exam test
+    try:
+        from app.main import _sync_exam_test_profiles
+        await _sync_exam_test_profiles()
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@router.delete("/exam-tests/{test_id}")
+async def delete_exam_test(test_id: str, principal: Principal) -> dict:
+    """Delete an exam test and retire its student-facing SimulationProfile so
+    it stops appearing for students (no orphaned published profile)."""
+    from datetime import datetime as _dt, timezone as _tz
+    from app.models._common import get_tolerant
+    from app.models.platform import ExamTest
+    from app.db import control_db
+    test = await get_tolerant(ExamTest, test_id)
+    if test is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Test not found")
+    await test.delete()
+    try:
+        db = control_db()
+        await db.simulation_profiles.update_many(
+            {"name": test.name},
+            {"$set": {"status": "retired",
+                      "updated_at": _dt.now(_tz.utc)}})
+    except Exception:  # noqa: BLE001
+        pass
+    await audit.record(principal, "exam_test.deleted", entity="ExamTest",
+                       entity_id=test_id)
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Question Sets (exactly 10 questions per set)
+# --------------------------------------------------------------------------
+
+@router.post("/question-sets/generate", status_code=status.HTTP_201_CREATED)
+async def generate_question_sets(module: str, principal: Principal, count: int = 1) -> dict:
+    """Auto-generate question sets from the question bank for a module.
+    Each set contains exactly 10 questions from the same module.
+    """
+    import re as _re
+    from app.models.platform import QuestionSet
+    from app.db import control_db
+
+    if module not in ("reading", "writing", "listening", "speaking", "quiz"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid module")
+
+    db = control_db()
+    # Map module to collection
+    coll_map = {
+        "reading": "reading_passages",
+        "listening": "listening_passages",
+        "writing": "writing_prompts",
+        "speaking": "task_items",
+        "quiz": "quiz_items",
+    }
+    coll_name = coll_map[module]
+    coll = db[coll_name]
+
+    # Count existing questions
+    total = await coll.count_documents({})
+    needed = count * 10
+    if total < needed:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Need {needed} {module} questions but only {total} exist")
+
+    # Count existing sets to determine numbering
+    existing_count = await QuestionSet.find(QuestionSet.module == module).count()
+
+    created_sets = []
+    for i in range(count):
+        set_num = existing_count + i + 1
+        prefix = module[:4].upper()
+        set_number = f"{prefix}-SET-{set_num:03d}"
+
+        # Find questions not already in an active set for this module
+        active_sets = await QuestionSet.find(
+            QuestionSet.module == module,
+            QuestionSet.status.in_(["active", "draft"]),
+        ).to_list()
+        used_ids = set()
+        for s in active_sets:
+            used_ids.update(s.question_ids)
+
+        # Get eligible questions
+        query = {"_id": {"$nin": list(used_ids)}} if used_ids else {}
+        cursor = coll.find(query).limit(10)
+        questions = await cursor.to_list()
+
+        if len(questions) < 10:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Not enough unused {module} questions for set {set_num}")
+
+        q_ids = [str(q["_id"]) for q in questions]
+
+        qs = QuestionSet(
+            set_number=set_number,
+            module=module,
+            question_ids=q_ids,
+            question_count=10,
+            status="draft",
+        )
+        await qs.create()
+        created_sets.append({"id": qs.id, "set_number": set_number, "module": module})
+
+    await audit.record(principal, "question_sets.generated", entity="QuestionSet",
+                       after={"module": module, "count": len(created_sets)})
+    return {"created": len(created_sets), "sets": created_sets, "ok": True}
+
+
+@router.patch("/question-sets/{set_id}")
+async def update_question_set(set_id: str, body: dict, principal: Principal) -> dict:
+    """Update a question set (status, etc.)."""
+    from app.models.platform import QuestionSet
+    qs = await QuestionSet.get(set_id)
+    if not qs:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
+    if "status" in body:
+        qs.status = body["status"]
+    qs.updated_at = datetime.now(timezone.utc)
+    await qs.save()
+    await audit.record(principal, "question_set.updated", entity="QuestionSet",
+                       entity_id=set_id, after={"status": qs.status})
+    return {"ok": True}
+
+
+@router.delete("/question-sets/{set_id}")
+async def delete_question_set(set_id: str, principal: Principal) -> dict:
+    """Delete a question set (only if draft)."""
+    from app.models.platform import QuestionSet
+    qs = await QuestionSet.get(set_id)
+    if not qs:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
+    if qs.status not in ("draft", "inactive"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Can only delete draft/inactive sets")
+    await QuestionSet.delete(QuestionSet.id == set_id)
+    await audit.record(principal, "question_set.deleted", entity="QuestionSet", entity_id=set_id)
+    return {"ok": True}
+
+
+@router.post("/question-sets/auto-create")
+async def auto_create_sets(principal: Principal) -> dict:
+    """Auto-create sets for all modules where we have enough questions (10+)."""
+    from app.models.platform import QuestionSet
+    from app.db import control_db
+
+    db = control_db()
+    coll_map = {
+        "reading": "reading_passages",
+        "listening": "listening_passages",
+        "writing": "writing_prompts",
+        "speaking": "task_items",
+        "quiz": "quiz_items",
+    }
+    results = {}
+    for module, coll_name in coll_map.items():
+        coll = db[coll_name]
+        total = await coll.count_documents({})
+        # Count existing sets for this module
+        existing = await QuestionSet.find(QuestionSet.module == module).count()
+        # How many sets of 10 can we make from unused questions?
+        active_sets = await QuestionSet.find(
+            QuestionSet.module == module,
+            QuestionSet.status.in_(["active", "draft"]),
+        ).to_list()
+        used_ids = set()
+        for s in active_sets:
+            used_ids.update(s.question_ids)
+        available = total - len(used_ids)
+        can_create = available // 10
+        sets_to_create = min(can_create, 50)  # cap at 50 per call
+
+        if sets_to_create <= 0:
+            results[module] = {"total_questions": total, "existing_sets": existing, "created": 0}
+            continue
+
+        prefix = module[:4].upper()
+        created = []
+        for i in range(sets_to_create):
+            set_num = existing + i + 1
+            set_number = f"{prefix}-SET-{set_num:03d}"
+
+            query = {"_id": {"$nin": list(used_ids)}} if used_ids else {}
+            questions = await coll.find(query).limit(10).to_list()
+            if len(questions) < 10:
+                break
+            q_ids = [str(q["_id"]) for q in questions]
+            used_ids.update(q_ids)
+
+            qs = QuestionSet(
+                set_number=set_number, module=module,
+                question_ids=q_ids, question_count=10, status="active",
+            )
+            await qs.create()
+            created.append(set_number)
+
+        results[module] = {"total_questions": total, "existing_sets": existing, "created": len(created), "sets": created}
+
+    await audit.record(principal, "question_sets.auto_created", entity="QuestionSet",
+                       after=results)
+    return {"results": results, "ok": True}
+
+
+# --------------------------------------------------------------------------
+# Exam Schedules — platform-scheduled sittings for institutions
+# --------------------------------------------------------------------------
+
+async def _resolve_profile_id_for_test(exam_test: ExamTest) -> str:
+    """Return the published SimulationProfile id that backs an ExamTest.
+
+    ExamTests are turned into SimulationProfiles (with ProfileSections) so
+    they can be sat through the normal attempt engine — `_sync_exam_test_profiles`
+    does that at startup and after every exam-test create/update. A schedule
+    needs to know which profile its students will actually start, so we look
+    it up by name and fall back to a re-sync if it has not been created yet.
+    """
+    from app.models.tenant import SimulationProfile
+    profile = await SimulationProfile.find_one(
+        SimulationProfile.name == exam_test.name,
+        SimulationProfile.status == "published",
+    )
+    if profile is None:
+        try:
+            from app.main import _sync_exam_test_profiles
+            await _sync_exam_test_profiles()
+        except Exception:
+            pass
+        profile = await SimulationProfile.find_one(
+            SimulationProfile.name == exam_test.name,
+            SimulationProfile.status == "published",
+        )
+    return profile.id if profile else ""
+
+
+@router.post("/exam-schedules", status_code=status.HTTP_201_CREATED)
+async def create_exam_schedule(body: ScheduledExamRequest,
+                               principal: Principal) -> dict:
+    """Schedule an ExamTest for one or more institutions within a window."""
+    test = await get_tolerant(ExamTest, body.exam_test_id)
+    if not test:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam test not found")
+    if not test.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "An inactive exam test cannot be scheduled")
+    if body.ends_at <= body.starts_at:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "The schedule must end after it starts")
+    if body.ends_at < datetime.now(timezone.utc):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "That window is already in the past")
+
+    # Validate institution ids if any were supplied
+    if body.tenant_ids:
+        existing = {t.id for t in await Tenant.find(
+            Tenant.id.in_(body.tenant_ids)).to_list()}
+        missing = [t for t in body.tenant_ids if t not in existing]
+        if missing:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Unknown institution(s): {', '.join(missing)}")
+
+    profile_id = await _resolve_profile_id_for_test(test)
+    schedule = ScheduledExam(
+        exam_test_id=test.id,
+        profile_id=profile_id,
+        name=test.name,
+        tenant_ids=body.tenant_ids,
+        starts_at=body.starts_at,
+        ends_at=body.ends_at,
+        max_attempts=body.max_attempts,
+        is_active=body.is_active,
+        created_by=principal.user_id,
+    )
+    await schedule.create()
+    await audit.record(principal, "exam_schedule.created", entity="ScheduledExam",
+                       entity_id=schedule.id,
+                       after={"exam_test": test.name,
+                              "window": f"{body.starts_at.isoformat()} → {body.ends_at.isoformat()}",
+                              "tenant_ids": body.tenant_ids})
+    return {"id": schedule.id, "ok": True}
+
+
+@router.patch("/exam-schedules/{schedule_id}")
+async def update_exam_schedule(schedule_id: str, body: ScheduledExamRequest,
+                               principal: Principal) -> dict:
+    """Update a schedule — window, audience, attempt cap or activation."""
+    schedule = await ScheduledExam.get(schedule_id)
+    if not schedule:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Schedule not found")
+    test = await get_tolerant(ExamTest, body.exam_test_id)
+    if not test:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Exam test not found")
+    if not test.is_active:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "An inactive exam test cannot be scheduled")
+    if body.ends_at <= body.starts_at:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "The schedule must end after it starts")
+    if body.tenant_ids:
+        existing = {t.id for t in await Tenant.find(
+            Tenant.id.in_(body.tenant_ids)).to_list()}
+        missing = [t for t in body.tenant_ids if t not in existing]
+        if missing:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                                f"Unknown institution(s): {', '.join(missing)}")
+
+    schedule.exam_test_id = test.id
+    schedule.name = test.name
+    schedule.profile_id = await _resolve_profile_id_for_test(test)
+    schedule.tenant_ids = body.tenant_ids
+    schedule.starts_at = body.starts_at
+    schedule.ends_at = body.ends_at
+    schedule.max_attempts = body.max_attempts
+    schedule.is_active = body.is_active
+    schedule.updated_at = datetime.now(timezone.utc)
+    await schedule.save()
+    await audit.record(principal, "exam_schedule.updated", entity="ScheduledExam",
+                       entity_id=schedule.id)
+    return {"ok": True}
+
+
+@router.delete("/exam-schedules/{schedule_id}")
+async def delete_exam_schedule(schedule_id: str, principal: Principal) -> dict:
+    """Delete a schedule. Attempts already started are untouched."""
+    schedule = await ScheduledExam.get(schedule_id)
+    if not schedule:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Schedule not found")
+    await schedule.delete()
+    await audit.record(principal, "exam_schedule.deleted", entity="ScheduledExam",
+                       entity_id=schedule_id)
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# GST invoicing (BILL-04) — reads BillingPlan, not the customer-facing Plan
+# above. Pre-dates the question-bank import; kept exactly as it was.
+# --------------------------------------------------------------------------
+
+@router.post("/tenants/{tenant_id}/invoice", response_model=InvoiceOut,
+             status_code=status.HTTP_201_CREATED)
+async def issue_invoice(tenant_id: str, principal: Principal) -> InvoiceOut:
+    """Issue a GST invoice for the current cycle (BILL-04).
+
+    Seats are counted from the institution's actual active accounts, not from
+    the plan's headline number — billing for seats nobody is using is how a
+    pilot becomes a dispute.
+    """
+    tenant = await Tenant.get(tenant_id)
+    if tenant is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Institution not found")
+    plan = await BillingPlan.get(tenant.plan_id) if tenant.plan_id else None
+    if plan is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "This institution has no plan assigned")
+
+    models = await ensure_tenant_models(tenant.slug)
+    seats = await models.User.find(
+        models.User.active == True).count()
+
+    if plan.billing_model == "per_seat":
+        subtotal = plan.price_per_seat * seats
+    elif plan.billing_model == "flat":
+        subtotal = plan.price_flat
+    else:
+        subtotal = 0.0
+
+    now = datetime.now(timezone.utc)
+    period_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    period_end = (period_start + timedelta(days=32)).replace(day=1) - timedelta(seconds=1)
+
+    count = await Invoice.find_all().count()
+    number = f"INV-{now:%Y%m}-{count + 1:04d}"
+
+    gst_amount = round(subtotal * GST_RATE / 100, 2)
+    invoice = Invoice(
+        tenant_id=tenant.id, number=number, period_start=period_start,
+        period_end=period_end, subtotal=round(subtotal, 2), gst_rate=GST_RATE,
+        gst_amount=gst_amount, total=round(subtotal + gst_amount, 2),
+        currency=plan.currency, status="issued", issued_at=now,
+    )
+    await invoice.create()
+
+    await audit.record(principal, "invoice.issued", entity="Invoice",
+                       entity_id=invoice.id, tenant_id=tenant.id,
+                       after={"number": number, "total": invoice.total,
+                              "seats": seats})
+
+    return InvoiceOut(
+        id=invoice.id, tenant_id=tenant.id, tenant_name=tenant.name,
+        number=number, period_start=period_start, period_end=period_end,
+        seats=seats, subtotal=invoice.subtotal, gst_rate=GST_RATE,
+        gst_amount=gst_amount, total=invoice.total, currency=invoice.currency,
+        status=invoice.status, issued_at=now,
+    )
+
+
+@router.get("/invoices", response_model=list[InvoiceOut])
+async def invoices() -> list[InvoiceOut]:
+    rows = await Invoice.find_all().sort("-created_at").limit(100).to_list()
+    names = {t.id: t.name for t in await Tenant.find_all().to_list()}
+    return [
+        InvoiceOut(
+            id=i.id, tenant_id=i.tenant_id, tenant_name=names.get(i.tenant_id, ""),
+            number=i.number, period_start=i.period_start, period_end=i.period_end,
+            seats=0, subtotal=i.subtotal, gst_rate=i.gst_rate,
+            gst_amount=i.gst_amount, total=i.total, currency=i.currency,
+            status=i.status, issued_at=i.issued_at,
+        )
+        for i in rows
+    ]

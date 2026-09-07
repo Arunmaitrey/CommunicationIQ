@@ -13,8 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.deps import Principal, TenantModels, require_roles
 from app.models.platform import Plan, Tenant
-from app.schemas import (CohortOut, ProfileSectionOut, SimulationProfileOut,
-                         TenantOverview, UserOut)
+from app.schemas import (AttemptOut, CohortOut, ProfileSectionOut,
+                         SimulationProfileOut, TenantOverview, UserOut)
 
 router = APIRouter(prefix="/tenant", tags=["tenant-admin"],
                    dependencies=[Depends(require_roles("tenant_admin"))])
@@ -27,7 +27,7 @@ async def overview(principal: Principal, models: TenantModels) -> TenantOverview
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Institution not found")
     plan = await Plan.get(tenant.plan_id) if tenant.plan_id else None
 
-    role_docs = await models.User.get_pymongo_collection().aggregate([
+    role_docs = await models.User.get_motor_collection().aggregate([
         {"$match": {"active": True}},
         {"$group": {"_id": "$role", "n": {"$sum": 1}}},
     ]).to_list(None)
@@ -36,7 +36,7 @@ async def overview(principal: Principal, models: TenantModels) -> TenantOverview
     attempts = await models.Attempt.find_all().count()
 
     students = counts.get("student", 0)
-    consented_ids = await models.ConsentRecord.get_pymongo_collection().distinct(
+    consented_ids = await models.ConsentRecord.get_motor_collection().distinct(
         "user_id", {"scope": "recording", "granted": True})
     consented = len(consented_ids)
 
@@ -72,7 +72,7 @@ async def users(models: TenantModels, role: str | None = None) -> list[UserOut]:
 @router.get("/cohorts", response_model=list[CohortOut])
 async def cohorts(models: TenantModels) -> list[CohortOut]:
     rows = await models.Cohort.find_all().sort("name").to_list()
-    member_docs = await models.CohortMember.get_pymongo_collection().aggregate([
+    member_docs = await models.CohortMember.get_motor_collection().aggregate([
         {"$group": {"_id": "$cohort_id", "n": {"$sum": 1}}},
     ]).to_list(None)
     counts = {d["_id"]: int(d["n"]) for d in member_docs}
@@ -152,6 +152,37 @@ async def profiles(models: TenantModels,
         )
         for p in rows
     ]
+
+
+@router.get("/students/{user_id}/attempts", response_model=list[AttemptOut])
+async def student_attempts(user_id: str, models: TenantModels) -> list[AttemptOut]:
+    """Everything a student in this institution has sat, newest first.
+
+    Unlike the trainer version of this route, a tenant admin needs no
+    cohort-visibility check: they already see the whole institution, and
+    ``models`` is already scoped to it, so there is nothing further to guard.
+    """
+    user = await models.User.get(user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Student not found")
+
+    rows = await models.Attempt.find(
+        models.Attempt.user_id == user_id).sort(
+        -models.Attempt.created_at).to_list()
+
+    profiles = await models.SimulationProfile.find(
+        In(models.SimulationProfile.id,
+           [r.profile_id for r in rows] or [""])).to_list()
+    names = {p.id: p.name for p in profiles}
+
+    return [AttemptOut(
+        id=r.id, profile_id=r.profile_id,
+        profile_name=names.get(r.profile_id, ""),
+        attempt_number=r.attempt_number, status=r.status, mode=r.mode,
+        is_baseline=r.is_baseline, overall_score=None,
+        started_at=r.started_at, submitted_at=r.submitted_at,
+        scored_at=r.scored_at,
+    ) for r in rows]
 
 
 @router.get("/season")

@@ -136,8 +136,18 @@ export function GapMeter({ percent }: { percent: number }) {
   );
 }
 
-export function Avatar({ name, size = 28 }: { name: string; size?: number }) {
+export function Avatar({ name, size = 28, src }: { name: string; size?: number; src?: string }) {
   const initials = name.split(" ").filter(Boolean).slice(0, 2).map((n) => n[0]).join("").toUpperCase();
+  if (src) {
+    return (
+      <span
+        className="inline-flex items-center justify-center rounded-full shrink-0 overflow-hidden"
+        style={{ width: size, height: size }}
+      >
+        <img src={src} alt={name} className="w-full h-full object-cover" />
+      </span>
+    );
+  }
   return (
     <span
       className="inline-flex items-center justify-center rounded-full font-bold shrink-0"

@@ -3,7 +3,7 @@
 This is the engine the Writing module needed and did not have. It is not a
 neural essay scorer and it does not pretend to be one. It is four measurable
 things, computed separately, each with a stated basis and a confidence, in
-the same shape and on the same 20-80 scale as every other measure here.
+the same shape and on the same 0-100 scale as every other measure here.
 
     task response        did the writing address what was asked
     coherence            does it hold together as a piece of prose
@@ -36,8 +36,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 # Below this there is not enough writing to judge. Returning a number anyway
 # would be the same error as scoring three words of speech: a confident

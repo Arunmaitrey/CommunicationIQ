@@ -26,12 +26,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Speech dimensions come back on the 20-80 presentation scale, not as right or
+# Speech dimensions come back on the 0-100 presentation scale, not as right or
 # wrong. BKT needs a binary observation, so a response counts as demonstrating
 # the skill at or above the platform's own "placement ready" line — the same
 # threshold the readiness bands use, so a student is never "ready" on one
 # screen and "not demonstrating it" on another.
-DEMONSTRATED_AT = 60.0
+DEMONSTRATED_AT = 66.7
 
 
 @dataclass(frozen=True)
@@ -100,7 +100,7 @@ def update(prior: float, demonstrated: bool, skill: str = "") -> float:
 
 
 def update_from_score(prior: float, score: float, skill: str = "",
-                      scale_min: float = 20.0, scale_max: float = 80.0) -> float:
+                      scale_min: float = 0.0, scale_max: float = 100.0) -> float:
     """Convenience for the pipeline, which works in presentation scores."""
     del scale_min, scale_max
     return update(prior, score >= DEMONSTRATED_AT, skill)

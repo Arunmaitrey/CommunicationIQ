@@ -10,6 +10,10 @@ import {
 import {
   ApiError, practiceApi, type QuizItem, type QuizResult,
 } from "@/lib/api";
+import { ExamSidebar, type ExamQuestionStatus } from "@/components/ExamSidebar";
+import { ReviewCard } from "@/components/ReviewCard";
+import { setExamMode } from "@/lib/examMode";
+import { filterUnattempted, markAttempted } from "@/lib/setTracker";
 
 export default function QuizPage() {
   return (
@@ -46,9 +50,12 @@ function Quiz() {
     setAnswers({});
     setIndex(0);
     try {
-      const next = await practiceApi.nextQuiz(10);
+      const fetched = await practiceApi.nextQuiz(10);
+      const next = filterUnattempted("quiz", fetched);
       if (!next.length) {
-        setError("No quiz items have been published for your institution yet.");
+        setError(fetched.length
+          ? "You have already been through today's quiz items — check back tomorrow for a fresh set."
+          : "No quiz items have been published for your institution yet.");
         setStage("idle");
         return;
       }
@@ -73,8 +80,17 @@ function Quiz() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stage, seconds, index]);
 
+  // Nav rail is dead weight during a timed run — same as every other
+  // practice mode, gated purely off "playing" so idle/loading/marked leave
+  // it alone.
+  useEffect(() => {
+    setExamMode(stage === "playing");
+    return () => setExamMode(false);
+  }, [stage]);
+
   function answer(choice: number | null) {
     if (!item) return;
+    markAttempted("quiz", item.id);
     const updated = { ...answers, [item.id]: choice };
     setAnswers(updated);
 
@@ -114,19 +130,37 @@ function Quiz() {
   }
 
   if (stage === "marked" && result) {
-    return <Marked result={result} onAgain={start} />;
+    return <Marked result={result} onAgain={start} onDone={() => setStage("idle")} />;
   }
 
   if (stage === "playing" && item) {
+    const questions: ExamQuestionStatus[] = items.map((i, n) => ({
+      id: i.id,
+      index: n + 1,
+      answered: answers[i.id] != null,
+      selectedOption: answers[i.id] ?? null,
+    }));
+
     return (
-      <>
+      <ExamSidebar
+        collapsed
+        questions={questions}
+        currentIndex={index}
+        totalQuestions={items.length}
+        sectionTitle="Quiz"
+        onNavigate={() => {}}
+      >
+        {/* Per-item shot clock, shown here rather than via ExamSidebar's own
+            timeRemaining/totalSecondsRemaining — that prop drives a
+            10min/5min/1min "exam ending" warning band meant for a whole
+            session, and would read every 30-second question as the test
+            being seconds from over. */}
         <div className="flex items-center gap-3 mb-4">
           <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
             {item.category.replace(/_/g, " ")}
           </span>
           {item.is_review && <Badge tone="var(--secondary)">from your mistakes</Badge>}
           <div className="flex-1" />
-          <span className="text-[11px] text-muted">{index + 1} of {items.length}</span>
           <span className={`text-sm font-bold tabular-nums ${
             seconds <= 5 ? "countdown-critical" : seconds <= 10 ? "countdown-warn" : ""}`}>
             {seconds}s
@@ -158,7 +192,7 @@ function Quiz() {
         <button onClick={() => answer(null)} className="btn btn-ghost btn-sm mt-4 ds-focus">
           Skip this one
         </button>
-      </>
+      </ExamSidebar>
     );
   }
 
@@ -189,7 +223,9 @@ function Quiz() {
   );
 }
 
-function Marked({ result, onAgain }: { result: QuizResult; onAgain: () => void }) {
+function Marked({ result, onAgain, onDone }: {
+  result: QuizResult; onAgain: () => void; onDone: () => void;
+}) {
   return (
     <>
       <PageHeader
@@ -237,6 +273,8 @@ function Marked({ result, onAgain }: { result: QuizResult; onAgain: () => void }
           </div>
         </div>
       </div>
+
+      <ReviewCard label="quiz" onNext={onAgain} onBack={onDone} nextLabel="Another quiz →" />
 
       <Section title="Every item, with the reasoning">
         <div className="space-y-2">

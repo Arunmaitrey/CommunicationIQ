@@ -174,6 +174,7 @@ export interface SessionUser {
   must_change_password: boolean;
   ui_language: string;
   preferred_theme: string;
+  onboarding_completed: boolean;
 }
 
 export interface ProfileSection {
@@ -303,6 +304,13 @@ export interface Attempt {
   id: string; profile_id: string; profile_name: string; attempt_number: number;
   status: string; mode: string; is_baseline: boolean; overall_score: number | null;
   started_at: string | null; submitted_at: string | null; scored_at: string | null;
+  /** Only populated by the platform-admin student-attempts view. */
+  ip_address?: string;
+  /** Not tracked anywhere yet — declared so the platform results page,
+   *  which checks for it defensively, type-checks against a real shape
+   *  rather than `any`. Always undefined until proctoring strikes are
+   *  actually recorded server-side. */
+  proctor_strikes?: number;
 }
 
 export interface Mastery {
@@ -421,6 +429,12 @@ export interface TenantRow {
 
 export interface TenantType { key: string; label: string }
 
+export interface ReviewRow {
+  id: string; attempt_id: string; user_id: string; user_name: string;
+  user_email: string; tenant_id?: string; profile_name: string;
+  rating: number; difficulty: string; comment: string; created_at: string;
+}
+
 export interface PlanRow {
   id: string; code: string; name: string; version: number; billing_model: string;
   currency: string; price_per_seat: number; price_flat: number;
@@ -464,11 +478,19 @@ export const api = {
   login: (email: string, password: string) =>
     post<{ token: string; user: SessionUser }>("/auth/login", { email, password }),
   me: () => get<SessionUser>("/auth/me"),
+  completeOnboarding: () => post<void>("/auth/onboarding/complete"),
+  changePassword: (currentPassword: string, newPassword: string) =>
+    post<void>("/auth/change-password", { current_password: currentPassword, new_password: newPassword }),
+  updateProfile: (body: { full_name?: string; l1_language?: string }) =>
+    patch<SessionUser>("/auth/profile", body),
+  updatePreferences: (body: { ui_language?: string; preferred_theme?: string }) =>
+    put<SessionUser>("/auth/preferences", body),
 
   studentHome: () => get<StudentHome>("/student/home"),
   studentProfiles: () => get<SimulationProfile[]>("/student/profiles"),
   studentAttempts: () => get<Attempt[]>("/student/attempts"),
   giveConsent: (scopes: string[]) => post<unknown>("/student/consent", { scopes }),
+  getConsent: () => get<{ granted: string[] }>("/student/consent"),
 
   trainerCohorts: () => get<Cohort[]>("/trainer/cohorts"),
   cohortReadiness: (id: string) => get<CohortReadiness>(`/trainer/cohorts/${id}/readiness`),
@@ -478,6 +500,8 @@ export const api = {
   tenantOverview: () => get<TenantOverview>("/tenant/overview"),
   tenantUsers: (role?: string) => get<UserRow[]>(`/tenant/users${role ? `?role=${role}` : ""}`),
   tenantCohorts: () => get<Cohort[]>("/tenant/cohorts"),
+  tenantStudentAttempts: (userId: string) =>
+    get<Attempt[]>(`/tenant/students/${userId}/attempts`),
   /** The assessment library. Retired ones are left out unless asked for --
    *  they accumulate forever, because retiring is how an assessment leaves
    *  circulation and deleting one would orphan the results that name it. */
@@ -521,6 +545,11 @@ export const api = {
   setProfileStatus: (id: string, status: string) =>
     post<SimulationProfile>(`/tenant/profiles/${id}/status`, { status }),
   tenantSeason: () => get<SeasonRow[]>("/tenant/season"),
+  contentSummary: () => get<ContentBankSummaryRow[]>("/tenant/content/summary"),
+  contentItems: (source: string, key = "", limit = 50) =>
+    get<ContentBankItemOut[]>(
+      `/tenant/content/items?source=${encodeURIComponent(source)}` +
+      (key ? `&key=${encodeURIComponent(key)}` : "") + `&limit=${limit}`),
 
   platformOverview: () => get<PlatformOverview>("/platform/overview"),
   platformTenants: () => get<TenantRow[]>("/platform/tenants"),
@@ -530,7 +559,73 @@ export const api = {
   platformAudit: () => get<AuditRow[]>("/platform/audit"),
   platformGamification: () => get<GamificationConfig>("/platform/gamification"),
   narrationSettings: () => get<NarrationSettings>("/platform/narration/settings"),
+
+  platformTenantUsers: (tenantId: string) => get<UserRow[]>(`/platform/tenants/${tenantId}/users`),
+  platformStudentAttempts: (userId: string, tenantId: string) =>
+    get<Attempt[]>(`/platform/students/${userId}/attempts?tenant_id=${tenantId}`),
+
+  platformExamTests: () => get<ExamTestSummary[]>("/platform/exam-tests"),
+  platformReviews: () => get<ReviewRow[]>("/platform/reviews"),
+
+  // The exam-schedules admin page called these four exactly as named here,
+  // but the client never defined them -- every save/update/delete would
+  // have thrown "api.createExamSchedule is not a function" in the browser.
+  platformExamSchedules: () => get<ScheduleRow[]>("/platform/exam-schedules"),
+  createExamSchedule: (body: Record<string, unknown>) =>
+    post<{ id: string; ok: boolean }>("/platform/exam-schedules", body),
+  updateExamSchedule: (id: string, body: Record<string, unknown>) =>
+    request<{ ok: boolean }>(`/platform/exam-schedules/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteExamSchedule: (id: string) =>
+    request<{ ok: boolean }>(`/platform/exam-schedules/${id}`, { method: "DELETE" }),
+
+  platformSmtp: (tenantId?: string) =>
+    get<Record<string, unknown> | null>(`/platform/smtp${tenantId ? `?tenant_id=${tenantId}` : ""}`),
+  saveSmtp: (body: Record<string, unknown>) => post<{ ok: boolean }>("/platform/smtp", body),
+  testSmtp: (body: Record<string, unknown>) =>
+    post<{ ok: boolean; message: string }>("/platform/smtp/test", body),
+
+  platformPayment: (gateway?: string) =>
+    get<Record<string, unknown> | null>(`/platform/payment${gateway ? `?gateway=${gateway}` : ""}`),
+  savePayment: (body: Record<string, unknown>) => post<{ ok: boolean }>("/platform/payment", body),
+
+  platformEmailTemplates: () => get<EmailTemplateRow[]>("/platform/email-templates"),
+  createEmailTemplate: (body: Partial<EmailTemplateRow>) =>
+    post<{ id: string; ok: boolean }>("/platform/email-templates", body),
+  updateEmailTemplate: (id: string, body: Partial<EmailTemplateRow>) =>
+    request<{ ok: boolean }>(`/platform/email-templates/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteEmailTemplate: (id: string) =>
+    request<{ ok: boolean }>(`/platform/email-templates/${id}`, { method: "DELETE" }),
 };
+
+export interface ScheduleInstitution { id: string; name: string }
+
+export interface ScheduleRow {
+  id: string; exam_test_id: string; profile_id: string; name: string;
+  test: {
+    name: string; description: string; duration_minutes: number;
+    reading_questions: number; listening_questions: number;
+    writing_questions: number; speaking_questions: number;
+    is_baseline: boolean;
+  } | null;
+  institutions: ScheduleInstitution[];
+  starts_at: string; ends_at: string; max_attempts: number; is_active: boolean;
+  status: string; created_at: string | null;
+  results: { started: number; students: number; average_score: number | null };
+}
+
+export interface ExamTestSummary {
+  id: string; name: string; company: string; duration_minutes: number;
+  reading_questions: number; listening_questions: number;
+  writing_questions: number; speaking_questions: number;
+  reading_seconds: number; listening_seconds: number;
+  writing_seconds: number; speaking_seconds: number;
+}
+
+export interface EmailTemplateRow {
+  id: string; key: string; name: string; subject: string;
+  body_html: string; body_text: string; category: string;
+  is_active: boolean; created_at?: string | null; updated_at?: string | null;
+}
 
 /** A stored secret, never returned whole. */
 export interface MaskedSecret { set: boolean; last4: string }
@@ -637,6 +732,9 @@ export interface RunnerPayload {
   mode: string;
   is_baseline: boolean;
   env_check_done: boolean;
+  /** Whether this profile's env-check requires a working, permitted camera
+   *  before the sitting can begin. Nothing is ever recorded or watched. */
+  camera_check: boolean;
   items: RunnerItem[];
 }
 
@@ -669,9 +767,15 @@ export interface DisfluencyEvent {
 
 export interface ResponseMetrics {
   response_id: string;
+  section_id: string;
   position: number;
   task_type: string;
   prompt_text: string;
+  submitted_answer: string;
+  correct_answer: string;
+  question_score: number | null;
+  word_count: number | null;
+  content_score: number | null;
   skipped: boolean;
   onset_ms: number | null;
   speech_ms: number | null;
@@ -942,6 +1046,9 @@ export interface EnvCheckPayload {
   device_label?: string;
   user_agent?: string;
   diagnostics?: Record<string, string | number | boolean>;
+  /** Whether a working, permitted camera was found. Only checked -- never
+   *  recorded or watched -- and only asked for when the profile requires it. */
+  camera_ok?: boolean | null;
 }
 
 const ATTEMPTS = "/student/attempts";
@@ -1055,6 +1162,26 @@ export const attemptApi = {
   submit: (attemptId: string) => post<AttemptResult>(`${ATTEMPTS}/${attemptId}/submit`),
 
   result: (attemptId: string) => get<AttemptResult>(`${ATTEMPTS}/${attemptId}/result`),
+
+  /** Fetch the printable exam report and open it in a new tab.
+   *
+   *  Mirrors audioBlobUrl below: `/report/{id}` requires an Authorization
+   *  header, which a bare `window.open(url)` link cannot carry, so the HTML
+   *  is fetched with the header and handed to the browser as an object URL.
+   */
+  async openReport(attemptId: string): Promise<void> {
+    const token = getToken();
+    const res = await fetch(`${API_BASE}/report/${attemptId}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (res.status === 401) {
+      sessionExpired(token);
+      throw new ApiError(401, "Session expired");
+    }
+    if (!res.ok) throw new ApiError(res.status, "Could not load the report");
+    const blob = await res.blob();
+    window.open(URL.createObjectURL(blob), "_blank");
+  },
 
   /** Fetch a recording as a blob URL.
    *
@@ -1178,6 +1305,16 @@ export const attemptApi = {
 export interface SeatUsage {
   used: number; limit: number; students: number; trainers: number;
   admins: number; remaining: number;
+}
+
+export interface ContentBankSummaryRow {
+  source: "quiz" | "task" | "writing_prompt" | "reading_passage" | "listening_passage";
+  key: string; count: number;
+}
+
+export interface ContentBankItemOut {
+  id: string; source: string; key: string; title: string;
+  status: string; difficulty: number; created_at?: string;
 }
 
 export interface ImportPreview {

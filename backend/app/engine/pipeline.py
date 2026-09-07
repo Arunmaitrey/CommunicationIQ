@@ -38,8 +38,8 @@ from app.models.tenant import (Attempt, FeatureRecord, ProfileSection,
 
 log = logging.getLogger(__name__)
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 # How the overall number is composed. Only dimensions that were actually
 # measured take part, and the weights are renormalised over those — so an
@@ -543,14 +543,14 @@ async def pending_responses(tenant: Session, attempt_id: str) -> list[str]:
     if not responses:
         return []
     ids = [r.id for r in responses]
-    audible = {a.response_id for a in (await tenant.execute(
+    audible = set((await tenant.execute(
         select(ResponseAudio.response_id).where(
             ResponseAudio.response_id.in_(ids),
             ResponseAudio.deleted_at.is_(None))
-    )).scalars().all()}
-    featured = {f.response_id for f in (await tenant.execute(
+    )).scalars().all())
+    featured = set((await tenant.execute(
         select(FeatureRecord.response_id).where(FeatureRecord.response_id.in_(ids))
-    )).scalars().all()}
+    )).scalars().all())
     return [r.id for r in responses
             if r.id in audible and r.id not in featured]
 
@@ -618,10 +618,15 @@ async def finalise_attempt(tenant: Session, attempt_id: str) -> AttemptOutcome:
         tenant.add(_attempt_row("overall", overall,
                                 round(min(0.7, 0.25 + 0.12 * measured), 2)))
 
-    await update_mastery(tenant, attempt.user_id, dimensions)
-
+    # Set before update_mastery, not after: it commits internally, which
+    # flushes and clears the session's tracked-object list. Mutating
+    # `attempt` afterward would be silently lost -- nothing left tracking
+    # it for the commit below to save.
     attempt.status = "scored"
     attempt.scored_at = datetime.now(timezone.utc)
+
+    await update_mastery(tenant, attempt.user_id, dimensions)
+
     await tenant.commit()
 
     return AttemptOutcome(
@@ -659,6 +664,7 @@ async def update_mastery(tenant: Session, user_id: str,
             ))
             continue
 
+        tenant.track(row)
         posterior = bkt.update_from_score(row.mastery, value, skill)
         row.last_change = round(posterior - row.mastery, 4)
         row.mastery = round(posterior, 4)
@@ -821,11 +827,11 @@ def quality_verdict(audio: ResponseAudio) -> str:
 
 
 def band_label(score: float) -> str:
-    if score >= 65:
+    if score >= 75:
         return "Strong"
-    if score >= 51:
+    if score >= 51.7:
         return "Competent"
-    if score >= 36:
+    if score >= 26.7:
         return "Developing"
     return "Beginning"
 

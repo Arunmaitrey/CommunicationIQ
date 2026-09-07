@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpen, Check, Flame, Gauge, X, Zap } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { StepGuide } from "@/components/StepGuide";
@@ -12,6 +12,9 @@ import {
   type ReadingResult, type ReadingStart,
 } from "@/lib/api";
 import { useData } from "@/lib/useData";
+import { ReviewCard } from "@/components/ReviewCard";
+import { setExamMode } from "@/lib/examMode";
+import { filterUnattempted, markAttempted } from "@/lib/setTracker";
 
 export default function ReadingPage() {
   return (
@@ -53,11 +56,21 @@ function Reading() {
   const openedAt = useRef<number>(0);
   const readMs = useRef<number>(0);
 
+  // Nav rail during an active passage/answer session is dead weight, same
+  // as every other practice mode.
+  useEffect(() => {
+    setExamMode(stage === "read" || stage === "answer");
+    return () => setExamMode(false);
+  }, [stage]);
+
+  const passages = data ? filterUnattempted("reading", data) : [];
+
   async function begin(passage: ReadingPassageRow) {
     setProblem("");
     setBusy(true);
     try {
       const started = await readingApi.start(passage.id);
+      markAttempted("reading", passage.id);
       setSession(started);
       setQuestions([]);
       setAnswers({});
@@ -195,13 +208,14 @@ function Reading() {
 
   // ---------------------------------------------------------------- marked --
   if (stage === "marked" && result) {
+    const backToBrowse = () => { setStage("browse"); setResult(null); };
     return (
       <>
         <PageHeader
           title={`${result.correct} of ${result.total} correct`}
           sub={result.title}
           action={
-            <button onClick={() => { setStage("browse"); setResult(null); }}
+            <button onClick={backToBrowse}
                     className="btn btn-primary btn-sm ds-focus">
               Another passage
             </button>
@@ -258,6 +272,10 @@ function Reading() {
             </span>
           )}
         </div>
+
+        <ReviewCard attemptId={session?.attempt_id} label="reading passage"
+                    onNext={backToBrowse} onBack={backToBrowse}
+                    nextLabel="Another passage →" />
 
         <Section title="Every question, with the reasoning" className="mb-4">
           <div className="space-y-2">
@@ -318,9 +336,12 @@ function Reading() {
       {!data || data.length === 0 ? (
         <EmptyState icon={BookOpen} title="No passages yet"
                     desc="The reading bank is empty for this institution." />
+      ) : passages.length === 0 ? (
+        <EmptyState icon={BookOpen} title="You have done today's passages"
+                    desc="Check back tomorrow for a fresh set." />
       ) : (
         <div className="grid md:grid-cols-2 gap-3">
-          {data.map((p) => (
+          {passages.map((p) => (
             <button key={p.id} onClick={() => begin(p)} disabled={busy}
                     className="ds-card p-4 text-left hover:bg-surface2 transition-colors ds-focus">
               <div className="flex items-start justify-between gap-2">

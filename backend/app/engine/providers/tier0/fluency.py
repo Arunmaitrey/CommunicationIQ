@@ -36,8 +36,8 @@ PHONATION_IDEAL_HIGH = 0.90
 # A pause this long inside an answer is heard as a stall, not as phrasing.
 LONG_PAUSE_MS = 1200
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 
 class FeatureFluency:

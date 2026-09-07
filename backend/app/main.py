@@ -15,11 +15,97 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.routers import (attempts, auth, game, invitations, listening,
                          platform_admin, platform_export,
-                         reading, writing,
+                         reading, report, writing,
                          platform_writes, practice, student, tenant_admin,
                          tenant_writes, trainer, trainer_ops)
 
 log = logging.getLogger(__name__)
+
+
+async def _sync_exam_test_profiles():
+    """Create a SimulationProfile + ProfileSections for every ExamTest that
+    lacks one, so a test built in the question-bank admin is immediately
+    sittable from the student side without a separate authoring step."""
+    import uuid as _uuid
+    from datetime import datetime as _dt, timezone as _tz
+    from app.db import control_db as _cdb
+    from app.models.platform import ExamTest as _ET
+
+    db = _cdb()
+    now = _dt.now(_tz.utc)
+    task_types = {
+        "reading": "reading_comprehension",
+        "listening": "audio_comprehension",
+        "writing": "writing_task",
+        "speaking": "open_response",
+    }
+    tests = await _ET.find_all().to_list()
+    for t in tests:
+        existing = await db.simulation_profiles.find_one({"name": t.name})
+        if existing:
+            continue
+        profile_id = str(_uuid.uuid4())
+        sections = []
+        pos = 1
+        for module, count in [
+            ("reading", t.reading_questions),
+            ("listening", t.listening_questions),
+            ("writing", t.writing_questions),
+            ("speaking", t.speaking_questions),
+        ]:
+            if count <= 0:
+                continue
+            secs_key = f"{module}_seconds"
+            resp_secs = getattr(t, secs_key, 300) // count if count else 30
+            sections.append({
+                "_id": str(_uuid.uuid4()), "profile_id": profile_id,
+                "position": pos, "title": module.capitalize(),
+                "task_type": task_types.get(module, "reading_comprehension"),
+                "instructions": f"Complete the {module} section.",
+                "item_count": count, "prep_seconds": 10,
+                "response_seconds": resp_secs,
+                "prompt_plays_allowed": 1 if module == "listening" else 0,
+                "allow_replay": False, "weight": 1.0, "selection": {},
+            })
+            pos += 1
+        await db.simulation_profiles.insert_one({
+            "_id": profile_id, "name": t.name, "code": "",
+            "style": "simulation", "company": t.company,
+            "description": t.description, "status": "published",
+            "estimated_minutes": t.duration_minutes,
+            "is_baseline": t.is_baseline, "scoring_weights": {},
+            "pass_threshold": 0.6, "skill_thresholds": {},
+            "created_at": now, "updated_at": now,
+        })
+        if sections:
+            await db.profile_sections.insert_many(sections)
+        log.info("Created SimulationProfile for ExamTest: %s", t.name)
+
+
+async def _sync_company_visibility(name: str, active: bool) -> None:
+    """Publish or retire every SimulationProfile and ExamTest carrying one
+    company's name, so toggling a company in the admin console takes effect
+    for students immediately rather than needing a backend restart.
+
+    Referenced from three spots in platform_admin.py's company CRUD
+    (create/update/delete) but never defined anywhere in the merged
+    feat/exam-section PR -- each call site already wraps it in a bare
+    try/except, so the gap was silent: creating, renaming or deactivating a
+    company always "worked", it just never actually changed whether that
+    company's content was reachable by a student.
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    from app.db import control_db as _cdb
+
+    db = _cdb()
+    now = _dt.now(_tz.utc)
+    await db.simulation_profiles.update_many(
+        {"company": name},
+        {"$set": {"status": "published" if active else "retired",
+                  "updated_at": now}})
+    await db.exam_tests.update_many(
+        {"company": name},
+        {"$set": {"is_active": active, "updated_at": now}})
 
 
 @asynccontextmanager
@@ -80,6 +166,22 @@ async def lifespan(_app: FastAPI):
         from app.narration.worker import run_forever
         narration_task = asyncio.create_task(run_forever())
 
+    # Every ExamTest built in the question-bank admin needs a matching
+    # SimulationProfile before a student can sit it — this creates any that
+    # are missing. Never blocks startup: a sync failure here just means that
+    # test isn't sittable yet, not that the API is down.
+    try:
+        await _sync_exam_test_profiles()
+    except Exception:  # noqa: BLE001
+        log.exception("Failed to sync exam test profiles")
+
+    # AI question generation scheduler — off unless an operator has actually
+    # configured a key, so an unconfigured deployment does nothing here.
+    if settings.auto_question_generation and settings.groq_api_key:
+        from app.question_generator import start_scheduler
+        start_scheduler()
+        log.info("AI question generation scheduler started")
+
     yield
 
     if narration_task is not None:
@@ -114,6 +216,7 @@ app.include_router(auth.router, prefix=API)
 app.include_router(student.router, prefix=API)
 app.include_router(student.consent_router, prefix=API)
 app.include_router(attempts.router, prefix=API)
+app.include_router(report.router, prefix=API)
 app.include_router(listening.router, prefix=API)
 app.include_router(reading.router, prefix=API)
 app.include_router(writing.router, prefix=API)

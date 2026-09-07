@@ -30,7 +30,8 @@ from app.models.tenant import (Assignment, Attempt, Cohort, CohortMember,
                                ProfileSection, SimulationProfile, TaskItem,
                                User)
 from app.schemas import (AssignmentOut, AssignmentRequest, CohortMembersRequest,
-                         CohortOut, CohortRequest, CreateUserRequest,
+                         CohortOut, CohortRequest, ContentBankItemOut,
+                         ContentBankSummaryRow, CreateUserRequest,
                          ImportPreview, ImportProblemOut, ImportRequest,
                          ImportResult, ProfileRequest, ProfileSectionOut,
                          ProfileSectionRequest, ProfileStatusRequest,
@@ -92,7 +93,7 @@ def _user_out(u: User) -> UserOut:
 
 
 async def _seat_usage(models: TenantModels, tenant_id: str) -> SeatUsage:
-    role_docs = await models.User.get_pymongo_collection().aggregate([
+    role_docs = await models.User.get_motor_collection().aggregate([
         {"$match": {"active": True}},
         {"$group": {"_id": "$role", "n": {"$sum": 1}}},
     ]).to_list(None)
@@ -436,7 +437,7 @@ async def assignments(models: TenantModels) -> list[AssignmentOut]:
     cohorts = {c.id: c for c in await models.Cohort.find_all().to_list()}
     profiles = {p.id: p for p in await models.SimulationProfile.find_all().to_list()}
 
-    member_counts = {doc["_id"]: doc["count"] async for doc in models.CohortMember.get_pymongo_collection().aggregate([
+    member_counts = {doc["_id"]: doc["count"] async for doc in models.CohortMember.get_motor_collection().aggregate([
         {"$group": {"_id": "$cohort_id", "count": {"$sum": 1}}},
     ])}
 
@@ -775,11 +776,11 @@ async def _sections_without_items(models: TenantModels,
     # selector had already been taught where each bank lives; the guard had
     # not, and two places encoding the same knowledge is how one of them ends
     # up stale.
-    task_counts = {doc["_id"]: doc["count"] async for doc in models.TaskItem.get_pymongo_collection().aggregate([
+    task_counts = {doc["_id"]: doc["count"] async for doc in models.TaskItem.get_motor_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$task_type", "count": {"$sum": 1}}},
     ])}
-    quiz_counts = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_pymongo_collection().aggregate([
+    quiz_counts = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$category", "count": {"$sum": 1}}},
     ])}
@@ -787,7 +788,7 @@ async def _sections_without_items(models: TenantModels,
     # live in the same table and are not interchangeable, so counting them
     # together would pass a Passage Reconstruction section on the strength of
     # six email prompts the runner would never serve it.
-    prompt_counts = {doc["_id"]: doc["count"] async for doc in models.WritingPrompt.get_pymongo_collection().aggregate([
+    prompt_counts = {doc["_id"]: doc["count"] async for doc in models.WritingPrompt.get_motor_collection().aggregate([
         {"$match": {"status": "published"}},
         {"$group": {"_id": "$kind", "count": {"$sum": 1}}},
     ])}
@@ -835,7 +836,7 @@ async def _sections_without_items(models: TenantModels,
             if groups_by_passage(key):
                 # Comprehension comes a whole passage at a time, so the raw
                 # count is not what the section will get.
-                sizes = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_pymongo_collection().aggregate([
+                sizes = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
                     {"$match": {"category": key, "status": "published"}},
                     {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
                 ]) if doc["count"]}
@@ -899,3 +900,101 @@ async def set_profile_status(profile_id: str, body: ProfileStatusRequest,
                        entity="SimulationProfile", entity_id=profile.id,
                        before={"status": before}, after={"status": body.status})
     return _profile_payload(await _load_profile(models, profile_id))
+
+
+# --------------------------------------------------------------------------
+# Item bank
+#
+# Read-only. The item bank is the same content the sections above draw on --
+# see ``_sections_without_items`` for the identical per-source aggregation --
+# surfaced here so a tenant admin can actually see what is in the bank rather
+# than discover a gap only when publishing a profile fails.
+# --------------------------------------------------------------------------
+
+@router.get("/content/summary", response_model=list[ContentBankSummaryRow])
+async def content_summary(principal: Principal,
+                          models: TenantModels) -> list[ContentBankSummaryRow]:
+    rows: list[ContentBankSummaryRow] = []
+
+    quiz_counts = {doc["_id"]: doc["count"] async for doc in models.QuizItem.get_motor_collection().aggregate([
+        {"$match": {"status": "published"}},
+        {"$group": {"_id": "$category", "count": {"$sum": 1}}},
+    ])}
+    for key, count in sorted(quiz_counts.items()):
+        rows.append(ContentBankSummaryRow(source="quiz", key=key or "(uncategorised)", count=count))
+
+    task_counts = {doc["_id"]: doc["count"] async for doc in models.TaskItem.get_motor_collection().aggregate([
+        {"$match": {"status": "published"}},
+        {"$group": {"_id": "$task_type", "count": {"$sum": 1}}},
+    ])}
+    for key, count in sorted(task_counts.items()):
+        rows.append(ContentBankSummaryRow(source="task", key=key or "(uncategorised)", count=count))
+
+    prompt_counts = {doc["_id"]: doc["count"] async for doc in models.WritingPrompt.get_motor_collection().aggregate([
+        {"$match": {"status": "published"}},
+        {"$group": {"_id": "$kind", "count": {"$sum": 1}}},
+    ])}
+    for key, count in sorted(prompt_counts.items()):
+        rows.append(ContentBankSummaryRow(source="writing_prompt", key=key or "(uncategorised)", count=count))
+
+    reading_n = await models.ReadingPassage.find(
+        models.ReadingPassage.status == "published").count()
+    rows.append(ContentBankSummaryRow(source="reading_passage", key="", count=reading_n))
+
+    listening_n = await models.ListeningPassage.find(
+        models.ListeningPassage.status == "published").count()
+    rows.append(ContentBankSummaryRow(source="listening_passage", key="", count=listening_n))
+
+    return rows
+
+
+_ITEM_SOURCES = {"quiz", "task", "writing_prompt", "reading_passage", "listening_passage"}
+
+
+@router.get("/content/items", response_model=list[ContentBankItemOut])
+async def content_items(principal: Principal, models: TenantModels,
+                        source: str, key: str = "", limit: int = 50,
+                        ) -> list[ContentBankItemOut]:
+    if source not in _ITEM_SOURCES:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Unknown source. Use one of: {', '.join(sorted(_ITEM_SOURCES))}")
+    limit = max(1, min(limit, 200))
+
+    if source == "quiz":
+        query = models.QuizItem.find(models.QuizItem.category == key) if key \
+            else models.QuizItem.find_all()
+        docs = await query.limit(limit).to_list()
+        return [ContentBankItemOut(id=d.id, source=source, key=d.category,
+                                   title=d.stem, status=d.status,
+                                   difficulty=d.difficulty) for d in docs]
+
+    if source == "task":
+        query = models.TaskItem.find(models.TaskItem.task_type == key) if key \
+            else models.TaskItem.find_all()
+        docs = await query.limit(limit).to_list()
+        return [ContentBankItemOut(id=d.id, source=source, key=d.task_type,
+                                   title=d.prompt_text or d.reference_text[:120],
+                                   status=d.status, difficulty=d.difficulty,
+                                   created_at=d.created_at) for d in docs]
+
+    if source == "writing_prompt":
+        query = models.WritingPrompt.find(models.WritingPrompt.kind == key) if key \
+            else models.WritingPrompt.find_all()
+        docs = await query.limit(limit).to_list()
+        return [ContentBankItemOut(id=d.id, source=source, key=d.kind,
+                                   title=d.title, status=d.status,
+                                   difficulty=d.difficulty,
+                                   created_at=d.created_at) for d in docs]
+
+    if source == "reading_passage":
+        docs = await models.ReadingPassage.find_all().limit(limit).to_list()
+        return [ContentBankItemOut(id=d.id, source=source, key=d.kind,
+                                   title=d.title, status=d.status,
+                                   difficulty=d.difficulty,
+                                   created_at=d.created_at) for d in docs]
+
+    docs = await models.ListeningPassage.find_all().limit(limit).to_list()
+    return [ContentBankItemOut(id=d.id, source=source, key=d.kind,
+                               title=d.title, status=d.status,
+                               difficulty=d.difficulty,
+                               created_at=d.created_at) for d in docs]

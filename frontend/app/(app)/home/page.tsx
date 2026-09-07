@@ -125,7 +125,9 @@ function Home() {
                   consent={data.consent_given}
                   hasAttempts={data.recent_attempts.length > 0} />
 
-      <Workflow title="How this works" steps={studentSteps(data, countedToday)} />
+      <div data-tour="home-workflow">
+        <Workflow title="How this works" steps={studentSteps(data, countedToday)} />
+      </div>
 
       {/* One number, and it changes what a student does today. Level and XP
           moved to My progress: they are a record of the past, and nobody acts

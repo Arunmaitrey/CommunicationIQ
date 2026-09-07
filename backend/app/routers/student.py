@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from app import formats, skills
 from app import deadline as app_deadline
 from app.deps import Principal, TenantModels, require_roles
-from app.schemas import (AttemptOut, ConsentRequest, MasteryOut,
+from app.schemas import (AttemptOut, ConsentOut, ConsentRequest, MasteryOut,
                          SkillModuleOut, SkillsOverview,
                          ProfileSectionOut, QuestOut, SimulationProfileOut,
                          StreakOut, StudentHome, UserOut)
@@ -280,6 +280,24 @@ async def profiles(models: TenantModels) -> list[SimulationProfileOut]:
         "-is_baseline", "name").to_list()
     sections_by_profile = await _sections_by_profile(models, [p.id for p in rows])
     return [_profile_out(p, sections_by_profile.get(p.id, [])) for p in rows]
+
+
+@consent_router.get("/consent", response_model=ConsentOut)
+async def get_consent(principal: Principal, models: TenantModels) -> ConsentOut:
+    """Which scopes this caller currently has granted.
+
+    Consent records are append-only (see ``give_consent``), so "currently
+    granted" means each scope's most recent row. Read once, sorted oldest
+    first, so a later row for the same scope simply overwrites the earlier
+    one in this dict — no per-scope query needed.
+    """
+    rows = await models.ConsentRecord.find(
+        models.ConsentRecord.user_id == principal.user_id,
+    ).sort("at").to_list()
+    latest: dict[str, bool] = {}
+    for row in rows:
+        latest[row.scope] = row.granted
+    return ConsentOut(granted=sorted(scope for scope, granted in latest.items() if granted))
 
 
 @consent_router.post("/consent", status_code=status.HTTP_201_CREATED)

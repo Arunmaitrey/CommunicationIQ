@@ -39,7 +39,7 @@ def _ev(**kw) -> NarrationEvidence:
 
 def _attempt(overall, calibrated=False, has_overall=True, band="close, with work to do"):
     return {"status": "scored", "has_overall": has_overall,
-            "overall": overall, "scale": [20, 80],
+            "overall": overall, "scale": [0, 100],
             "band_phrase": band if has_overall else "", "calibrated": calibrated,
             "has_audio": True}
 

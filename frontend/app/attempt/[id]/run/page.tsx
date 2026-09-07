@@ -19,6 +19,7 @@ import {
   beep, levelToFraction, MicPermissionError, MicRecorder, MicUnavailableError,
   playAudioUrl, primeSpeech, speak, TARGET_SAMPLE_RATE,
 } from "@/lib/audio";
+import ProctorCamera from "@/components/proctoring/ProctorCamera";
 
 export default function RunPage() {
   return (
@@ -868,6 +869,16 @@ function Runner() {
     }
   }
 
+  const proctorEndedRef = useRef(false);
+  /** Proctoring hit its violation limit — submit whatever has been answered
+   *  so far, the same way finishAnyway does, rather than leave the attempt
+   *  open after the camera has already locked the screen. */
+  async function handleProctorAutoEnd() {
+    if (proctorEndedRef.current || phase === "submitting") return;
+    proctorEndedRef.current = true;
+    await finishAnyway();
+  }
+
   // -- rendering ----------------------------------------------------------
 
   if (phase === "loading") {
@@ -877,10 +888,10 @@ function Runner() {
   if (phase === "failed") {
     // Where "try again" actually leads depends on who stopped.
     //
-    // A student can walk away and start another simulation whenever they
-    // like. An invited candidate cannot: an invitation is one sitting, the
-    // server refuses a second attempt, and /simulate is a student page that
-    // would eject them to a login screen they have no account for. What they
+    // A student can walk away and start another test whenever they like. An
+    // invited candidate cannot: an invitation is one sitting, the server
+    // refuses a second attempt, and /tests is a student page that would
+    // eject them to a login screen they have no account for. What they
     // need is the environment check for *this* attempt -- it resumes the same
     // one, and everything already recorded is already uploaded.
     const candidate = user?.role === "candidate";
@@ -896,9 +907,9 @@ function Runner() {
             </p>
           )}
           <button
-            onClick={() => router.push(candidate ? `/attempt/${id}/check` : "/simulate")}
+            onClick={() => router.push(candidate ? `/attempt/${id}/check` : "/tests")}
             className="btn btn-primary ds-focus">
-            {candidate ? "Check the microphone and carry on" : "Back to simulations"}
+            {candidate ? "Check the microphone and carry on" : "Back to tests"}
           </button>
         </div>
       </Centered>
@@ -970,6 +981,11 @@ function Runner() {
 
   return (
     <div className={`runner${skin ? ` ${skin.theme}` : ""}`}>
+      <ProctorCamera
+        sessionId={id}
+        examCompleted={phase === "submitting"}
+        onAutoEnd={handleProctorAutoEnd}
+      />
       {isSvar ? (
         // The reference header is minimal: a continuous whole-test count and
         // the sitting timer. The blue section banner below carries the "which
@@ -1155,8 +1171,13 @@ function Runner() {
                   later gives you a cleaner reading.
                 </p>
                 <div className="space-y-2">
-                  <button onClick={() => router.push("/simulate")}
-                          className="btn btn-primary w-full ds-focus">
+                  {/* A candidate has no /tests -- one link, one sitting (see
+                      lib/nav.ts). Their "come back later" is the check page
+                      for this same attempt, not a student-only screen. */}
+                  <button
+                    onClick={() => router.push(
+                      user?.role === "candidate" ? `/attempt/${id}/check` : "/tests")}
+                    className="btn btn-primary w-full ds-focus">
                     Leave and come back later
                   </button>
                   <button onClick={() => setRescheduling(false)}
@@ -1675,18 +1696,30 @@ function Runner() {
             </div>
           ) : (
             <>
-              <div className={`countdown ${seconds <= 3 ? "countdown-critical" : seconds <= 10 ? "countdown-warn" : ""}`}>
-                {seconds}
-              </div>
               {item.prompt_text
                 ? <p className="runner-prompt">{item.prompt_text}</p>
                 : <p className="runner-prompt" data-testid="answer-line">{answerLine(item.task_type)}</p>}
+              {/* The recording moment as the screen's visual centre: a
+                  breathing purple ring around a solid tile carrying the
+                  countdown, so "you are speaking, right now" reads before
+                  the number does. */}
+              <div className="mic-centerpiece is-live">
+                <div className="mic-centerpiece-tile">
+                  <Mic size={20} />
+                  <span className={`n ${seconds <= 3 ? "countdown-critical" : seconds <= 10 ? "countdown-warn" : ""}`}
+                        style={seconds <= 10 ? undefined : { color: "#fff" }}>
+                    {seconds}
+                  </span>
+                </div>
+              </div>
               {notice && (
                 <p className="runner-instruction" style={{ color: "var(--rag-amber)" }}>
                   {notice}
                 </p>
               )}
-              <Meter level={level} />
+              <div className="mic-centerpiece-wave">
+                <Meter level={level} />
+              </div>
               <button
                 onClick={() => { endReason.current = "user_ended"; stopEarly.current = true; }}
                 className="btn btn-ghost ds-focus"

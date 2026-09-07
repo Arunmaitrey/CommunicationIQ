@@ -15,8 +15,8 @@ import re
 from app.engine.contracts.types import (DisfluencyResult, ProviderMeta,
                                         TranscriptResult, VADResult)
 
-SCALE_MIN = 20.0
-SCALE_MAX = 80.0
+SCALE_MIN = 0.0
+SCALE_MAX = 100.0
 
 # Whisper transcribes hesitation reasonably consistently in English.
 FILLERS = {"um", "uh", "erm", "er", "ah", "hmm", "mm", "mhm", "uhh", "umm"}

@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, File, Form, HTTPException,
                      Request, Response as HttpResponse, UploadFile, status)
+from pydantic import BaseModel
 from app.config import settings
 from app.invitations import CANDIDATE_ROLE
 from app.db import Session, ensure_platform_models, ensure_tenant_models, func, select
@@ -41,9 +42,9 @@ from app.engine.psychometrics import irt
 from app.engine.registry import Providers
 from app.gamification import engine as game
 from app.models.tenant import (Attempt, ConsentRecord, FeatureRecord,
-                               Invitation, ProfileSection, Response,
+                               Invitation, ProfileSection, QuizItem, Response,
                                ResponseAudio, ScoreRecord, SimulationProfile,
-                               TaskItem)
+                               TaskItem, WritingPrompt)
 from app.schemas import (AnswerSubmission, AttemptResult, CandidateResume,
                          EnvCheckRequest, NarrationOut, PromptResponse,
                          ResponseMetrics, RunnerItem, RunnerPayload,
@@ -900,6 +901,7 @@ async def _runner_payload(session: TenantSession, attempt: Attempt,
         style=profile.style, company=profile.company,
         status=attempt.status, mode=attempt.mode, is_baseline=attempt.is_baseline,
         env_check_done=bool(attempt.env_check), items=payload_items,
+        camera_check=bool(getattr(profile, "camera_check", False)),
         noise_dbfs=(attempt.env_check or {}).get("noise_dbfs"),
         noise_ceiling_dbfs=(attempt.env_check or {}).get("noise_ceiling_dbfs"),
         deadline_at=clock.deadline_at, server_now=clock.server_now,
@@ -1585,6 +1587,42 @@ async def submit(attempt_id: str, principal: Principal, session: TenantSession,
                          biggest_lever_override=outcome.biggest_lever)
 
 
+class ProctorEventIn(BaseModel):
+    """Payload sent by ProctorCamera when a violation streak ends or the
+    exam finishes — see frontend/app/proctoring/ProctorCamera.tsx."""
+
+    face_detected: bool = False
+    away_events: int = 0
+    multi_face_events: int = 0
+    violation_count: int = 0
+
+
+@router.post("/{attempt_id}/proctor-events", status_code=status.HTTP_204_NO_CONTENT)
+async def record_proctor_event(attempt_id: str, payload: ProctorEventIn,
+                               principal: Principal, session: TenantSession) -> None:
+    """Persist a proctoring violation summary against the attempt.
+
+    Best-effort by design on the client (ProctorCamera swallows fetch
+    errors), so this only needs to be idempotent and cheap: it appends one
+    event and keeps a running strike count an admin can review later. It
+    intentionally does not fail the request loudly — a proctoring hiccup
+    must never block or crash the exam itself.
+    """
+    attempt = await _own_attempt(session, principal, attempt_id)
+    attempt.proctor_events.append({
+        "face_detected": payload.face_detected,
+        "away_events": payload.away_events,
+        "multi_face_events": payload.multi_face_events,
+        "violation_count": payload.violation_count,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    })
+    attempt.proctor_violation_count = max(
+        attempt.proctor_violation_count, payload.violation_count)
+    if payload.violation_count >= 4:
+        attempt.proctor_locked = True
+    await session.commit()
+
+
 async def _run_game_hook(session, platform, principal, attempt, outcome) -> None:
     """Award XP, advance the quest, touch the streak — after scoring, never before.
 
@@ -2158,7 +2196,7 @@ async def _diagnosis_for(session: TenantSession, attempt: Attempt,
         if r.response_id is not None:
             counts[r.dimension] = counts.get(r.dimension, 0) + 1
     return app_diagnosis.diagnose(
-        dims, scale_max=overall.scale_max if overall else 80.0,
+        dims, scale_max=overall.scale_max if overall else 100.0,
         response_counts=counts, available_practice=available_practice)
 
 
@@ -2199,6 +2237,16 @@ async def _result(session: TenantSession, attempt: Attempt,
         select(TaskItem).where(TaskItem.id.in_([r.item_id for r in responses if r.item_id] or [""]))
     )).scalars().all()}
 
+    quiz_items = {i.id: i for i in (await session.execute(
+        select(QuizItem).where(QuizItem.id.in_(
+            [r.quiz_item_id for r in responses if r.quiz_item_id] or [""]))
+    )).scalars().all()}
+
+    writing_prompts = {p.id: p for p in (await session.execute(
+        select(WritingPrompt).where(WritingPrompt.id.in_(
+            [r.prompt_id for r in responses if r.prompt_id] or [""]))
+    )).scalars().all()}
+
     per_response: dict[str, dict[str, float]] = {}
     for row in scores:
         if row.response_id:
@@ -2221,15 +2269,39 @@ async def _result(session: TenantSession, attempt: Attempt,
             noisy_count += 1
         section = sections.get(r.section_id or "")
         item = items.get(r.item_id or "")
+        quiz_item = quiz_items.get(r.quiz_item_id or "")
+        writing_prompt = writing_prompts.get(r.prompt_id or "")
         audio = audio_rows.get(r.id)
+        response_scores = per_response.get(r.id, {})
+        submitted = feature.transcript if feature else ""
+        correct_answer = ""
+        if quiz_item is not None:
+            options = list(quiz_item.options or [])
+            if r.selected_index is not None and 0 <= r.selected_index < len(options):
+                submitted = str(options[r.selected_index])
+            if 0 <= quiz_item.correct_index < len(options):
+                correct_answer = str(options[quiz_item.correct_index])
+            if section and section.task_type == "sentence_completion":
+                correct_answer = ", ".join(str(value) for value in options)
+        prompt_text = (_prompt_text_for(section, item) if item is not None
+                       else quiz_item.stem if quiz_item is not None
+                       else writing_prompt.prompt if writing_prompt is not None
+                       else "")
         rows.append(ResponseMetrics(
             response_id=r.id,
+            section_id=r.section_id or "",
             position=r.position,
             task_type=section.task_type if section else "",
             # Safe to reveal now: the attempt is over and the score is fixed.
             # The same field choice as when it was served, so the report shows
             # the question that was asked rather than the answer that was wanted.
-            prompt_text=_prompt_text_for(section, item),
+            prompt_text=prompt_text,
+            submitted_answer=submitted,
+            correct_answer=correct_answer,
+            question_score=(round(sum(response_scores.values()) / len(response_scores), 1)
+                            if response_scores else None),
+            word_count=metrics.get("word_count"),
+            content_score=response_scores.get("content"),
             skipped=r.skipped,
             onset_ms=metrics.get("onset_ms"),
             speech_ms=metrics.get("speech_ms"),
@@ -2239,7 +2311,7 @@ async def _result(session: TenantSession, attempt: Attempt,
             pause_count=metrics.get("pause_count"),
             longest_pause_ms=metrics.get("longest_pause_ms"),
             quality=quality,
-            scores=per_response.get(r.id, {}),
+            scores=response_scores,
             ended_mid_speech=bool(metrics.get("ended_mid_speech")),
             ended_by=r.ended_by or "",
             completeness=metrics.get("completeness"),
@@ -2353,7 +2425,7 @@ async def _result(session: TenantSession, attempt: Attempt,
     for row in scores:
         if row.response_id is not None:
             counts[row.dimension] = counts.get(row.dimension, 0) + 1
-    scale_max = overall_row.scale_max if overall_row else 80.0
+    scale_max = overall_row.scale_max if overall_row else 100.0
 
     # The practice profiles this tenant can actually start. A dimension
     # whose practice is missing here cannot become the primary, and no

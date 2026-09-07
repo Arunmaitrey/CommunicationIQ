@@ -5,14 +5,17 @@ export type ThemeId =
   | "quadrant" | "quadrant-dark" | "minimal" | "midnight"
   | "enterprise" | "material" | "bento" | "gold" | "blue" | "royal-blue"
   | "glassmorphism" | "liquid-glass" | "ai-futurism" | "dark-console"
-  | "luxury" | "cyberpunk" | "campus";
+  | "luxury" | "cyberpunk" | "campus" | "aurora";
 
 // Grouped by intent: Professional = safe in front of a placement officer ·
 // Dark = what a student practising at 11pm in a hostel room will pick ·
-// Expressive = personality. Campus leads as the product default.
+// Expressive = personality. Aurora leads as the product default (2026-09):
+// the premium lavender/purple system, replacing Campus as the out-of-the-box
+// look. Campus stays selectable — nothing about it changed.
 export type ThemeGroup = "Professional" | "Dark" | "Expressive";
 
 export const THEMES: { id: ThemeId; label: string; group: ThemeGroup }[] = [
+  { id: "aurora", label: "Aurora", group: "Professional" },
   { id: "campus", label: "Campus", group: "Professional" },
   { id: "blue", label: "Ocean Blue", group: "Professional" },
   { id: "royal-blue", label: "Royal Blue", group: "Professional" },
@@ -34,7 +37,7 @@ export const THEMES: { id: ThemeId; label: string; group: ThemeGroup }[] = [
 
 export const THEME_GROUPS: ThemeGroup[] = ["Professional", "Dark", "Expressive"];
 
-const DEFAULT: ThemeId = "campus";
+const DEFAULT: ThemeId = "aurora";
 
 /** Where one person's theme is kept.
  *

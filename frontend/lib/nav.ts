@@ -1,8 +1,8 @@
 import {
-  Activity, BarChart3, Boxes, Building2, ClipboardList, CreditCard,
-  FileText, Flag, GraduationCap, Home, Layers, LineChart, Mic,
-  ScrollText, Send, Settings, ShieldCheck, Sparkles, Target, Upload, Users,
-  Wallet,
+  Activity, BarChart3, BookOpen, Boxes, Briefcase, Building2, CalendarClock,
+  ClipboardList, CreditCard, FileSearch, FileText, Flag, GraduationCap, Home,
+  Layers, LineChart, Mail, Mic, MessageSquare, ScrollText, Send, Settings,
+  ShieldCheck, Sparkles, Star, Target, Upload, Users, Wallet,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { Role } from "@/lib/api";
@@ -80,6 +80,10 @@ export const NAV: NavSection[] = [
       { href: "/practise", label: "Practise", icon: Target, roles: STUDENT, tint: TINT.teal },
       { href: "/tests", label: "Take a test", icon: Mic, roles: STUDENT, tint: TINT.violet },
       { href: "/my-progress", label: "My progress", icon: LineChart, roles: STUDENT, tint: TINT.sky },
+      // Writing reviews is pulled from nav for now: the page only ever reads
+      // a localStorage key (commiq.reviews.*) that nothing in the app writes
+      // to, so every real student would see a permanently empty screen. The
+      // route still resolves for anyone with the old link.
     ],
   },
   {
@@ -101,7 +105,9 @@ export const NAV: NavSection[] = [
       { href: "/tenant/readiness", label: "Readiness", icon: BarChart3, roles: TENANT, tint: TINT.emerald },
       { href: "/tenant/season", label: "Placement season", icon: ClipboardList, roles: TENANT, tint: TINT.orange },
       { href: "/tenant/profiles", label: "Assessments", icon: Layers, roles: TENANT, tint: TINT.violet },
+      { href: "/tenant/content", label: "Item bank", icon: BookOpen, roles: TENANT, tint: TINT.indigo },
       { href: "/tenant/invitations", label: "Invitations", icon: Send, roles: TENANT, tint: TINT.rose },
+      { href: "/tenant/results", label: "Exam results", icon: FileText, roles: TENANT, tint: TINT.slate },
     ],
   },
   {
@@ -114,7 +120,18 @@ export const NAV: NavSection[] = [
       { href: "/platform/gamification", label: "Game economy", icon: Sparkles, roles: PLATFORM, tint: TINT.amber },
       { href: "/platform/audit", label: "Audit log", icon: ScrollText, roles: PLATFORM, tint: TINT.slate },
       { href: "/platform/billing", label: "Billing", icon: CreditCard, roles: PLATFORM, tint: TINT.lime },
-      { href: "/platform/content", label: "Item bank", icon: FileText, roles: PLATFORM, milestone: "M6", tint: TINT.orange },
+      { href: "/platform/content", label: "Question bank", icon: FileText, roles: PLATFORM, tint: TINT.orange },
+      { href: "/platform/question-sets", label: "Question sets", icon: Layers, roles: PLATFORM, tint: TINT.teal },
+      { href: "/platform/sets", label: "Set assignment", icon: Layers, roles: PLATFORM, tint: TINT.indigo },
+      { href: "/platform/companies", label: "Companies", icon: Briefcase, roles: PLATFORM, tint: TINT.rose },
+      { href: "/platform/exam-tests", label: "Exam tests", icon: ClipboardList, roles: PLATFORM, tint: TINT.cyan },
+      { href: "/platform/exam-schedules", label: "Exam schedules", icon: CalendarClock, roles: PLATFORM, tint: TINT.amber },
+      { href: "/platform/results", label: "Results", icon: FileSearch, roles: PLATFORM, tint: TINT.sky },
+      { href: "/platform/reviews", label: "Reviews", icon: Star, roles: PLATFORM, tint: TINT.amber },
+      { href: "/platform/messages", label: "Messages", icon: MessageSquare, roles: PLATFORM, tint: TINT.violet },
+      { href: "/platform/email-templates", label: "Email templates", icon: Mail, roles: PLATFORM, tint: TINT.slate },
+      { href: "/platform/smtp", label: "SMTP", icon: Send, roles: PLATFORM, tint: TINT.emerald },
+      { href: "/platform/payments", label: "Payments", icon: CreditCard, roles: PLATFORM, tint: TINT.lime },
     ],
   },
   {

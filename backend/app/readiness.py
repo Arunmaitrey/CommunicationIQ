@@ -4,7 +4,7 @@ One definition, used by the trainer view, the cohort dashboard and every
 export, so a student is never "placement ready" on one screen and "needs
 training" on another.
 
-The bands are on the presentation scale (20–80, Versant-style). They are a
+The bands are on the product's native 0–100 scale. They are a
 *platform* judgement about practice progress — never a claim about a vendor
 score, and never presented as a guarantee (MOT-04, DIAG-10).
 """
@@ -15,8 +15,8 @@ NEEDS_TRAINING = "needs_training"
 HIGH_RISK = "high_risk"
 NOT_STARTED = "not_started"
 
-READY_AT = 60.0
-RISK_BELOW = 45.0
+READY_AT = 66.7
+RISK_BELOW = 41.7
 
 
 def band(overall: float | None) -> str:

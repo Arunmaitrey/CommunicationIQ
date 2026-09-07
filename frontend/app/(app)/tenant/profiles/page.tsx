@@ -310,7 +310,6 @@ function Profiles() {
  *  keep in step and two places to publish from. */
 const TEMPLATE_CODES = new Set([
   "svar_full_simulation",
-  "versant_style_speaking_listening",
   "versant_style_four_skills",
   "professional_english",
 ]);

@@ -69,7 +69,6 @@ async def score_recordings(name: str) -> int:
     """Run the engine over the study set and write engine_scores.csv."""
     from app.engine.providers.tier1.asr import FasterWhisperASR
     from app.engine.providers.tier1.accuracy import ReferenceMatchAccuracy
-    from app.engine.providers.tier1.fluency import FeatureFluency  # noqa: F401
     from app.engine.providers.tier0.fluency import FeatureFluency as Fluency
     from app.engine.providers.tier1.pronunciation import Wav2VecGOP
     from app.engine.providers.tier1.vad import SileroVAD
