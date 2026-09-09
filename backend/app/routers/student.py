@@ -12,10 +12,11 @@ from types import SimpleNamespace
 from beanie.operators import In
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from app import formats, skills
+from app import audit, formats, skills
 from app import deadline as app_deadline
 from app.deps import Principal, TenantModels, require_roles
-from app.schemas import (AttemptOut, ConsentOut, ConsentRequest, MasteryOut,
+from app.schemas import (AttemptOut, ConsentOut, ConsentRequest,
+                         ContactMessageRequest, MasteryOut,
                          SkillModuleOut, SkillsOverview,
                          ProfileSectionOut, QuestOut, SimulationProfileOut,
                          StreakOut, StudentHome, UserOut)
@@ -350,3 +351,29 @@ async def attempts(principal: Principal, models: TenantModels) -> list[AttemptOu
         )
         for a in rows
     ]
+
+
+@router.post("/contact", status_code=status.HTTP_201_CREATED)
+async def submit_contact_message(body: ContactMessageRequest,
+                                 principal: Principal) -> dict:
+    """A student's own way to reach the platform, separate from
+    /platform/messages -- that endpoint's own docstring claims "from any
+    user" but sits behind a router that requires platform scope, so a
+    student calling it gets a 403. This is the same write, on a router a
+    student can actually reach.
+    """
+    from app.models.platform import ContactMessage
+    msg = ContactMessage(
+        from_user_id=principal.user_id,
+        from_email=principal.email,
+        from_name=principal.full_name or "",
+        from_role=principal.role,
+        from_tenant_id=principal.tenant_id,
+        subject=body.subject,
+        body=body.body,
+        priority=body.priority,
+    )
+    await msg.create()
+    await audit.record(principal, "contact.submitted", entity="ContactMessage",
+                       entity_id=msg.id)
+    return {"id": msg.id, "ok": True}

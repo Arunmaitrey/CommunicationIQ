@@ -491,6 +491,8 @@ export const api = {
   studentAttempts: () => get<Attempt[]>("/student/attempts"),
   giveConsent: (scopes: string[]) => post<unknown>("/student/consent", { scopes }),
   getConsent: () => get<{ granted: string[] }>("/student/consent"),
+  submitContact: (body: { subject: string; body: string; priority: string }) =>
+    post<{ id: string; ok: boolean }>("/student/contact", body),
 
   trainerCohorts: () => get<Cohort[]>("/trainer/cohorts"),
   cohortReadiness: (id: string) => get<CohortReadiness>(`/trainer/cohorts/${id}/readiness`),

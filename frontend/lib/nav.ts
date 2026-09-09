@@ -84,6 +84,7 @@ export const NAV: NavSection[] = [
       // a localStorage key (commiq.reviews.*) that nothing in the app writes
       // to, so every real student would see a permanently empty screen. The
       // route still resolves for anyone with the old link.
+      { href: "/contact", label: "Contact us", icon: MessageSquare, roles: STUDENT, tint: TINT.cyan },
     ],
   },
   {
