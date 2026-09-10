@@ -150,6 +150,11 @@ ITEM_SOURCE: dict[str, tuple[str, str]] = {
     # composing kind it wants (240 real "email" WritingPrompts exist) rather
     # than through "email_writing"'s any-composing-kind alias.
     "email": ("writing_prompt", "email"),
+    # Same gap again: a section named after what it wants written rather
+    # than the internal "email_writing"/"email" aliases above. Every
+    # WritingPrompt tagged to a company is kind="email" (confirmed), so
+    # this points at the same real content those two already reach.
+    "writing_task": ("writing_prompt", "email"),
 }
 
 # WritingPrompt kinds that ask the candidate to compose something new.

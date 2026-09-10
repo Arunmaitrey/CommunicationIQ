@@ -245,10 +245,23 @@ def matches(item, pool: PoolFilter, source_kind: str = "task") -> bool:
         if pool.difficulty_max is not None and value > pool.difficulty_max:
             return False
 
+    # Company is deliberately not in this loop. Every other filter here means
+    # "narrow the general bank to this slice, and leave unclassified material
+    # in since most of the bank predates the column" -- exactly backwards for
+    # company. A company round wants *only* that employer's material: an
+    # unclassified or differently-tagged item passing through is not a
+    # narrower reading passage, it is a generic one dressed up as ADP's, and
+    # letting empty-company items ride along was confirmed to do exactly
+    # that (783 of 784 audio_comprehension items have no company, and every
+    # one of them matched "company=[ADP]" before this split existed).
+    if pool.company and "company" in allowed:
+        have = str(getattr(item, "company", "") or "").strip().lower()
+        if have not in pool.company:
+            return False
+
     for name, attribute in (("topics", "topic"), ("roles", "role"),
                             ("industries", "industry"),
-                            ("languages", "language"),
-                            ("company", "company")):
+                            ("languages", "language")):
         wanted = getattr(pool, name)
         if not wanted or name not in allowed:
             continue

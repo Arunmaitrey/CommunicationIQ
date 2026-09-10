@@ -299,17 +299,30 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
     # whether the microphone works at all. Scoring that measures the software's
     # unfamiliarity rather than their English. One item, from the first
     # section, marked so nothing it produces counts.
+    # Drawn up front, not via a second independent _pick_items call, and
+    # sized one larger than the section needs: two separate random.sample
+    # draws from the same (often small, company-specific) pool can pick the
+    # same item for both the warm-up and a real, scored slot -- a candidate
+    # was handed the identical Read Aloud sentence twice in one attempt this
+    # way. With room for a distinct extra item the warm-up gets one; without
+    # it, skipping the warm-up beats repeating a scored item.
+    reserved_first_items: list[TaskItem] | None = None
     if getattr(profile, "practice_item", False) and sections:
         first = min(sections, key=lambda s: s.position)
         kind, key = app_sections.source_of(first.task_type)
         if kind == "task":
-            for item in await _pick_items(session, first, principal.user_id,
-                                          task_type=key):
+            pool = list((await session.execute(
+                select(TaskItem).where(TaskItem.task_type == key,
+                                       TaskItem.status == "published")
+            )).scalars().all())
+            pool = app_selection.eligible(pool, _pool_of(first), "task")
+            if len(pool) > first.item_count:
+                drawn = random.sample(pool, first.item_count + 1)
+                practice_item, reserved_first_items = drawn[0], drawn[1:]
                 session.add(Response(
                     attempt_id=attempt.id, section_id=first.id,
-                    item_id=item.id, position=position, is_practice=True))
+                    item_id=practice_item.id, position=position, is_practice=True))
                 position += 1
-                break
 
     for section in sorted(sections, key=lambda s: s.position):
         # Where the items come from is a property of the task type, not of
@@ -320,8 +333,11 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
         kind, key = app_sections.source_of(section.task_type)
 
         if kind == "task":
-            for item in await _pick_items(session, section, principal.user_id,
-                                          task_type=key):
+            items = (reserved_first_items if reserved_first_items is not None
+                     and section.id == first.id
+                     else await _pick_items(session, section, principal.user_id,
+                                            task_type=key))
+            for item in items:
                 session.add(Response(
                     attempt_id=attempt.id, section_id=section.id,
                     item_id=item.id, position=position,
@@ -440,21 +456,32 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
     # event -- the exact thing whole-passage selection exists to prevent. So a
     # difficulty filter here means "passages whose questions are all in
     # range", applied before the subset-sum runs.
+    # A question with no real passage_id is not one big shared passage with
+    # every other orphaned question -- it is its own standalone item, and
+    # grouping them together produced exactly this: 63 unrelated ADP
+    # questions collapsed into a single fake "passage" too large for any
+    # 10-item section to select, while two genuine 1-question passages were
+    # all that remained pickable. Each gets its own synthetic key instead,
+    # so it is chosen (or not) on its own, the way an ungrouped question
+    # already is everywhere else in this function.
+    def _passage_key(item) -> str:
+        return item.passage_id or f"_standalone_{item.id}"
+
     pool_filter = _pool_of(section)
     if pool_filter.configured:
         by_id: dict[str, list] = {}
         for item in pool:
-            by_id.setdefault(item.passage_id or "", []).append(item)
+            by_id.setdefault(_passage_key(item), []).append(item)
         keep = {pid for pid, group in by_id.items()
                 if all(app_selection.matches(q, pool_filter, "quiz")
                        for q in group)}
-        pool = [i for i in pool if (i.passage_id or "") in keep]
+        pool = [i for i in pool if _passage_key(i) in keep]
         if not pool:
             return []
 
     by_passage: dict[str, list] = {}
     for item in pool:
-        by_passage.setdefault(item.passage_id or "", []).append(item)
+        by_passage.setdefault(_passage_key(item), []).append(item)
 
     passages = list(by_passage)
     random.shuffle(passages)
