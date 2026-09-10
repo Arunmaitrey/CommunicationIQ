@@ -396,6 +396,31 @@ class ExamTest(Document):
         name = "exam_tests"
 
 
+class ScheduledExam(Document):
+    """An ExamTest opened to one or more institutions for a fixed window.
+
+    Referenced throughout platform_admin.py/platform_writes.py (the
+    exam-schedules CRUD and the student-facing availability check) but never
+    defined -- every import of it failed at module load, which took the
+    whole app down before a single request could be served.
+    """
+    id: StrId = Field(default_factory=_uuid, alias="_id")
+    exam_test_id: str = ""
+    profile_id: str = ""
+    name: str = ""
+    tenant_ids: list[str] = Field(default_factory=list)  # empty = every institution
+    starts_at: datetime = Field(default_factory=_now)
+    ends_at: datetime = Field(default_factory=_now)
+    max_attempts: int = 1
+    is_active: bool = True
+    created_by: str = ""
+    created_at: datetime = Field(default_factory=_now)
+    updated_at: datetime = Field(default_factory=_now)
+
+    class Settings:
+        name = "exam_schedules"
+
+
 class QuestionSet(Document):
     """A set of exactly 10 questions from the same module."""
     id: StrId = Field(default_factory=_uuid, alias="_id")

@@ -153,6 +153,10 @@ ITEM_SOURCE: dict[str, tuple[str, str]] = {
     # Writing tasks - draw from WritingPrompt bank
     "email": ("writing_prompt", "email"),
     "email_writing": ("writing_prompt", "email"),
+    # A section named after what it wants written rather than either of the
+    # two aliases above. Every WritingPrompt tagged to a company is
+    # kind="email" (confirmed), so this points at the same real content.
+    "writing_task": ("writing_prompt", "email"),
     # One typed word into a gap. Its own quiz category rather than a writing
     # prompt: the item is a sentence with a hole, not a task to compose.
     "sentence_completion": ("quiz", "sentence_completion"),

@@ -1916,6 +1916,30 @@ class ExamTestRequest(BaseModel):
     question_ids: dict = Field(default_factory=dict)
 
 
+class ScheduledExamRequest(BaseModel):
+    exam_test_id: str = Field(min_length=1)
+    tenant_ids: list[str] = Field(default_factory=list)  # empty = every institution
+    starts_at: datetime
+    ends_at: datetime
+    max_attempts: int = Field(default=1, ge=1, le=20)
+    is_active: bool = True
+
+
+class ScheduledExamOut(BaseModel):
+    id: str
+    exam_test_id: str
+    profile_id: str
+    name: str
+    tenant_ids: list[str]
+    starts_at: datetime
+    ends_at: datetime
+    max_attempts: int
+    is_active: bool
+    created_by: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class ExamTestOut(BaseModel):
     id: str
     name: str

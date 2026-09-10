@@ -23,6 +23,17 @@ class Settings(BaseSettings):
     mongo_uri: str = "mongodb://localhost:27017/CommunicationIQ"
     mongo_server_selection_timeout_ms: int = 5000
 
+    # Read by app.engine.freeze.fingerprint() to hash into the engine
+    # version -- swapping model or compute type changes every transcript and
+    # therefore every score, so the freeze needs to know about it. Not read
+    # by the ASR provider itself (tier1/asr.py hardcodes "small.en"/"int8"),
+    # but the freeze hash still needs a value, and this documents what the
+    # provider is actually running rather than the hash silently going
+    # stale, or crashing every score with an AttributeError as it did before
+    # these existed.
+    whisper_model: str = "small.en"
+    whisper_compute_type: str = "int8"
+
     @property
     def control_db_name(self) -> str:
         """The control-plane database name, taken from the URI path.

@@ -66,12 +66,23 @@ async def score_pending(tenant, providers, tenant_id: str | None,
     whether the candidate understood. ``_unscored_reasons`` in the attempts
     router notices the missing dimension and says so.
     """
-    rows = list((await tenant.execute(
-        select(Response, ProfileSection.task_type)
-        .join(ProfileSection, ProfileSection.id == Response.section_id)
-        .where(Response.attempt_id == attempt_id,
-               ProfileSection.task_type.in_(sorted(SCORED_HERE)))
-    )).all())
+    # No .join(): the query shim over Beanie/MongoDB never implemented one.
+    # Fetch the matching sections first, then the responses that point at
+    # them, and pair the two in Python instead.
+    sections = list((await tenant.execute(
+        select(ProfileSection).where(
+            ProfileSection.task_type.in_(sorted(SCORED_HERE)))
+    )).scalars().all())
+    task_type_by_section = {s.id: s.task_type for s in sections}
+    if not task_type_by_section:
+        return 0
+
+    responses = list((await tenant.execute(
+        select(Response).where(
+            Response.attempt_id == attempt_id,
+            Response.section_id.in_(list(task_type_by_section)))
+    )).scalars().all())
+    rows = [(r, task_type_by_section[r.section_id]) for r in responses]
     if not rows:
         return 0
 

@@ -543,14 +543,17 @@ async def pending_responses(tenant: Session, attempt_id: str) -> list[str]:
     if not responses:
         return []
     ids = [r.id for r in responses]
-    audible = {a.response_id for a in (await tenant.execute(
+    # A single-column select's .scalars().all() already yields the raw
+    # response_id values, not row objects -- re-reading .response_id off
+    # each one raised AttributeError on every submit that reached here.
+    audible = set((await tenant.execute(
         select(ResponseAudio.response_id).where(
             ResponseAudio.response_id.in_(ids),
             ResponseAudio.deleted_at.is_(None))
-    )).scalars().all()}
-    featured = {f.response_id for f in (await tenant.execute(
+    )).scalars().all())
+    featured = set((await tenant.execute(
         select(FeatureRecord.response_id).where(FeatureRecord.response_id.in_(ids))
-    )).scalars().all()}
+    )).scalars().all())
     return [r.id for r in responses
             if r.id in audible and r.id not in featured]
 

@@ -2711,7 +2711,8 @@ from app.config import settings
 from app.invitations import CANDIDATE_ROLE
 from app.db import ensure_platform_models, ensure_tenant_models, func, select, Session
 from app import formats
-from app.deps import Principal, PlatformSession, TenantSession, require_roles
+from app.deps import (Principal, PlatformSession, TenantModels, TenantSession,
+                      require_roles)
 from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
 from app import deadline as app_deadline
 from app import reconstruction as app_reconstruction
@@ -2805,7 +2806,7 @@ async def _score_in_background(slug: str, tenant_id: str | None,
     except Exception as exc:  # noqa: BLE001
         # Recoverable: submit retries anything still pending, and
         # score_response is idempotent so the retry is safe.
-        log.warning("background scoring failed for response %s: %s", response_id, exc)
+        log.exception("background scoring failed for response %s: %s", response_id, exc)
 
 
 async def _recording_still_welcome(session: TenantSession,
@@ -2995,18 +2996,37 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
     # whether the microphone works at all. Scoring that measures the software's
     # unfamiliarity rather than their English. One item, from the first
     # section, marked so nothing it produces counts.
+    # Drawn up front, not via a second independent _pick_items call, and
+    # sized one larger than the section needs: two separate random.sample
+    # draws from the same (often small, company-specific) pool can pick the
+    # same item for both the warm-up and a real, scored slot -- a candidate
+    # was handed the identical Read Aloud sentence twice in one attempt this
+    # way. With room for a distinct extra item the warm-up gets one; without
+    # it, skipping the warm-up beats repeating a scored item. Falls back to
+    # plain random sampling rather than _pick_items' adaptive/IRT path since
+    # freshly authored, uncalibrated company content is what this pool
+    # actually is in practice.
+    reserved_first_items: list[TaskItem] | None = None
     if getattr(profile, "practice_item", False) and sections:
         first = min(sections, key=lambda s: s.position)
         kind, key = app_sections.source_of(first.task_type)
         if kind == "task":
-            for item in await _pick_items(session, first, principal.user_id,
-                                          task_type=key,
-                                          company=getattr(profile, "company", "")):
+            pool = list((await session.execute(
+                select(TaskItem).where(TaskItem.task_type == key,
+                                       TaskItem.status == "published")
+            )).scalars().all())
+            pool = app_selection.eligible(pool, _pool_of(first), "task")
+            if principal.user_id:
+                used = await _previously_used_ids(session, principal.user_id,
+                                                   TaskItem, "item_id")
+                pool = _deduplicate(pool, used, "id")
+            if len(pool) > first.item_count:
+                drawn = random.sample(pool, first.item_count + 1)
+                practice_item, reserved_first_items = drawn[0], drawn[1:]
                 session.add(Response(
                     attempt_id=attempt.id, section_id=first.id,
-                    item_id=item.id, position=position, is_practice=True))
+                    item_id=practice_item.id, position=position, is_practice=True))
                 position += 1
-                break
 
     for section in sorted(sections, key=lambda s: s.position):
         # Where the items come from is a property of the task type, not of
@@ -3017,9 +3037,12 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
         kind, key = app_sections.source_of(section.task_type)
 
         if kind == "task":
-            for item in await _pick_items(session, section, principal.user_id,
-                                          task_type=key,
-                                          company=getattr(profile, "company", "")):
+            items = (reserved_first_items if reserved_first_items is not None
+                     and section.id == first.id
+                     else await _pick_items(session, section, principal.user_id,
+                                            task_type=key,
+                                            company=getattr(profile, "company", "")))
+            for item in items:
                 session.add(Response(
                     attempt_id=attempt.id, section_id=section.id,
                     item_id=item.id, position=position,
@@ -3081,12 +3104,18 @@ async def _previously_used_ids(session: TenantSession, user_id: str,
     """
     from app.models.tenant import Response, Attempt
     try:
-        resp = await session.execute(
-            select(Response.item_id, Response.quiz_item_id, Response.prompt_id)
-            .join(Attempt, Attempt.id == Response.attempt_id)
-            .where(Attempt.user_id == user_id, Attempt.status == "scored")
-        )
-        rows = resp.all()
+        # No .join(): the query shim over Beanie/MongoDB never implemented
+        # one -- this used to raise on every call and return set() from the
+        # except below, silently disabling cross-attempt deduplication.
+        scored_attempt_ids = [a.id for a in (await session.execute(
+            select(Attempt).where(Attempt.user_id == user_id,
+                                  Attempt.status == "scored")
+        )).scalars().all()]
+        if not scored_attempt_ids:
+            return set()
+        rows = (await session.execute(
+            select(Response).where(Response.attempt_id.in_(scored_attempt_ids))
+        )).scalars().all()
         ids = set()
         for row in rows:
             val = getattr(row, id_field, None)
@@ -3210,21 +3239,31 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
     # event -- the exact thing whole-passage selection exists to prevent. So a
     # difficulty filter here means "passages whose questions are all in
     # range", applied before the subset-sum runs.
+    # A question with no real passage_id is not one big shared passage with
+    # every other orphaned question -- it is its own standalone item.
+    # Grouping them together on the shared key "" produced exactly this: 63
+    # unrelated questions collapsed into a single fake "passage" too large
+    # for any 10-item section to select. Each gets its own synthetic key
+    # instead, so it is chosen (or not) on its own, the way an ungrouped
+    # question already is everywhere else in this function.
+    def _passage_key(item) -> str:
+        return item.passage_id or f"_standalone_{item.id}"
+
     pool_filter = _pool_of(section)
     if pool_filter.configured:
         by_id: dict[str, list] = {}
         for item in pool:
-            by_id.setdefault(item.passage_id or "", []).append(item)
+            by_id.setdefault(_passage_key(item), []).append(item)
         keep = {pid for pid, group in by_id.items()
                 if all(app_selection.matches(q, pool_filter, "quiz")
                        for q in group)}
-        pool = [i for i in pool if (i.passage_id or "") in keep]
+        pool = [i for i in pool if _passage_key(i) in keep]
         if not pool:
             return []
 
     by_passage: dict[str, list] = {}
     for item in pool:
-        by_passage.setdefault(item.passage_id or "", []).append(item)
+        by_passage.setdefault(_passage_key(item), []).append(item)
 
     passages = list(by_passage)
     random.shuffle(passages)
@@ -3319,13 +3358,18 @@ async def _pick_items(session: TenantSession, section: ProfileSection,
 
 async def _ability_of(session: TenantSession, user_id: str) -> float:
     """A working ability estimate from what this student has already scored."""
+    # No .join(): the query shim over Beanie/MongoDB never implemented one.
+    user_attempt_ids = [a.id for a in (await session.execute(
+        select(Attempt).where(Attempt.user_id == user_id)
+    )).scalars().all()]
+    if not user_attempt_ids:
+        return irt.ability_from_scores([])
     scores = list((await session.execute(
-        select(ScoreRecord.score)
-        .join(Attempt, Attempt.id == ScoreRecord.attempt_id)
-        .where(Attempt.user_id == user_id,
-               ScoreRecord.dimension == "overall",
-               ScoreRecord.response_id.is_(None),
-               ScoreRecord.is_shadow.is_(False))
+        select(ScoreRecord.score).where(
+            ScoreRecord.attempt_id.in_(user_attempt_ids),
+            ScoreRecord.dimension == "overall",
+            ScoreRecord.response_id.is_(None),
+            ScoreRecord.is_shadow.is_(False))
         .order_by(ScoreRecord.created_at.desc()).limit(5)
     )).scalars().all())
     return irt.ability_from_scores(scores)
@@ -4264,7 +4308,7 @@ async def skip_response(attempt_id: str, response_id: str, principal: Principal,
 
 @router.post("/{attempt_id}/submit", response_model=AttemptResult)
 async def submit(attempt_id: str, principal: Principal, session: TenantSession,
-                 platform: PlatformSession,
+                 platform: PlatformSession, models: TenantModels,
                  background: BackgroundTasks,
                  request: Request) -> AttemptResult:
     """Close the attempt and compose its score.
@@ -4328,7 +4372,7 @@ async def submit(attempt_id: str, principal: Principal, session: TenantSession,
         log.warning("content scoring failed for attempt %s: %s", attempt_id, exc)
 
     outcome = await finalise_attempt(session, attempt_id)
-    await _run_game_hook(session, platform, principal, attempt, outcome)
+    await _run_game_hook(session, models, principal, attempt, outcome)
     attempt = (await session.execute(
         select(Attempt).where(Attempt.id == attempt_id)
     )).scalars().first() or attempt
@@ -4374,7 +4418,7 @@ async def record_proctor_event(attempt_id: str, payload: ProctorEventIn,
     await session.commit()
 
 
-async def _run_game_hook(session, platform, principal, attempt, outcome) -> None:
+async def _run_game_hook(session, models, principal, attempt, outcome) -> None:
     """Award XP, advance the quest, touch the streak — after scoring, never before.
 
     The reward follows a measured result rather than a button press: that is
@@ -4383,18 +4427,24 @@ async def _run_game_hook(session, platform, principal, attempt, outcome) -> None
     their report, so it is logged and swallowed.
     """
     try:
-        config = await game.config_for(platform, principal.tenant_id)
+        config = await game.config_for(principal.tenant_id)
 
-        previous = (await session.execute(
-            select(ScoreRecord.score)
-            .join(Attempt, Attempt.id == ScoreRecord.attempt_id)
-            .where(Attempt.user_id == principal.user_id,
-                   Attempt.profile_id == attempt.profile_id,
-                   Attempt.id != attempt.id,
-                   ScoreRecord.dimension == "overall",
-                   ScoreRecord.response_id.is_(None))
-            .order_by(ScoreRecord.score.desc()).limit(1)
-        )).scalars().first()
+        # No .join(): the query shim over Beanie/MongoDB never implemented
+        # one. Two plain queries instead of one joined query.
+        other_attempt_ids = [a.id for a in (await session.execute(
+            select(Attempt).where(Attempt.user_id == principal.user_id,
+                                  Attempt.profile_id == attempt.profile_id,
+                                  Attempt.id != attempt.id)
+        )).scalars().all()]
+        previous = None
+        if other_attempt_ids:
+            previous = (await session.execute(
+                select(ScoreRecord.score).where(
+                    ScoreRecord.attempt_id.in_(other_attempt_ids),
+                    ScoreRecord.dimension == "overall",
+                    ScoreRecord.response_id.is_(None))
+                .order_by(ScoreRecord.score.desc()).limit(1)
+            )).scalars().first()
 
         sections = list((await session.execute(
             select(ProfileSection.task_type)
@@ -4405,8 +4455,11 @@ async def _run_game_hook(session, platform, principal, attempt, outcome) -> None
         full_simulation = bool(profile and not profile.is_baseline
                                and len(sections) >= 3)
 
+        # `models` (the TenantModels namespace), not `session` (the query
+        # executor): on_attempt_scored reaches for models.SkillMastery, which
+        # a Session object does not have.
         await game.on_attempt_scored(
-            session, config, principal.user_id, attempt.id,
+            models, config, principal.user_id, attempt.id,
             dimensions=outcome.dimensions,
             is_full_simulation=full_simulation,
             previous_best=previous,
@@ -5202,16 +5255,21 @@ async def _result(session: TenantSession, attempt: Attempt,
                                             candidate.profile_id))
                 linked = True
         if source is None:
-            source = (await session.execute(
-                select(Attempt, SimulationProfile)
-                .join(SimulationProfile,
-                      SimulationProfile.id == Attempt.profile_id)
-                .where(Attempt.user_id == attempt.user_id,
-                       Attempt.id != attempt.id,
-                       Attempt.status == "scored",
-                       SimulationProfile.style != "drill")
-                .order_by(Attempt.scored_at.desc()).limit(1)
-            )).first()
+            # No .join(): the query shim over Beanie/MongoDB never
+            # implemented one. Walk candidate attempts newest-first and stop
+            # at the first whose profile isn't a drill, instead of joining.
+            candidates = list((await session.execute(
+                select(Attempt).where(Attempt.user_id == attempt.user_id,
+                                      Attempt.id != attempt.id,
+                                      Attempt.status == "scored")
+                .order_by(Attempt.scored_at.desc())
+            )).scalars().all())
+            for candidate_attempt in candidates:
+                candidate_profile = await session.get(
+                    SimulationProfile, candidate_attempt.profile_id)
+                if candidate_profile is not None and candidate_profile.style != "drill":
+                    source = (candidate_attempt, candidate_profile)
+                    break
 
         assessment_score = None
         assessment_profile_id = ""

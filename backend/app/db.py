@@ -13,6 +13,7 @@ import asyncio
 from types import SimpleNamespace
 from typing import Any
 
+import certifi
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from beanie import Document, init_beanie
 
@@ -21,7 +22,13 @@ from app.config import settings
 
 client = AsyncIOMotorClient(
     settings.mongo_uri, uuidRepresentation="standard",
-    serverSelectionTimeoutMS=15000)
+    serverSelectionTimeoutMS=15000,
+    # This Python build's default SSL context ships with no CA certs loaded
+    # (a known python.org-framework-build gap on macOS), which makes Atlas's
+    # TLS handshake fail with "unable to get local issuer certificate" even
+    # though the connection itself is fine. Pointing at certifi's bundle
+    # sidesteps the system trust store entirely.
+    tlsCAFile=certifi.where())
 
 CONTROL_DB_NAME = settings.control_db_name
 

@@ -12,7 +12,10 @@ from pathlib import Path
 
 import numpy as np
 
-from app.engine.contracts.types import ProviderMeta, TranscriptResult, WordTiming
+from app.engine.audio import decode_wav, resample_to
+from app.engine.contracts.types import (AudioRef, ProviderMeta,
+                                        TranscriptResult, WordTiming)
+from app.storage import get_storage
 
 log = logging.getLogger(__name__)
 
@@ -41,13 +44,22 @@ def _get_model():
     return _model
 
 
-def load_samples(audio_bytes: bytes) -> np.ndarray:
-    """Load audio bytes and return float32 samples at 16kHz mono.
+def load_samples(storage_key: str) -> np.ndarray:
+    """Read a stored recording as 16 kHz mono float32 samples.
 
-    Accepts WAV (PCM s16le) format. Returns a numpy array of float32
-    samples normalised to [-1, 1].
+    Goes through the Storage contract rather than the filesystem, so the
+    same provider works unchanged once recordings live in object storage.
+    ``provider_registry`` names this module ``FasterWhisperASR``, a class
+    that never existed here -- every ASR call failed to load, and every
+    dimension downstream of a transcript (accuracy, disfluency, grammar,
+    content) was unscored on every attempt as a result.
     """
-    # Try WAV parsing first
+    wave = decode_wav(get_storage().get(storage_key))
+    return resample_to(wave, SAMPLE_RATE).samples.astype(np.float32)
+
+
+def _decode_bytes(audio_bytes: bytes) -> np.ndarray:
+    """Load raw audio bytes directly (WAV or PCM s16le), not via storage."""
     if audio_bytes[:4] == b"RIFF":
         return _parse_wav(audio_bytes)
 
@@ -82,16 +94,26 @@ def _parse_wav(data: bytes) -> np.ndarray:
         return samples
 
 
-async def transcribe(audio_bytes: bytes, *, language: str = "en",
-                     hint_text: str = "") -> TranscriptResult:
-    """Transcribe audio using faster-whisper with word-level timestamps.
+class FasterWhisperASR:
+    """Capability: ``asr``."""
 
-    Returns a TranscriptResult with the full text, per-word timings,
-    and overall confidence.
-    """
+    contract_version = "1.0"
+    provider_key = "faster_whisper"
+    version = "0.1.0"
+
+    async def transcribe(self, audio: AudioRef, *, language: str = "en",
+                         hint_text: str = "") -> TranscriptResult:
+        # hint_text is deliberately ignored: priming the model with the
+        # reference for a scripted task would make every score a
+        # measurement of our own prompt rather than of the candidate.
+        samples = load_samples(audio.storage_key)
+        return _transcribe_samples(samples, language=language)
+
+
+def _transcribe_samples(samples: np.ndarray, *, language: str = "en") -> TranscriptResult:
+    """Run the model over already-decoded samples and shape the result."""
     try:
         model = _get_model()
-        samples = load_samples(audio_bytes)
 
         if len(samples) < SAMPLE_RATE * 0.5:
             # Less than 0.5 seconds — too short to transcribe meaningfully

@@ -96,11 +96,11 @@ def band_of(difficulty: float | None) -> str:
 # TaskItem-only because that is the only table that carries them.
 FILTERS_FOR: dict[str, frozenset[str]] = {
     "task": frozenset({"difficulty", "topics", "roles", "industries",
-                       "languages"}),
+                       "languages", "company"}),
     # `topics` on a quiz item is its sub-category (grammar: verb_forms,
     # tenses, articles, prepositions). Roles/industries stay TaskItem-only.
-    "quiz": frozenset({"difficulty", "topics"}),
-    "writing_prompt": frozenset({"difficulty"}),
+    "quiz": frozenset({"difficulty", "topics", "company"}),
+    "writing_prompt": frozenset({"difficulty", "company"}),
 }
 
 # Every filter this module knows about, so an unknown key in a stored
@@ -124,6 +124,11 @@ class PoolFilter:
     roles: tuple[str, ...] = ()
     industries: tuple[str, ...] = ()
     languages: tuple[str, ...] = ()
+    # Any-of, but NOT the same "unclassified passes through" rule as the
+    # four filters above -- see the strict block in matches(). A company
+    # round wants only that employer's material, so an item with no company
+    # set is excluded rather than waved through.
+    company: tuple[str, ...] = ()
     # How many eligible items the section needs before it is worth running.
     #
     # A floor, not a cap. A bank exactly the size of a section serves the same
@@ -138,7 +143,8 @@ class PoolFilter:
     @property
     def configured(self) -> bool:
         return bool(self.topics or self.roles or self.industries
-                    or self.languages or self.mix or self.min_pool
+                    or self.languages or self.company or self.mix
+                    or self.min_pool
                     or self.difficulty_min is not None
                     or self.difficulty_max is not None)
 
@@ -148,7 +154,7 @@ class PoolFilter:
         asked: list[str] = []
         if self.difficulty_min is not None or self.difficulty_max is not None:
             asked.append("difficulty")
-        for name in ("topics", "roles", "industries", "languages"):
+        for name in ("topics", "roles", "industries", "languages", "company"):
             if getattr(self, name):
                 asked.append(name)
         return [name for name in asked if name not in allowed]
@@ -188,6 +194,7 @@ def from_dict(raw: dict | None) -> PoolFilter:
                         else float(data["difficulty_max"])),
         topics=strings("topics"), roles=strings("roles"),
         industries=strings("industries"), languages=strings("languages"),
+        company=strings("company"),
         min_pool=int(data.get("min_pool") or 0),
         mix=mix,
     )
@@ -200,7 +207,7 @@ def to_dict(pool: PoolFilter) -> dict:
         out["difficulty_min"] = pool.difficulty_min
     if pool.difficulty_max is not None:
         out["difficulty_max"] = pool.difficulty_max
-    for name in ("topics", "roles", "industries", "languages"):
+    for name in ("topics", "roles", "industries", "languages", "company"):
         value = getattr(pool, name)
         if value:
             out[name] = list(value)
@@ -235,6 +242,17 @@ def matches(item, pool: PoolFilter, source_kind: str = "task") -> bool:
         if pool.difficulty_min is not None and value < pool.difficulty_min:
             return False
         if pool.difficulty_max is not None and value > pool.difficulty_max:
+            return False
+
+    # Company is deliberately not in the loop below. Every filter there means
+    # "narrow the general bank to this slice, and leave unclassified material
+    # in since most of the bank predates the column" -- exactly backwards for
+    # company. A company round wants *only* that employer's material: an
+    # unclassified or differently-tagged item passing through is not a
+    # narrower reading passage, it is a generic one dressed up as ADP's.
+    if pool.company and "company" in allowed:
+        have = str(getattr(item, "company", "") or "").strip().lower()
+        if have not in pool.company:
             return False
 
     for name, attribute in (("topics", "topic"), ("roles", "role"),
