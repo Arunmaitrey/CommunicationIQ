@@ -648,10 +648,23 @@ async def update_mastery(tenant: Session, user_id: str,
         if skill is None:
             continue
 
-        row = (await tenant.execute(
+        # Not scalar_one_or_none(): two background scoring tasks for the same
+        # user's fluency can both see "no row yet" and both insert, since
+        # this check-then-insert isn't atomic and there is no unique index on
+        # (user_id, skill) to stop it. That race is what actually produced a
+        # duplicate here (two "fluency" rows 100ms apart) and turned every
+        # later submit for this user into an unhandled MultipleResultsFound,
+        # which the browser saw as a bare connection failure. Tolerate it:
+        # keep the most recently updated row, and quietly retire the rest.
+        rows = (await tenant.execute(
             select(SkillMastery).where(SkillMastery.user_id == user_id,
                                        SkillMastery.skill == skill)
-        )).scalar_one_or_none()
+        )).scalars().all()
+        row = None
+        if rows:
+            row, *extra = sorted(rows, key=lambda r: r.updated_at, reverse=True)
+            for stray in extra:
+                await stray.delete()
 
         if row is None:
             prior = bkt.parameters_for(skill).p_init
