@@ -96,10 +96,10 @@ def band_of(difficulty: float | None) -> str:
 # TaskItem-only because that is the only table that carries them.
 FILTERS_FOR: dict[str, frozenset[str]] = {
     "task": frozenset({"difficulty", "topics", "roles", "industries",
-                       "languages"}),
+                       "languages", "company"}),
     # `topics` on a quiz item is its sub-category (grammar: verb_forms,
     # tenses, articles, prepositions). Roles/industries stay TaskItem-only.
-    "quiz": frozenset({"difficulty", "topics"}),
+    "quiz": frozenset({"difficulty", "topics", "company"}),
     "writing_prompt": frozenset({"difficulty"}),
 }
 
@@ -124,6 +124,13 @@ class PoolFilter:
     roles: tuple[str, ...] = ()
     industries: tuple[str, ...] = ()
     languages: tuple[str, ...] = ()
+    # Any-of, same rule as the others: an item with no company set is
+    # unclassified and eligible everywhere. A section that wants only the
+    # company-neutral pool (e.g. Professional English, which is not styled
+    # after any one employer) asks for company=[""] explicitly -- ""
+    # matches an unclassified item, so this reads the same as every other
+    # filter here rather than needing a special case.
+    company: tuple[str, ...] = ()
     # How many eligible items the section needs before it is worth running.
     #
     # A floor, not a cap. A bank exactly the size of a section serves the same
@@ -138,7 +145,7 @@ class PoolFilter:
     @property
     def configured(self) -> bool:
         return bool(self.topics or self.roles or self.industries
-                    or self.languages or self.mix or self.min_pool
+                    or self.languages or self.company or self.mix or self.min_pool
                     or self.difficulty_min is not None
                     or self.difficulty_max is not None)
 
@@ -148,7 +155,7 @@ class PoolFilter:
         asked: list[str] = []
         if self.difficulty_min is not None or self.difficulty_max is not None:
             asked.append("difficulty")
-        for name in ("topics", "roles", "industries", "languages"):
+        for name in ("topics", "roles", "industries", "languages", "company"):
             if getattr(self, name):
                 asked.append(name)
         return [name for name in asked if name not in allowed]
@@ -188,6 +195,7 @@ def from_dict(raw: dict | None) -> PoolFilter:
                         else float(data["difficulty_max"])),
         topics=strings("topics"), roles=strings("roles"),
         industries=strings("industries"), languages=strings("languages"),
+        company=strings("company"),
         min_pool=int(data.get("min_pool") or 0),
         mix=mix,
     )
@@ -200,7 +208,7 @@ def to_dict(pool: PoolFilter) -> dict:
         out["difficulty_min"] = pool.difficulty_min
     if pool.difficulty_max is not None:
         out["difficulty_max"] = pool.difficulty_max
-    for name in ("topics", "roles", "industries", "languages"):
+    for name in ("topics", "roles", "industries", "languages", "company"):
         value = getattr(pool, name)
         if value:
             out[name] = list(value)
@@ -239,7 +247,8 @@ def matches(item, pool: PoolFilter, source_kind: str = "task") -> bool:
 
     for name, attribute in (("topics", "topic"), ("roles", "role"),
                             ("industries", "industry"),
-                            ("languages", "language")):
+                            ("languages", "language"),
+                            ("company", "company")):
         wanted = getattr(pool, name)
         if not wanted or name not in allowed:
             continue

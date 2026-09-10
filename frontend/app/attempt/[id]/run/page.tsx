@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Headphones, Loader2, Mic, Square } from "lucide-react";
+import { CheckCircle2, Circle, Headphones, Loader2, Mic, Square } from "lucide-react";
 import { AiNarrator } from "@/components/brand/AiNarrator";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useRole } from "@/components/RoleProvider";
@@ -1592,13 +1592,17 @@ function Runner() {
                       <button
                         key={n}
                         onClick={() => setChoice(n)}
-                        className="w-full text-left ds-inset p-3 text-sm ds-focus transition-colors"
+                        aria-pressed={choice === n}
+                        className="w-full flex items-center gap-3 text-left ds-inset p-3 text-sm ds-focus transition-colors"
                         style={choice === n ? {
                           borderColor: "var(--primary)",
                           background: "color-mix(in srgb, var(--primary) 10%, transparent)",
                         } : undefined}
                       >
-                        {option}
+                        {choice === n
+                          ? <CheckCircle2 size={18} className="shrink-0" style={{ color: "var(--primary)" }} />
+                          : <Circle size={18} className="shrink-0 text-muted" />}
+                        <span className="flex-1">{option}</span>
                       </button>
                     ))}
                   </div>

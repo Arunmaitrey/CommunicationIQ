@@ -132,6 +132,24 @@ ITEM_SOURCE: dict[str, tuple[str, str]] = {
     # exactly the shape WritingPrompt already stores -- but its own kind,
     # because it is not a task to compose and must never be served as one.
     "passage_reconstruction": ("writing_prompt", "reconstruction"),
+    # A profile section can name its task type after the quiz category
+    # directly rather than through a differently-named alias (contrast
+    # "listening_comprehension" above, which points at this same
+    # "audio_comprehension" category under a different section-facing name).
+    # Without an entry here, a section using one of these three fell through
+    # to source_of's ("task", task_type) default -- and no TaskItem has ever
+    # had task_type "grammar", "vocabulary" or "audio_comprehension", so
+    # every section built with one of these names selected zero items,
+    # silently, every time (confirmed: Professional English's Grammar,
+    # Vocabulary and Listening sections, each with real, substantial content
+    # sitting unused in the quiz bank -- 110, 105 and 784 items respectively).
+    "grammar": ("quiz", "grammar"),
+    "vocabulary": ("quiz", "vocabulary"),
+    "audio_comprehension": ("quiz", "audio_comprehension"),
+    # Same gap as above, one more name: a section titled after the specific
+    # composing kind it wants (240 real "email" WritingPrompts exist) rather
+    # than through "email_writing"'s any-composing-kind alias.
+    "email": ("writing_prompt", "email"),
 }
 
 # WritingPrompt kinds that ask the candidate to compose something new.

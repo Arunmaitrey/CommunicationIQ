@@ -73,7 +73,7 @@ router = APIRouter(prefix="/student/attempts", tags=["attempt"],
 # has to be visible or the candidate cannot perform the task at all. It is not
 # withheld the way Repeat Sentence / Dictation are, where hearing (not seeing)
 # the sentence is the whole measurement.
-VISIBLE_PROMPT_TASKS = {"read_aloud", "sentence_build", "open_response"}
+VISIBLE_PROMPT_TASKS = {"read_aloud", "sentence_build", "open_response", "short_answer"}
 
 # Which field carries the words to be spoken aloud. For Repeat Sentence and
 # Story Retell the reference *is* the prompt — the sentence to repeat, the
