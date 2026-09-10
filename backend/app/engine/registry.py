@@ -129,10 +129,9 @@ class Providers:
         config = next((c for c in configs if c.tenant_id == tenant_id and tenant_id), configs[0])
 
         primary_row = await self._registry_row(config.primary_provider_id)
-        if primary_row is None or not primary_row.active:
-            raise ProviderUnavailable(
-                f"primary provider for {capability.value} is missing or inactive"
-            )
+        primary_unavailable = (None if primary_row is not None and primary_row.active
+                               else ProviderUnavailable(
+                                   f"primary provider for {capability.value} is missing or inactive"))
 
         fallback_row = await self._registry_row(config.fallback_provider_id)
         shadow_row = await self._registry_row(config.shadow_provider_id)
@@ -153,11 +152,12 @@ class Providers:
         # including the timing measures that need neither torch nor a
         # transcript.
         primary_impl = None
-        primary_error: ProviderUnavailable | None = None
-        try:
-            primary_impl = _load(primary_row)
-        except ProviderUnavailable as exc:
-            primary_error = exc
+        primary_error: ProviderUnavailable | None = primary_unavailable
+        if primary_error is None:
+            try:
+                primary_impl = _load(primary_row)
+            except ProviderUnavailable as exc:
+                primary_error = exc
 
         fallback = None
         if fallback_row is not None and fallback_row.active:

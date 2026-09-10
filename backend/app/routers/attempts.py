@@ -24,7 +24,8 @@ from app.config import settings
 from app.invitations import CANDIDATE_ROLE
 from app.db import Session, ensure_platform_models, ensure_tenant_models, func, select
 from app import formats
-from app.deps import Principal, PlatformSession, TenantSession, require_roles
+from app.deps import (Principal, PlatformSession, TenantModels, TenantSession,
+                      require_roles)
 from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
 from app import deadline as app_deadline
 from app import reconstruction as app_reconstruction
@@ -532,13 +533,26 @@ async def _pick_items(session: TenantSession, section: ProfileSection,
 
 async def _ability_of(session: TenantSession, user_id: str) -> float:
     """A working ability estimate from what this student has already scored."""
+    # No .join(): the query shim over Beanie/MongoDB never implemented one.
+    # Unlike the two call sites of this same shape in _run_game_hook and
+    # spoken_content.score_pending, nothing catches an exception here -- this
+    # one would have taken the whole request down the moment a student had
+    # enough calibrated items for adaptive selection to actually run.
+    # select(Attempt.id) rather than select(Attempt) -- a single-column
+    # select of a model's id hits a real shim bug (it does getattr(doc,
+    # "_id"), the Mongo alias, on an already-parsed model that only has
+    # .id) -- so the whole row is fetched and .id read from it in Python.
+    user_attempt_ids = [a.id for a in (await session.execute(
+        select(Attempt).where(Attempt.user_id == user_id)
+    )).scalars().all()]
+    if not user_attempt_ids:
+        return irt.ability_from_scores([])
     scores = list((await session.execute(
-        select(ScoreRecord.score)
-        .join(Attempt, Attempt.id == ScoreRecord.attempt_id)
-        .where(Attempt.user_id == user_id,
-               ScoreRecord.dimension == "overall",
-               ScoreRecord.response_id.is_(None),
-               ScoreRecord.is_shadow.is_(False))
+        select(ScoreRecord.score).where(
+            ScoreRecord.attempt_id.in_(user_attempt_ids),
+            ScoreRecord.dimension == "overall",
+            ScoreRecord.response_id.is_(None),
+            ScoreRecord.is_shadow.is_(False))
         .order_by(ScoreRecord.created_at.desc()).limit(5)
     )).scalars().all())
     return irt.ability_from_scores(scores)
@@ -1529,7 +1543,7 @@ async def skip_response(attempt_id: str, response_id: str, principal: Principal,
 
 @router.post("/{attempt_id}/submit", response_model=AttemptResult)
 async def submit(attempt_id: str, principal: Principal, session: TenantSession,
-                 platform: PlatformSession,
+                 platform: PlatformSession, models: TenantModels,
                  background: BackgroundTasks) -> AttemptResult:
     """Close the attempt and compose its score.
 
@@ -1579,7 +1593,7 @@ async def submit(attempt_id: str, principal: Principal, session: TenantSession,
         log.warning("content scoring failed for attempt %s: %s", attempt_id, exc)
 
     outcome = await finalise_attempt(session, attempt_id)
-    await _run_game_hook(session, platform, principal, attempt, outcome)
+    await _run_game_hook(session, models, principal, attempt, outcome)
     await session.refresh(attempt)
     await _ensure_and_kick_narration(session, background,
                                      principal.tenant_slug or "", attempt)
@@ -1623,7 +1637,7 @@ async def record_proctor_event(attempt_id: str, payload: ProctorEventIn,
     await session.commit()
 
 
-async def _run_game_hook(session, platform, principal, attempt, outcome) -> None:
+async def _run_game_hook(session, models, principal, attempt, outcome) -> None:
     """Award XP, advance the quest, touch the streak — after scoring, never before.
 
     The reward follows a measured result rather than a button press: that is
@@ -1632,18 +1646,31 @@ async def _run_game_hook(session, platform, principal, attempt, outcome) -> None
     their report, so it is logged and swallowed.
     """
     try:
-        config = await game.config_for(platform, principal.tenant_id)
+        config = await game.config_for(principal.tenant_id)
 
-        previous = (await session.execute(
-            select(ScoreRecord.score)
-            .join(Attempt, Attempt.id == ScoreRecord.attempt_id)
-            .where(Attempt.user_id == principal.user_id,
-                   Attempt.profile_id == attempt.profile_id,
-                   Attempt.id != attempt.id,
-                   ScoreRecord.dimension == "overall",
-                   ScoreRecord.response_id.is_(None))
-            .order_by(ScoreRecord.score.desc()).limit(1)
-        )).scalars().first()
+        # No .join(): the query shim over Beanie/MongoDB never implemented
+        # one, so this raised AttributeError on every submit -- caught by
+        # this function's own try/except, at the cost of XP/streak/quest
+        # updates every time. Same lookup as two plain queries: this user's
+        # other attempts at this profile, then the best "overall" among them.
+        # select(Attempt) rather than select(Attempt.id) -- a single-column
+        # select of a model's id hits a real shim bug (getattr(doc, "_id"),
+        # the Mongo alias, on an already-parsed model that only has .id).
+        prior_attempt_ids = [a.id for a in (await session.execute(
+            select(Attempt).where(
+                Attempt.user_id == principal.user_id,
+                Attempt.profile_id == attempt.profile_id,
+                Attempt.id != attempt.id)
+        )).scalars().all()]
+        previous = None
+        if prior_attempt_ids:
+            previous = (await session.execute(
+                select(ScoreRecord.score).where(
+                    ScoreRecord.attempt_id.in_(prior_attempt_ids),
+                    ScoreRecord.dimension == "overall",
+                    ScoreRecord.response_id.is_(None))
+                .order_by(ScoreRecord.score.desc()).limit(1)
+            )).scalars().first()
 
         sections = list((await session.execute(
             select(ProfileSection.task_type)
@@ -1655,7 +1682,7 @@ async def _run_game_hook(session, platform, principal, attempt, outcome) -> None
                                and len(sections) >= 3)
 
         await game.on_attempt_scored(
-            session, config, principal.user_id, attempt.id,
+            models, config, principal.user_id, attempt.id,
             dimensions=outcome.dimensions,
             is_full_simulation=full_simulation,
             previous_best=previous,
@@ -2484,16 +2511,23 @@ async def _result(session: TenantSession, attempt: Attempt,
                                             candidate.profile_id))
                 linked = True
         if source is None:
-            source = (await session.execute(
-                select(Attempt, SimulationProfile)
-                .join(SimulationProfile,
-                      SimulationProfile.id == Attempt.profile_id)
-                .where(Attempt.user_id == attempt.user_id,
-                       Attempt.id != attempt.id,
-                       Attempt.status == "scored",
-                       SimulationProfile.style != "drill")
-                .order_by(Attempt.scored_at.desc()).limit(1)
-            )).first()
+            # No .join(): the query shim over Beanie/MongoDB never
+            # implemented one. Same lookup without it -- this user's other
+            # scored, non-drill attempts, newest first, then pair each with
+            # its profile and take the first whose profile still qualifies.
+            candidates = list((await session.execute(
+                select(Attempt).where(
+                    Attempt.user_id == attempt.user_id,
+                    Attempt.id != attempt.id,
+                    Attempt.status == "scored")
+                .order_by(Attempt.scored_at.desc())
+            )).scalars().all())
+            for candidate_attempt in candidates:
+                candidate_profile = await session.get(
+                    SimulationProfile, candidate_attempt.profile_id)
+                if candidate_profile is not None and candidate_profile.style != "drill":
+                    source = (candidate_attempt, candidate_profile)
+                    break
 
         assessment_score = None
         assessment_profile_id = ""

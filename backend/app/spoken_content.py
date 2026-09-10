@@ -66,12 +66,26 @@ async def score_pending(tenant, providers, tenant_id: str | None,
     whether the candidate understood. ``_unscored_reasons`` in the attempts
     router notices the missing dimension and says so.
     """
-    rows = list((await tenant.execute(
-        select(Response, ProfileSection.task_type)
-        .join(ProfileSection, ProfileSection.id == Response.section_id)
-        .where(Response.attempt_id == attempt_id,
-               ProfileSection.task_type.in_(sorted(SCORED_HERE)))
-    )).all())
+    # No .join() here: the query shim over Beanie/MongoDB never implemented
+    # one (there is nothing to join in a document store), so this was
+    # silently raising AttributeError on every attempt with spoken content --
+    # caught by the caller, at the cost of one dimension every time. Two
+    # plain queries do the same lookup: which sections count as "scored
+    # here", then which of this attempt's responses sit in one of them.
+    sections = list((await tenant.execute(
+        select(ProfileSection).where(
+            ProfileSection.task_type.in_(sorted(SCORED_HERE)))
+    )).scalars().all())
+    section_task_type = {s.id: s.task_type for s in sections}
+    if not section_task_type:
+        return 0
+
+    responses = list((await tenant.execute(
+        select(Response).where(
+            Response.attempt_id == attempt_id,
+            Response.section_id.in_(list(section_task_type)))
+    )).scalars().all())
+    rows = [(r, section_task_type[r.section_id]) for r in responses]
     if not rows:
         return 0
 
