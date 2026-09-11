@@ -98,6 +98,12 @@ RESPONSE_MODE: dict[str, str] = {
     "audio_comprehension": "select",
     # Writing tasks.
     "email": "write",
+    # Same gap as ITEM_SOURCE's "writing_task" entry, one layer up: pointing
+    # a section at the right content bank doesn't help if mode_of() still
+    # falls through to "speak" for the name -- every Group A company's
+    # Writing section asked the candidate to record audio for a compose
+    # prompt, with nothing to read.
+    "writing_task": "write",
     "dictation": "write",
     "email_writing": "write",
     "sentence_completion": "write",
