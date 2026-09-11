@@ -107,17 +107,32 @@ DIMENSIONS_BY_TASK: dict[str, frozenset[str]] = {
     # reported as complete.
     "listening_comprehension": frozenset({"comprehension"}),
     "reading_comprehension": frozenset({"comprehension"}),
+    # A section named after the quiz category rather than through the
+    # "listening_comprehension" alias -- missing here, _sole_dimension's own
+    # fallback made it score as "comprehension" anyway (right by
+    # coincidence, but undeclared, so _unscored_reasons could not tell this
+    # section's answers from ones that produced nothing).
+    "audio_comprehension": frozenset({"comprehension"}),
     # Not comprehension. Every wrong reply here is a correct English
     # sentence, so what is being measured is whether the candidate can tell
     # a reply that works from one that lands badly.
     "response_selection": frozenset({"appropriacy"}),
     "vocabulary_in_context": frozenset({"vocabulary"}),
+    # Standalone MCQ, not through the *_in_context alias. Missing here, every
+    # correct Grammar/Vocabulary answer scored as "comprehension" instead --
+    # merging three distinct signals into one blended number.
+    "grammar": frozenset({"grammar"}),
+    "vocabulary": frozenset({"vocabulary"}),
     # Heard once, typed back: one right answer, measured as word accuracy.
     "dictation": frozenset({"accuracy"}),
     # One word into a gap. Grammar rather than vocabulary because the bank is
     # connectives, prepositions and agreement.
     "sentence_completion": frozenset({"grammar"}),
     "email_writing": frozenset({"content", "grammar", "vocabulary"}),
+    # Same content and marking as email_writing under two more section-facing
+    # names (see sections.py's ITEM_SOURCE for why they exist).
+    "email": frozenset({"content", "grammar", "vocabulary"}),
+    "writing_task": frozenset({"content", "grammar", "vocabulary"}),
     # What was retained, and whether it came back as English. No lexical
     # range: the words are the author's.
     "passage_reconstruction": frozenset({"content", "grammar"}),

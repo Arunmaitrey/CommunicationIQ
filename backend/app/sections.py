@@ -60,6 +60,9 @@ SKILL_OF_TASK: dict[str, str] = {
     # Writing.
     "email": "writing",
     "email_writing": "writing",
+    # Same content and marking as email/email_writing under one more
+    # section-facing name -- see ITEM_SOURCE's "writing_task" entry below.
+    "writing_task": "writing",
     # Listening comprehension from audio passages.
     "audio_comprehension": "listening",
     "sentence_completion": "writing",
