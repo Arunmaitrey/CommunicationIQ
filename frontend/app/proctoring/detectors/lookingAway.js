@@ -16,25 +16,25 @@ import { VIOLATION_TYPES } from '../constants';
 */
 
 const HEAD_ENTER = {
-  horizontal: 0.35,
-  down: 0.5,   // loosened from 0.35 — keyboard glances tilt the head down, give this more room
-  up: -0.15,
+  horizontal: 0.45,
+  down: 0.6,   // loosened further — keyboard glances and natural head movement tilt down
+  up: -0.2,
 };
 
 const HEAD_EXIT = {
-  horizontal: 0.25,
-  down: 0.35,  // loosened from 0.25 to match HEAD_ENTER.down being loosened
-  up: -0.08,
+  horizontal: 0.35,
+  down: 0.45,  // loosened to match HEAD_ENTER.down being loosened
+  up: -0.12,
 };
 
 const GAZE_ENTER = {
-  horizontal: 0.18,
-  vertical: 0.28, // loosened from 0.18 — down-gaze needs more slack for keyboard glances
+  horizontal: 0.25,
+  vertical: 0.35, // loosened further — down-gaze needs more slack for keyboard glances
 };
 
 const GAZE_EXIT = {
-  horizontal: 0.12,
-  vertical: 0.2,  // loosened from 0.12 to match GAZE_ENTER.vertical being loosened
+  horizontal: 0.18,
+  vertical: 0.25,  // loosened to match GAZE_ENTER.vertical being loosened
 };
 
 const SMOOTHING_ALPHA = 0.35;

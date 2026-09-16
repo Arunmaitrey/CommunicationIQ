@@ -329,7 +329,7 @@ function StudentAttemptHistory({ studentId, student }: { studentId: string; stud
                 </span>,
                 <span key="strikes" className="text-[10px] text-muted font-mono">
                   {a.proctor_strikes != null && a.proctor_strikes > 0 ? (
-                    <span className="text-red-500 font-semibold">{a.proctor_strikes} strikes</span>
+                    <span className="text-ragRed font-semibold">{a.proctor_strikes} strikes</span>
                   ) : "—"}
                 </span>,
                 <div key="actions" className="flex items-center gap-1.5">

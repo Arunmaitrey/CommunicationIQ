@@ -79,7 +79,7 @@ DIMENSIONS_BY_TASK: dict[str, frozenset[str]] = {
                                     "fluency", "latency", "pronunciation"}),
     "spoken_correction": frozenset({"accuracy", "completeness", "disfluency",
                                     "fluency", "latency", "pronunciation"}),
-"sentence_build": frozenset({"accuracy", "completeness", "construction",
+"sentence_build": frozenset({"accuracy", "completeness",
                                  "disfluency", "fluency", "grammar", "latency",
                                  "pronunciation"}),
     "short_answer": frozenset({"content", "disfluency", "fluency", "latency"}),
@@ -121,8 +121,8 @@ DIMENSIONS_BY_TASK: dict[str, frozenset[str]] = {
     # What was retained, and whether it came back as English. No lexical
     # range: the words are the author's.
     "passage_reconstruction": frozenset({"content", "grammar"}),
-    # Timed typing: copy a given text. Measures speed (WPM) and accuracy.
-    "typing": frozenset({"accuracy", "fluency"}),
+    # Timed typing: copy a given text. Scored by essay scorer (content, vocabulary, grammar).
+    "typing": frozenset({"content", "vocabulary", "grammar"}),
     # Read word lists aloud (Cognizant Q11-15): word-level clarity and accuracy.
     "read_words": frozenset({"accuracy", "completeness", "disfluency",
                               "fluency", "latency", "pronunciation"}),

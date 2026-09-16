@@ -28,9 +28,9 @@ interface Row {
 }
 
 function rankColor(rank: number): string {
-  if (rank === 1) return "#f59e0b";
-  if (rank === 2) return "#94a3b8";
-  if (rank === 3) return "#b45309";
+  if (rank === 1) return "var(--rag-amber)";
+  if (rank === 2) return "var(--muted)";
+  if (rank === 3) return "var(--rag-red)";
   return "var(--muted)";
 }
 

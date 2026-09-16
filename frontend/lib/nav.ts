@@ -1,6 +1,6 @@
 import {
   Activity, BarChart3, Building2, BookOpen,
-  Home, Layers, LineChart, Mic, PenLine,
+  Home, LineChart, Mic, PenLine,
   ScrollText, Settings, ShieldCheck, Star, Target, Trophy, Users,
   CreditCard, Mail, Package, MessageSquare, ClipboardList, Contact,
   CalendarClock,
@@ -84,7 +84,6 @@ export const NAV: NavSection[] = [
     title: "Exam",
     items: [
       { href: "/platform/content", label: "Question Bank", icon: BookOpen, roles: PLATFORM, tint: TINT.emerald },
-      { href: "/platform/sets", label: "Question Sets", icon: Layers, roles: PLATFORM, tint: TINT.teal },
       { href: "/platform/exam-tests", label: "Exam Tests", icon: ClipboardList, roles: PLATFORM, tint: TINT.cyan },
       { href: "/platform/exam-schedules", label: "Exam Schedules", icon: CalendarClock, roles: PLATFORM, tint: TINT.rose },
       { href: "/platform/companies", label: "Companies", icon: Building2, roles: PLATFORM, tint: TINT.indigo },
@@ -108,7 +107,6 @@ export const NAV: NavSection[] = [
     items: [
       { href: "/platform/messages", label: "Messages", icon: MessageSquare, roles: PLATFORM, tint: TINT.rose },
       { href: "/platform/smtp", label: "Email / SMTP", icon: Mail, roles: PLATFORM, tint: TINT.orange },
-      { href: "/platform/email-templates", label: "Email Templates", icon: Mail, roles: PLATFORM, tint: TINT.lime },
       { href: "/platform/payments", label: "Payments", icon: CreditCard, roles: PLATFORM, tint: TINT.rose },
     ],
   },

@@ -93,7 +93,7 @@ function MyProgress() {
 
       <div className="grid md:grid-cols-2 gap-3 mb-4">
         <Link href="/season"
-              className="ds-card p-4 hover:bg-surface2 transition-colors ds-focus block">
+              className="ds-card card-interactive p-4 ds-focus block">
           <div className="text-sm font-bold">Your plan to the drive</div>
           <p className="text-[11px] text-muted mt-1 leading-relaxed">
             What to work on each week between now and your placement date.
@@ -123,10 +123,10 @@ function MyProgress() {
                     </Link>
                     <span className={`px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide
                       ${a.status === "scored"
-                        ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                        ? "status-pill status-ok"
                         : a.status === "in_progress"
-                        ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                        : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}>
+                        ? "status-pill status-warn"
+                        : "bg-surface2 text-muted"}`}>
                       {a.status}
                     </span>
                   </div>
@@ -135,7 +135,7 @@ function MyProgress() {
                     {a.started_at && ` · Started ${new Date(a.started_at).toLocaleString()}`}
                     {a.ip_address && ` · IP: ${a.ip_address}`}
                     {a.proctor_strikes != null && a.proctor_strikes > 0 && (
-                      <span className="ml-1 text-red-500 font-semibold"> · {a.proctor_strikes} strikes</span>
+                      <span className="ml-1 text-ragRed font-semibold"> · {a.proctor_strikes} strikes</span>
                     )}
                   </div>
                 </div>

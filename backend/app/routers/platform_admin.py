@@ -216,43 +216,6 @@ async def get_payment_config(gateway: str = "stripe") -> dict | None:
     }
 
 
-@router.get("/email-templates")
-async def list_email_templates() -> list[dict]:
-    from app.db import control_db
-    db = control_db()
-    rows = await db["email_templates"].find().sort("created_at", -1).to_list(100)
-    return [
-        {
-            "id": str(r["_id"]), "key": r.get("key", ""), "name": r.get("name", ""),
-            "subject": r.get("subject", ""), "body_html": r.get("body_html", ""),
-            "body_text": r.get("body_text", ""),
-            "category": r.get("category", "transactional"),
-            "is_active": r.get("is_active", True),
-        }
-        for r in rows
-    ]
-
-
-@router.get("/narration/settings")
-async def narration_settings() -> dict:
-    """The AI-narration configuration, secrets masked to set/last4."""
-    from app import ai_settings
-    overrides = await ai_settings.load_and_apply()
-    return ai_settings.masked_view(overrides)
-
-
-@router.get("/narration/metrics")
-async def narration_metrics() -> dict:
-    """Operational health of the AI narrator ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â counts, failures, cost.
-
-    Platform staff only (the router dependency). Reads the job table across
-    tenants; carries no student content. Answers pending/processing/ready/
-    failed, why things fail, latency, token usage and success rate.
-    """
-    from app.narration import metrics
-    return await metrics.collect()
-
-
 @router.get("/gamification", response_model=GamificationConfigOut)
 async def gamification(tenant_id: str | None = None) -> GamificationConfigOut:
     """The game economy (PLAT-17). Tenant row if present, otherwise the global default."""
@@ -402,15 +365,26 @@ async def student_attempts(user_id: str, tenant_id: str) -> list[dict]:
 
 async def _create_reading(passage_id, body):
     from app.db import ensure_shared_models, control_db
-    from app.set_engine import generate_question_number, auto_create_sets
+    from app.set_engine import generate_question_number
     import uuid
     models = await ensure_shared_models()
+    company = body.get("company", "")
+    title = body.get("title", "")
+    body_text = body.get("body", "")
+    if not body_text or not body_text.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Reading passage requires body text")
+    existing = await models.ReadingPassage.find_one(
+        models.ReadingPassage.title == title,
+        models.ReadingPassage.company == company,
+    )
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Duplicate reading passage (same title/company)")
     qn = await generate_question_number("reading", control_db())
     passage = models.ReadingPassage(
-        id=passage_id, question_number=qn, title=body.get("title", ""),
-        kind=body.get("kind", "article"), body=body.get("body", ""),
-        company=body.get("company", ""),
-        word_count=len(body.get("body", "").split()),
+        id=passage_id, question_number=qn, title=title,
+        kind=body.get("kind", "article"), body=body_text,
+        company=company,
+        word_count=len(body_text.split()),
         difficulty=body.get("difficulty", 0.0), status="published",
     )
     await passage.create()
@@ -421,27 +395,36 @@ async def _create_reading(passage_id, body):
             stem=q.get("stem", ""), options=q.get("options", []),
             correct_index=q.get("correct_index", 0),
             explanation=q.get("explanation", ""), passage_id=passage_id,
-            company=body.get("company", ""),
+            company=company,
             seconds_allowed=q.get("seconds_allowed", 30),
             difficulty=q.get("difficulty", 0.0), status="published",
         )
         await qi.create()
-    await auto_create_sets("reading", control_db())
-
 
 
 
 async def _create_writing(body):
     from app.db import ensure_shared_models, control_db
-    from app.set_engine import generate_question_number, auto_create_sets
+    from app.set_engine import generate_question_number
     import uuid
     models = await ensure_shared_models()
+    company = body.get("company", "")
+    title = body.get("title", "")
+    prompt_text = body.get("prompt", "")
+    if not prompt_text or not prompt_text.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Writing prompt requires prompt text")
+    existing = await models.WritingPrompt.find_one(
+        models.WritingPrompt.title == title,
+        models.WritingPrompt.company == company,
+    )
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Duplicate writing prompt (same title/company)")
     prompt_id = str(uuid.uuid4())
     qn = await generate_question_number("writing", control_db())
     prompt = models.WritingPrompt(
-        id=prompt_id, question_number=qn, title=body.get("title", ""),
-        kind=body.get("kind", "essay"), prompt=body.get("prompt", ""),
-        company=body.get("company", ""),
+        id=prompt_id, question_number=qn, title=title,
+        kind=body.get("kind", "essay"), prompt=prompt_text,
+        company=company,
         scenario=body.get("scenario", ""),
         key_points=body.get("key_points", []),
         min_words=body.get("min_words", 150),
@@ -449,7 +432,6 @@ async def _create_writing(body):
         difficulty=body.get("difficulty", 0.0), status="published",
     )
     await prompt.create()
-    await auto_create_sets("writing", control_db())
     return prompt_id
 
 
@@ -457,16 +439,27 @@ async def _create_writing(body):
 
 async def _create_listening(body):
     from app.db import ensure_shared_models, control_db
-    from app.set_engine import generate_question_number, auto_create_sets
+    from app.set_engine import generate_question_number
     import uuid
     models = await ensure_shared_models()
+    company = body.get("company", "")
+    title = body.get("title", "")
+    transcript = body.get("transcript", "")
+    if not transcript or not transcript.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Listening passage requires transcript")
+    existing = await models.ListeningPassage.find_one(
+        models.ListeningPassage.title == title,
+        models.ListeningPassage.company == company,
+    )
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Duplicate listening passage (same title/company)")
     passage_id = str(uuid.uuid4())
     qn = await generate_question_number("listening", control_db())
     passage = models.ListeningPassage(
-        id=passage_id, question_number=qn, title=body.get("title", ""),
+        id=passage_id, question_number=qn, title=title,
         kind=body.get("kind", "short_talk"),
-        transcript=body.get("transcript", ""),
-        company=body.get("company", ""),
+        transcript=transcript,
+        company=company,
         audio_key=body.get("audio_key", ""),
         accent=body.get("accent", "indian"),
         plays_allowed=body.get("plays_allowed", 1),
@@ -475,18 +468,17 @@ async def _create_listening(body):
     )
     await passage.create()
     for q in body.get("questions", []):
-        qn_q = await generate_question_number("reading", control_db())
+        qn_q = await generate_question_number("listening", control_db())
         qi = models.QuizItem(
             id=str(uuid.uuid4()), question_number=qn_q, category="audio_comprehension",
             stem=q.get("stem", ""), options=q.get("options", []),
             correct_index=q.get("correct_index", 0),
             explanation=q.get("explanation", ""), passage_id=passage_id,
-            company=body.get("company", ""),
+            company=company,
             seconds_allowed=q.get("seconds_allowed", 30),
             difficulty=q.get("difficulty", 0.0), status="published",
         )
         await qi.create()
-    await auto_create_sets("listening", control_db())
     return passage_id
 
 
@@ -496,43 +488,66 @@ async def _create_listening(body):
 
 async def _create_quiz(category, body):
     from app.db import ensure_shared_models, control_db
-    from app.set_engine import generate_question_number, auto_create_sets
+    from app.set_engine import generate_question_number
     import uuid
     models = await ensure_shared_models()
     item_id = str(uuid.uuid4())
-    # Determine module from category
+    company = body.get("company", "")
+    stem = body.get("stem", "")
+    if not stem or not stem.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Question stem is required")
+    options = body.get("options", [])
+    if not options or len(options) < 2:
+        options = ["Option A", "Option B", "Option C", "Option D"]
+    correct_index = body.get("correct_index", 0)
+    if not isinstance(correct_index, int) or correct_index < 0 or correct_index >= len(options):
+        correct_index = 0
+    existing = await models.QuizItem.find_one(
+        models.QuizItem.stem == stem,
+        models.QuizItem.category == category,
+        models.QuizItem.company == company,
+    )
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Duplicate question (same stem/category/company)")
     module = "reading" if category == "reading_comprehension" else "quiz"
     qn = await generate_question_number(module, control_db())
     qi = models.QuizItem(
-        id=item_id, question_number=qn, category=category, stem=body.get("stem", ""),
-        options=body.get("options", []), correct_index=body.get("correct_index", 0),
-        explanation=body.get("explanation", ""), company=body.get("company", ""),
+        id=item_id, question_number=qn, category=category, stem=stem,
+        options=options, correct_index=correct_index,
+        explanation=body.get("explanation", ""), company=company,
         difficulty=body.get("difficulty", 0.3),
         seconds_allowed=30, status="published",
     )
     await qi.create()
-    # Auto-create sets if enough questions
-    await auto_create_sets(module, control_db())
     return item_id
 
 
 async def _create_speaking(body):
     from app.db import ensure_shared_models, control_db
-    from app.set_engine import generate_question_number, auto_create_sets
+    from app.set_engine import generate_question_number
     import uuid
     models = await ensure_shared_models()
     item_id = str(uuid.uuid4())
+    company = body.get("company", "")
+    prompt_text = body.get("prompt_text", "")
+    if not prompt_text or not prompt_text.strip():
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Speaking task requires prompt text")
+    existing = await models.TaskItem.find_one(
+        models.TaskItem.prompt_text == prompt_text,
+        models.TaskItem.company == company,
+    )
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Duplicate speaking item (same prompt/company)")
     qn = await generate_question_number("speaking", control_db())
     ti = models.TaskItem(
         id=item_id, question_number=qn, task_type=body.get("task_type", "open_response"),
-        prompt_text=body.get("prompt_text", ""),
-        company=body.get("company", ""),
+        prompt_text=prompt_text,
+        company=company,
         reference_text=body.get("reference_text", ""),
         prompt_audio_key=body.get("audio_key", ""),
         difficulty=body.get("difficulty", 0.3), status="published",
     )
     await ti.create()
-    await auto_create_sets("speaking", control_db())
     return item_id
 
 
@@ -649,6 +664,235 @@ async def platform_questions(category: str = "", company: str = "",
 
 
 # --------------------------------------------------------------------------
+# Question bank item listing — paginated, per category (+ optional company).
+# This is the endpoint the Question Bank console lists questions from.
+# --------------------------------------------------------------------------
+
+_QUESTION_CATEGORY_MODEL = {
+    "reading": "ReadingPassage",
+    "writing": "WritingPrompt",
+    "listening": "ListeningPassage",
+    "speaking": "TaskItem",
+    "grammar": "QuizItem",
+    "vocabulary": "QuizItem",
+}
+
+
+@router.get("/questions/items")
+async def list_question_items(tenant_id: str, category: str = "reading",
+                              page: int = 1, page_size: int = 10,
+                              company: str = "") -> dict:
+    """Return actual question items for a category (paginated).
+
+    If *company* is supplied, results are filtered to items tagged with that
+    company name. The total count also reflects the filter so pagination
+    stays correct. tenant_id is accepted for API compatibility — the question
+    bank is shared across institutions, so it does not change the result.
+    """
+    from app.models.tenant import (QuizItem, TaskItem, WritingPrompt,
+                                   ListeningPassage, ReadingPassage)
+
+    model_map = {
+        "reading": ReadingPassage, "writing": WritingPrompt,
+        "listening": ListeningPassage, "speaking": TaskItem,
+        "grammar": QuizItem, "vocabulary": QuizItem,
+    }
+    model = model_map.get(category)
+    if model is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Unknown category {category!r}")
+
+    base = [model.status == "published"]
+    if company:
+        base.append(model.company == company)
+    q = model.find(*base)
+    total = await q.count()
+    skip = max(0, (page - 1) * page_size)
+    docs = await q.sort("-created_at").skip(skip).limit(page_size).to_list()
+
+    items = []
+    for d in docs:
+        out = {
+            "id": str(d.id),
+            "category": category,
+            "company": getattr(d, "company", "") or "",
+            "status": getattr(d, "status", "published"),
+            "created_at": (getattr(d, "created_at", None).isoformat()
+                           if getattr(d, "created_at", None) else None),
+        }
+        if category == "speaking":
+            out["title"] = getattr(d, "title", "")
+            out["task_type"] = getattr(d, "task_type", "")
+            out["prompt"] = getattr(d, "prompt", "")
+            out["answer"] = getattr(d, "answer", "") or getattr(d, "reference", "")
+            out["seconds_allowed"] = getattr(d, "seconds_allowed", None)
+        elif category in ("grammar", "vocabulary"):
+            out["stem"] = getattr(d, "stem", "")
+            out["options"] = getattr(d, "options", [])
+            out["correct_index"] = getattr(d, "correct_index", 0)
+            out["explanation"] = getattr(d, "explanation", "")
+            out["question_number"] = getattr(d, "question_number", "")
+        elif category == "writing":
+            out["title"] = getattr(d, "title", "")
+            out["prompt"] = getattr(d, "prompt", "") or getattr(d, "body", "")
+            out["kind"] = getattr(d, "kind", "")
+        elif category == "listening":
+            out["title"] = getattr(d, "title", "")
+            out["transcript"] = getattr(d, "transcript", "")
+            out["audio_key"] = getattr(d, "audio_key", "")
+            # Comprehension questions attach to the passage via passage_id.
+            n = await QuizItem.find(QuizItem.passage_id == str(d.id)).count()
+            out["question_count"] = n
+        elif category == "reading":
+            out["title"] = getattr(d, "title", "")
+            out["body"] = getattr(d, "body", "")
+            n = await QuizItem.find(QuizItem.passage_id == str(d.id)).count()
+            out["question_count"] = n
+        items.append(out)
+
+    return {"items": items, "total": total, "page": page,
+            "page_size": page_size,
+            "total_pages": max(1, (total + page_size - 1) // page_size)}
+
+
+# --------------------------------------------------------------------------
+# Module-specific question bank endpoints for the Exam Test Question Bank UI.
+# These return questions grouped by module so the admin can browse and assign.
+# --------------------------------------------------------------------------
+
+@router.get("/reading/passages")
+async def platform_reading_passages(company: str = "", limit: int = 5000) -> list:
+    """Reading comprehension questions (quiz_items with reading categories)
+    plus reading passages."""
+    from app.models.tenant import QuizItem, ReadingPassage
+    items = []
+    # Reading comprehension quiz items
+    qf: dict = {"status": "published", "category": {"$in": ["reading_comprehension", "grammar", "vocabulary"]}}
+    if company:
+        qf["company"] = company
+    for q in await QuizItem.find(qf).limit(limit).to_list():
+        items.append({
+            "id": str(q.id), "title": q.stem, "category": q.category,
+            "company": getattr(q, "company", "") or "",
+            "options": getattr(q, "options", []),
+            "correct_index": getattr(q, "correct_index", 0),
+            "explanation": getattr(q, "explanation", ""),
+            "question_number": getattr(q, "question_number", ""),
+        })
+    # Reading passages
+    rf: dict = {"status": "published"}
+    if company:
+        rf["company"] = company
+    for p in await ReadingPassage.find(rf).limit(limit).to_list():
+        items.append({
+            "id": str(p.id), "title": p.title, "category": "reading_passage",
+            "company": getattr(p, "company", "") or "",
+            "body": getattr(p, "body", ""),
+        })
+    return items
+
+
+@router.get("/listening/passages")
+async def platform_listening_passages(company: str = "", limit: int = 5000) -> list:
+    """Listening passages and audio comprehension quiz items."""
+    from app.models.tenant import ListeningPassage, QuizItem
+    items = []
+    lf: dict = {"status": "published"}
+    if company:
+        lf["company"] = company
+    for p in await ListeningPassage.find(lf).limit(limit).to_list():
+        n = await QuizItem.find(QuizItem.passage_id == str(p.id)).count()
+        items.append({
+            "id": str(p.id), "title": p.title, "category": "listening_passage",
+            "company": getattr(p, "company", "") or "",
+            "transcript": getattr(p, "transcript", ""),
+            "audio_key": getattr(p, "audio_key", ""),
+            "question_count": n,
+        })
+    # Audio comprehension quiz items (standalone)
+    qf: dict = {"status": "published", "category": "audio_comprehension"}
+    if company:
+        qf["company"] = company
+    for q in await QuizItem.find(qf).limit(limit).to_list():
+        items.append({
+            "id": str(q.id), "title": q.stem, "category": "audio_comprehension",
+            "company": getattr(q, "company", "") or "",
+            "options": getattr(q, "options", []),
+            "correct_index": getattr(q, "correct_index", 0),
+            "explanation": getattr(q, "explanation", ""),
+            "passage_id": getattr(q, "passage_id", ""),
+        })
+    return items
+
+
+@router.get("/writing/prompts")
+async def platform_writing_prompts(company: str = "", limit: int = 5000) -> list:
+    """Writing prompts (essay, email, etc.)."""
+    from app.models.tenant import WritingPrompt
+    items = []
+    wf: dict = {"status": "published"}
+    if company:
+        wf["company"] = company
+    for p in await WritingPrompt.find(wf).limit(limit).to_list():
+        items.append({
+            "id": str(p.id), "title": p.title, "category": p.kind or "essay",
+            "company": getattr(p, "company", "") or "",
+            "prompt": getattr(p, "prompt", ""),
+            "kind": getattr(p, "kind", ""),
+        })
+    return items
+
+
+@router.get("/speaking/tasks")
+async def platform_speaking_tasks(company: str = "", limit: int = 5000) -> list:
+    """Speaking tasks (read_aloud, listen_and_repeat, open_response, etc.)."""
+    from app.models.tenant import TaskItem
+    items = []
+    tf = {"status": "published"}
+    if company:
+        tf["company"] = company
+    for t in await TaskItem.find(tf).limit(limit).to_list():
+        items.append({
+            "id": str(t.id), "title": t.prompt_text, "category": t.task_type,
+            "company": getattr(t, "company", "") or "",
+            "task_type": getattr(t, "task_type", ""),
+            "prompt_text": getattr(t, "prompt_text", ""),
+            "reference_text": getattr(t, "reference_text", ""),
+            "difficulty": getattr(t, "difficulty", 0),
+        })
+    return items
+
+
+@router.get("/questions/company-counts")
+async def question_company_counts(tenant_id: str = "") -> dict:
+    """Per-company question counts per category, via MongoDB aggregation.
+
+    Fast on large banks: the counting happens in MongoDB, not Python.
+    Returns {"<company>": {"<category>": count, ...}, ...} with "" meaning
+    the general (untagged) pool.
+    """
+    from app.db import control_db
+    db = control_db()
+
+    category_collection = {
+        "reading": "reading_passages", "writing": "writing_prompts",
+        "listening": "listening_passages", "speaking": "task_items",
+        "grammar": "quiz_items", "vocabulary": "quiz_items",
+    }
+    out: dict[str, dict[str, int]] = {}
+    for cat, coll in category_collection.items():
+        pipeline = [
+            {"$match": {"status": "published"}},
+            {"$group": {"_id": {"$ifNull": ["$company", ""]},
+                        "count": {"$sum": 1}}},
+        ]
+        for row in await db[coll].aggregate(pipeline).to_list(500):
+            c = row["_id"] or ""
+            out.setdefault(c, {})[cat] = out.get(c, {}).get(cat, 0) + row["count"]
+    return out
+
+
+# --------------------------------------------------------------------------
 # Question creation endpoints
 # --------------------------------------------------------------------------
 
@@ -656,13 +900,6 @@ async def platform_questions(category: str = "", company: str = "",
 async def create_quiz_item(body: dict) -> dict:
     item_id = await _create_quiz(body.get("category", "reading_comprehension"), body)
     await audit_log.record_system("platform.create_question", entity="quiz_item")
-    # Auto-create sets if we have 10+ questions in this module
-    try:
-        from app.db import control_db
-        from app.set_engine import auto_create_sets
-        await auto_create_sets("quiz", control_db())
-    except Exception:
-        pass
     return {"id": item_id, "ok": True}
 
 
@@ -682,13 +919,15 @@ async def bulk_upload_questions(body: dict) -> dict:
     - explanation: explanation for the answer
     - difficulty: 0.0-1.0 (optional, default 0.3)
     """
-    from app.db import ensure_shared_models
+    from app.db import ensure_shared_models, control_db
+    from app.set_engine import generate_question_number
     import uuid
 
     models = await ensure_shared_models()
     items = body.get("items", [])
     category = body.get("category", "quiz")
     company = body.get("company", "")
+    db = control_db()
 
     created = 0
     errors = []
@@ -706,12 +945,27 @@ async def bulk_upload_questions(body: dict) -> dict:
                 continue
 
             if category == "quiz" or category == "grammar" or category == "vocabulary":
+                # Validate MCQ options
+                if not options or len(options) < 2:
+                    options = ["Option A", "Option B", "Option C", "Option D"]
+                if not isinstance(correct_index, int) or correct_index < 0 or correct_index >= len(options):
+                    correct_index = 0
                 item_id = str(uuid.uuid4())
+                qn = await generate_question_number("quiz", db)
+                cat = category if category in ("grammar", "vocabulary") else "grammar"
+                existing = await models.QuizItem.find_one(
+                    models.QuizItem.stem == stem,
+                    models.QuizItem.category == cat,
+                    models.QuizItem.company == company,
+                )
+                if existing:
+                    errors.append({"index": i, "error": "Duplicate question (same stem/category/company)"})
+                    continue
                 qi = models.QuizItem(
-                    id=item_id,
-                    category=category if category in ("grammar", "vocabulary") else "grammar",
+                    id=item_id, question_number=qn,
+                    category=cat,
                     stem=stem,
-                    options=options if len(options) >= 2 else ["Option A", "Option B", "Option C", "Option D"],
+                    options=options,
                     correct_index=correct_index,
                     explanation=explanation,
                     company=company,
@@ -723,11 +977,21 @@ async def bulk_upload_questions(body: dict) -> dict:
                 created += 1
 
             elif category == "reading":
-                # Create reading passage with questions
-                passage_id = str(uuid.uuid4())
                 body_text = item.get("body", item.get("passage", ""))
+                if not body_text or not body_text.strip():
+                    errors.append({"index": i, "error": "Reading passage requires body text"})
+                    continue
+                passage_id = str(uuid.uuid4())
+                qn = await generate_question_number("reading", db)
+                existing = await models.ReadingPassage.find_one(
+                    models.ReadingPassage.title == stem[:100],
+                    models.ReadingPassage.company == company,
+                )
+                if existing:
+                    errors.append({"index": i, "error": "Duplicate reading passage (same title/company)"})
+                    continue
                 passage = models.ReadingPassage(
-                    id=passage_id,
+                    id=passage_id, question_number=qn,
                     title=stem[:100],
                     kind=item.get("kind", "article"),
                     body=body_text,
@@ -738,10 +1002,10 @@ async def bulk_upload_questions(body: dict) -> dict:
                 )
                 await passage.create()
 
-                # Create associated questions
                 for q in item.get("questions", []):
+                    qn_q = await generate_question_number("reading", db)
                     qi = models.QuizItem(
-                        id=str(uuid.uuid4()),
+                        id=str(uuid.uuid4()), question_number=qn_q,
                         category="reading_comprehension",
                         stem=q.get("stem", ""),
                         options=q.get("options", []),
@@ -756,9 +1020,21 @@ async def bulk_upload_questions(body: dict) -> dict:
                 created += 1
 
             elif category == "listening":
+                transcript = item.get("transcript", "")
+                if not transcript or not transcript.strip():
+                    errors.append({"index": i, "error": "Listening passage requires transcript"})
+                    continue
                 passage_id = str(uuid.uuid4())
+                qn = await generate_question_number("listening", db)
+                existing = await models.ListeningPassage.find_one(
+                    models.ListeningPassage.title == stem[:100],
+                    models.ListeningPassage.company == company,
+                )
+                if existing:
+                    errors.append({"index": i, "error": "Duplicate listening passage (same title/company)"})
+                    continue
                 passage = models.ListeningPassage(
-                    id=passage_id,
+                    id=passage_id, question_number=qn,
                     title=stem[:100],
                     kind=item.get("kind", "short_talk"),
                     transcript=item.get("transcript", ""),
@@ -773,8 +1049,9 @@ async def bulk_upload_questions(body: dict) -> dict:
                 await passage.create()
 
                 for q in item.get("questions", []):
+                    qn_q = await generate_question_number("listening", db)
                     qi = models.QuizItem(
-                        id=str(uuid.uuid4()),
+                        id=str(uuid.uuid4()), question_number=qn_q,
                         category="audio_comprehension",
                         stem=q.get("stem", ""),
                         options=q.get("options", []),
@@ -789,9 +1066,21 @@ async def bulk_upload_questions(body: dict) -> dict:
                 created += 1
 
             elif category == "writing":
+                prompt_text = item.get("prompt", stem)
+                if not prompt_text or not prompt_text.strip():
+                    errors.append({"index": i, "error": "Writing prompt requires prompt text"})
+                    continue
                 prompt_id = str(uuid.uuid4())
+                qn = await generate_question_number("writing", db)
+                existing = await models.WritingPrompt.find_one(
+                    models.WritingPrompt.title == stem[:100],
+                    models.WritingPrompt.company == company,
+                )
+                if existing:
+                    errors.append({"index": i, "error": "Duplicate writing prompt (same title/company)"})
+                    continue
                 prompt = models.WritingPrompt(
-                    id=prompt_id,
+                    id=prompt_id, question_number=qn,
                     title=stem[:100],
                     kind=item.get("kind", "essay"),
                     prompt=item.get("prompt", stem),
@@ -807,9 +1096,20 @@ async def bulk_upload_questions(body: dict) -> dict:
                 created += 1
 
             elif category == "speaking":
+                if not stem or not stem.strip():
+                    errors.append({"index": i, "error": "Speaking task requires prompt text"})
+                    continue
                 item_id = str(uuid.uuid4())
+                qn = await generate_question_number("speaking", db)
+                existing = await models.TaskItem.find_one(
+                    models.TaskItem.prompt_text == stem,
+                    models.TaskItem.company == company,
+                )
+                if existing:
+                    errors.append({"index": i, "error": "Duplicate speaking item (same prompt/company)"})
+                    continue
                 ti = models.TaskItem(
-                    id=item_id,
+                    id=item_id, question_number=qn,
                     task_type=item.get("task_type", "open_response"),
                     prompt_text=stem,
                     company=company,
@@ -844,12 +1144,6 @@ async def bulk_upload_questions(body: dict) -> dict:
 async def create_speaking_item(body: dict) -> dict:
     item_id = await _create_speaking(body)
     await audit_log.record_system("platform.create_question", entity="task_item")
-    try:
-        from app.db import control_db
-        from app.set_engine import auto_create_sets
-        await auto_create_sets("speaking", control_db())
-    except Exception:
-        pass
     return {"id": item_id, "ok": True}
 
 
@@ -859,12 +1153,6 @@ async def create_reading_passage(body: dict) -> dict:
     passage_id = str(uuid.uuid4())
     await _create_reading(passage_id, body)
     await audit_log.record_system("platform.create_question", entity="reading_passage")
-    try:
-        from app.db import control_db
-        from app.set_engine import auto_create_sets
-        await auto_create_sets("reading", control_db())
-    except Exception:
-        pass
     return {"passage_id": passage_id, "ok": True}
 
 
@@ -872,12 +1160,6 @@ async def create_reading_passage(body: dict) -> dict:
 async def create_writing_prompt(body: dict) -> dict:
     prompt_id = await _create_writing(body)
     await audit_log.record_system("platform.create_question", entity="writing_prompt")
-    try:
-        from app.db import control_db
-        from app.set_engine import auto_create_sets
-        await auto_create_sets("writing", control_db())
-    except Exception:
-        pass
     return {"prompt_id": prompt_id, "ok": True}
 
 
@@ -885,21 +1167,7 @@ async def create_writing_prompt(body: dict) -> dict:
 async def create_listening_passage(body: dict) -> dict:
     passage_id = await _create_listening(body)
     await audit_log.record_system("platform.create_question", entity="listening_passage")
-    try:
-        from app.db import control_db
-        from app.set_engine import auto_create_sets
-        await auto_create_sets("listening", control_db())
-    except Exception:
-        pass
     return {"passage_id": passage_id, "ok": True}
-
-
-@router.post("/questions/generate")
-async def generate_questions() -> dict:
-    """Manually trigger AI question generation via Groq API."""
-    from app.question_generator import run_daily_generation
-    result = await run_daily_generation()
-    return {"generated": result, "ok": True}
 
 
 # ---------------------------------------------------------------------------
@@ -1075,16 +1343,6 @@ async def import_confirm(
         entity=f"{category or 'mixed'}:{company or 'general'}",
     )
 
-    # Auto-create sets for any module that got new questions
-    try:
-        from app.db import control_db
-        from app.set_engine import auto_create_sets
-        for mod in cats:
-            if mod in ("reading", "writing", "listening", "speaking", "quiz"):
-                await auto_create_sets(mod, control_db())
-    except Exception:
-        pass
-
     return {
         "ok": True,
         "created": created,
@@ -1119,6 +1377,151 @@ async def import_template(category: str) -> HttpResponse:
 
 
 # ── Company management ────────────────────────────────────────────────────
+
+# ---------------------------------------------------------------------------
+# Company Papers — one paper = 10 reading + 10 writing + 10 listening + 10
+# speaking sets, all from that company's own bank. Built by hand, like sets.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/company-papers")
+async def list_company_papers(company: str = "") -> list[dict]:
+    """All company papers with their section sets resolved."""
+    from app.models.tenant import CompanyPaper
+    query = {"status": {"$in": ["active", "draft"]}}
+    if company:
+        query["company"] = company
+    papers = await CompanyPaper.find(query).to_list(500)
+    out = []
+    for p in papers:
+        out.append({
+            "id": str(p.id), "name": p.name, "company": p.company,
+            "description": p.description, "status": p.status,
+            "is_used": p.is_used, "usage_count": p.usage_count,
+            "sets": {
+                "reading": p.reading_set_id, "writing": p.writing_set_id,
+                "listening": p.listening_set_id, "speaking": p.speaking_set_id,
+                "quiz": p.quiz_set_id,
+            },
+        })
+    return out
+
+
+@router.post("/company-papers", status_code=status.HTTP_201_CREATED)
+async def create_company_paper(body: dict) -> dict:
+    """Create one empty company paper draft for a company.
+
+    The four section slots start empty; the admin fills each by picking one of
+    that company's own active sets per skill. The paper cannot go live until
+    reading, writing, listening and speaking are all filled (40 = 4×10).
+    """
+    from app.models.tenant import CompanyPaper
+    company = (body.get("company") or "").strip()
+    name = (body.get("name") or "").strip()
+    if not company:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "company is required")
+    if not name:
+        name = f"{company} Communication Round"
+    existing = await CompanyPaper.find_one(
+        CompanyPaper.name == name, CompanyPaper.status != "archived")
+    if existing:
+        raise HTTPException(status.HTTP_409_CONFLICT,
+                            f"A paper named '{name}' already exists")
+    paper = CompanyPaper(name=name, company=company,
+                         description=(body.get("description") or "").strip())
+    await paper.create()
+    await audit_log.record_system(
+        "platform.company_paper_created", entity="CompanyPaper",
+        entity_id=str(paper.id), after={"name": name, "company": company})
+    return {"id": str(paper.id), "name": name, "company": company,
+            "status": paper.status}
+
+
+@router.get("/company-papers/available-sets")
+async def paper_available_sets(company: str = "", module: str = "") -> list[dict]:
+    """Active sets of one module+company that a paper slot can take.
+
+    A slot may take any active set of that company for that skill, including
+    sets already used by another paper — a paper references a set; several
+    papers can share one set without any question leaking across companies.
+    """
+    from app.models.platform import QuestionSet
+    if not company or module not in ("reading", "writing", "listening", "speaking", "quiz"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "company and valid module required")
+    sets = await QuestionSet.find(
+        QuestionSet.module == module,
+        QuestionSet.company == company,
+        QuestionSet.status == "active",
+    ).to_list(500)
+    return [{"id": str(s.id), "set_number": s.set_number,
+             "question_count": s.question_count} for s in sets]
+
+
+@router.patch("/company-papers/{paper_id}")
+async def update_company_paper(paper_id: str, body: dict) -> dict:
+    """Fill section slots, rename, or change status (with the 4-section gate)."""
+    from app.models.tenant import CompanyPaper
+    from app.models.platform import QuestionSet
+    paper = await CompanyPaper.get(paper_id)
+    if paper is None or paper.status == "archived":
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Paper not found")
+
+    if "name" in body:
+        paper.name = (body["name"] or "").strip()
+    if "description" in body:
+        paper.description = (body["description"] or "").strip()
+
+    slot_map = {"reading": "reading_set_id", "writing": "writing_set_id",
+                "listening": "listening_set_id", "speaking": "speaking_set_id",
+                "quiz": "quiz_set_id"}
+    for key, field in slot_map.items():
+        if key in body:
+            set_id = (body[key] or "").strip()
+            if set_id:
+                s = await QuestionSet.get(set_id)
+                if s is None or s.status != "active" or s.module != key:
+                    raise HTTPException(status.HTTP_409_CONFLICT,
+                                        f"Set for '{key}' must be an active {key} set")
+                if (s.company or "") != paper.company:
+                    raise HTTPException(status.HTTP_409_CONFLICT,
+                                        f"Set for '{key}' belongs to "
+                                        f"'{s.company or 'general'}', not {paper.company}")
+                setattr(paper, field, set_id)
+            else:
+                setattr(paper, field, "")
+
+    if "status" in body:
+        wanted = body["status"]
+        if wanted == "active":
+            missing = [k for k in ("reading", "writing", "listening", "speaking")
+                       if not getattr(paper, slot_map[k])]
+            if missing:
+                raise HTTPException(status.HTTP_409_CONFLICT,
+                                    "Cannot activate: still missing " + ", ".join(missing))
+        paper.status = wanted
+
+    paper.updated_at = datetime.now(timezone.utc)
+    await paper.save()
+    await audit_log.record_system(
+        "platform.company_paper_updated", entity="CompanyPaper",
+        entity_id=paper_id, after={"status": paper.status})
+    return {"ok": True, "status": paper.status}
+
+
+@router.delete("/company-papers/{paper_id}")
+async def delete_company_paper(paper_id: str) -> dict:
+    """Archive a paper (papers are history once used — never hard-deleted)."""
+    from app.models.tenant import CompanyPaper
+    paper = await CompanyPaper.get(paper_id)
+    if paper is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Paper not found")
+    paper.status = "archived"
+    paper.updated_at = datetime.now(timezone.utc)
+    await paper.save()
+    await audit_log.record_system(
+        "platform.company_paper_archived", entity="CompanyPaper", entity_id=paper_id)
+    return {"ok": True}
+
 
 @router.get("/companies")
 async def list_companies() -> list[dict]:
@@ -1244,6 +1647,7 @@ async def delete_company(company_id: str) -> dict:
 @router.delete("/questions/{collection}/{item_id}")
 async def delete_question(collection: str, item_id: str) -> dict:
     from app.models.tenant import QuizItem, TaskItem, WritingPrompt, ListeningPassage, ReadingPassage
+    from app.models.platform import QuestionSet
     model_map = {
         "quiz": QuizItem, "task": TaskItem, "writing": WritingPrompt,
         "listening": ListeningPassage, "reading": ReadingPassage,
@@ -1252,8 +1656,18 @@ async def delete_question(collection: str, item_id: str) -> dict:
     if not model:
         raise HTTPException(400, f"Unknown collection: {collection}")
     doc = await model.get(item_id)
-    if doc:
-        await doc.delete()
+    if not doc:
+        raise HTTPException(404, f"{collection} item not found")
+    # Check if question is used in any active question sets
+    active_sets = await QuestionSet.find(
+        QuestionSet.status.in_(["active", "draft"]),
+        QuestionSet.question_ids == item_id,
+    ).to_list()
+    if active_sets:
+        set_ids = [s.id for s in active_sets]
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Cannot delete: question is used in {len(active_sets)} active/draft set(s) ({', '.join(set_ids[:3])}). Remove it from sets first.")
+    await doc.delete()
     await audit_log.record_system("platform.delete_question", entity=f"{collection}:{item_id}")
     return {"ok": True}
 
@@ -1263,11 +1677,20 @@ async def upload_audio(file: "UploadFile") -> dict:
     """Upload an audio file (WAV, M4A, MP3) for listening passages or prompts."""
     import uuid
     ext = os.path.splitext(file.filename or "audio.wav")[1] or ".wav"
+    ALLOWED_AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".ogg", ".flac", ".webm"}
+    if ext.lower() not in ALLOWED_AUDIO_EXTS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Audio must be one of: {', '.join(ALLOWED_AUDIO_EXTS)}")
+    content = await file.read()
+    # Reject non-audio files (SVG, HTML, executables)
+    if content[:5].lower() in (b"<svg ", b"<html", b"<!DOC"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only audio files are allowed")
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Audio must be under 25 MB")
     key = f"audio/{uuid.uuid4().hex}{ext}"
     upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "audio")
     os.makedirs(upload_dir, exist_ok=True)
     dest = os.path.join(upload_dir, key.replace("audio/", ""))
-    content = await file.read()
     with open(dest, "wb") as f:
         f.write(content)
     await audit_log.record_system("platform.upload_audio", entity=key)
@@ -1308,10 +1731,19 @@ async def list_contact_messages(status: str = "") -> list[dict]:
 
 @router.get("/exam-tests")
 async def list_exam_tests() -> list[dict]:
-    """List all custom exam tests."""
-    from app.models.platform import ExamTest
+    """List all custom exam tests with set counts per module."""
+    from app.models.platform import ExamTest, QuestionSet
     tests = await ExamTest.find_all().to_list()
     tests.sort(key=lambda t: t.created_at or t.updated_at or "", reverse=True)
+    # Batch-fetch set counts per company
+    all_sets = await QuestionSet.find({"status": "active"}).to_list(5000)
+    company_mod_counts: dict[str, dict[str, int]] = {}
+    for s in all_sets:
+        key = s.company or ""
+        if key not in company_mod_counts:
+            company_mod_counts[key] = {}
+        mod = s.module
+        company_mod_counts[key][mod] = company_mod_counts[key].get(mod, 0) + 1
     return [
         {
             "id": t.id, "name": t.name, "description": t.description,
@@ -1320,14 +1752,17 @@ async def list_exam_tests() -> list[dict]:
             "listening_questions": t.listening_questions,
             "writing_questions": t.writing_questions,
             "speaking_questions": t.speaking_questions,
+            "quiz_questions": t.quiz_questions,
             "reading_seconds": t.reading_seconds,
             "listening_seconds": t.listening_seconds,
             "writing_seconds": t.writing_seconds,
             "speaking_seconds": t.speaking_seconds,
+            "quiz_seconds": t.quiz_seconds,
             "allow_pause": t.allow_pause, "show_timer": t.show_timer,
             "one_shot_audio": t.one_shot_audio,
             "is_active": t.is_active, "is_baseline": t.is_baseline,
             "company": t.company, "question_ids": t.question_ids,
+            "sets_by_module": company_mod_counts.get(t.company or "", {}),
             "created_at": t.created_at.isoformat() if t.created_at else None,
         }
         for t in tests
@@ -1423,55 +1858,11 @@ async def list_exam_schedules() -> list[dict]:
 # Question Sets
 # --------------------------------------------------------------------------
 
-@router.get("/question-sets")
-async def list_question_sets(module: str = "") -> list[dict]:
-    """List all question sets, optionally filtered by module."""
-    from app.models.platform import QuestionSet
-    query = {}
-    if module:
-        query["module"] = module
-    sets = await QuestionSet.find(query).sort("created_at", -1).to_list()
-    return [
-        {
-            "id": s.id, "set_number": s.set_number, "module": s.module,
-            "question_ids": s.question_ids, "question_count": s.question_count,
-            "status": s.status, "usage_count": s.usage_count,
-            "last_used_at": s.last_used_at.isoformat() if s.last_used_at else None,
-            "created_at": s.created_at.isoformat() if s.created_at else None,
-        }
-        for s in sets
-    ]
-
-
-@router.get("/question-sets/stats")
-async def question_set_stats() -> dict:
-    """Get question set availability per module."""
-    from app.models.platform import QuestionSet
-    from app.db import control_db
-    db = control_db()
-    coll_map = {
-        "reading": "reading_passages",
-        "listening": "listening_passages",
-        "writing": "writing_prompts",
-        "speaking": "task_items",
-        "quiz": "quiz_items",
-    }
-    stats = {}
-    for module, coll_name in coll_map.items():
-        total = await db[coll_name].count_documents({})
-        active_sets = await QuestionSet.find(
-            QuestionSet.module == module, QuestionSet.status == "active"
-        ).count()
-        draft_sets = await QuestionSet.find(
-            QuestionSet.module == module, QuestionSet.status == "draft"
-        ).count()
-        stats[module] = {
-            "total_questions": total,
-            "active_sets": active_sets,
-            "draft_sets": draft_sets,
-            "questions_available": total,
-        }
-    return stats
+# The sets API is the /sets family below. A second /question-sets family used to
+# live here (list + stats) with a third set of writes in platform_writes; all
+# three wrote the same QuestionSet rows, so the same set could be created,
+# listed and archived through two different vocabularies. Consolidated onto
+# /sets, which is what the console actually calls.
 
 
 # --------------------------------------------------------------------------
@@ -1561,18 +1952,30 @@ async def serve_prompt_audio(key: str) -> HttpResponse:
 
 
 @router.get("/sets")
-async def list_sets(module: str = "", status: str = "", company: str = "") -> list[dict]:
-    """List question sets with optional filters."""
+async def list_sets(module: str = "", status: str = "", company: str = "",
+                    include_archived: bool = False) -> list[dict]:
+    """List question sets with optional filters.
+
+    Archived sets are excluded unless asked for. The bank accumulates a lot of
+    them (every rebuild supersedes the previous generation), and the Question
+    Bank shows this list as one button per set, so carrying the dead ones would
+    bury the sets an admin can actually assign.
+    """
     from app.models.platform import QuestionSet, ExamTest
     query = {}
     if module:
         query["module"] = module
     if status:
         query["status"] = status
+    elif not include_archived:
+        query["status"] = {"$in": ["active", "draft"]}
     if company:
         query["company"] = company
     raw = await QuestionSet.find(query).to_list(5000)
-    sets = sorted(raw, key=lambda s: s.set_number or "")
+    # Company first, then number: with one numbering sequence per company, a
+    # flat sort by set_number would interleave READ-SET-001 of every company
+    # into a run of repeated labels.
+    sets = sorted(raw, key=lambda s: (s.company or "", s.set_number or ""))
 
     # Find which exam tests use each module+company combo
     all_tests = await ExamTest.find({}).to_list(500)
@@ -1596,6 +1999,266 @@ async def list_sets(module: str = "", status: str = "", company: str = "") -> li
         }
         for s in sets
     ]
+
+
+from app.set_engine import (create_empty_set, set_candidates,
+                            add_question_to_set, remove_question_from_set,
+                            activate_set)
+
+
+@router.post("/sets", status_code=status.HTTP_201_CREATED)
+async def create_set(body: dict) -> dict:
+    """Create one empty draft set for a module (+ optional company).
+
+    Sets are built by hand: the shell is created here, then the admin adds the
+    ten questions one at a time through /sets/{id}/questions. Nothing is
+    auto-filled from the bank.
+    """
+    module = (body.get("module") or "").strip()
+    company = (body.get("company") or "").strip()
+    result = await create_empty_set(module, company)
+    if result.get("created") == 0:
+        await audit_log.record_system(
+            "platform.set_create_failed", entity=f"set:{module}",
+            after={"company": company, "reason": result.get("error", "")})
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, result.get("error") or "Could not create a set")
+    await audit_log.record_system(
+        "platform.set_created", entity="QuestionSet",
+        entity_id=result.get("set_id", ""),
+        after={"set_number": result.get("set_number"), "module": module,
+               "company": company})
+    return result
+
+
+@router.get("/sets/{set_id}/candidates")
+async def set_candidate_questions(set_id: str, search: str = "",
+                                  limit: int = 30) -> dict:
+    """Questions the admin may still add to this draft set.
+
+    Scope follows the set (same module collection, same company, published) and
+    excludes questions already sitting in another live set, so the picker can
+    never offer something the engine would refuse.
+    """
+    result = await set_candidates(set_id, search=search, limit=limit)
+    if result.get("error"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, result["error"])
+    return result
+
+
+@router.get("/sets/{set_id}/questions")
+async def get_set_questions_by_id(set_id: str) -> list:
+    """Return resolved questions for a specific set (by set ID)."""
+    from app.db import control_db
+    from bson import ObjectId
+    db = control_db()
+    s_doc = None
+    try:
+        s_doc = await db.question_sets.find_one({"_id": ObjectId(set_id)})
+    except Exception:
+        pass
+    if not s_doc:
+        s_doc = await db.question_sets.find_one({"_id": set_id})
+    if not s_doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
+    MODULE_COLL = {
+        "reading": "reading_passages",
+        "listening": "listening_passages",
+        "writing": "writing_prompts",
+        "speaking": "task_items",
+        "quiz": "quiz_items",
+    }
+    COMP_COLL = {"reading": "quiz_items", "listening": "quiz_items"}
+    mod = s_doc.get("module", "")
+    qids = s_doc.get("question_ids", []) or []
+    coll_name = MODULE_COLL.get(mod)
+    comp_name = COMP_COLL.get(mod)
+    questions = []
+    for qid in qids[:20]:
+        doc = None
+        if coll_name:
+            doc = await db[coll_name].find_one({"_id": str(qid)})
+        if not doc and comp_name:
+            doc = await db[comp_name].find_one({"_id": str(qid)})
+        if doc:
+            questions.append({
+                "id": str(doc["_id"]),
+                "title": doc.get("title") or doc.get("stem") or doc.get("prompt_text") or doc.get("prompt") or "",
+                "category": doc.get("category") or doc.get("task_type") or mod,
+                "options": doc.get("options", []),
+                "correct_index": doc.get("correct_index", 0),
+                "explanation": doc.get("explanation", ""),
+                "audio_key": doc.get("audio_key") or doc.get("prompt_audio_key") or "",
+                "body": doc.get("body") or doc.get("transcript") or "",
+            })
+    return questions
+
+
+@router.post("/sets/{set_id}/questions")
+async def set_add_question(set_id: str, body: dict) -> dict:
+    """Add one question to a draft set (manual set building)."""
+    question_id = (body.get("question_id") or "").strip()
+    if not question_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "question_id is required")
+    result = await add_question_to_set(set_id, question_id)
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_409_CONFLICT, result.get("error") or "Could not add the question")
+    await audit_log.record_system(
+        "platform.set_question_added", entity="QuestionSet", entity_id=set_id,
+        after={"question_id": question_id, "count": result.get("question_count")})
+    return result
+
+
+@router.delete("/sets/{set_id}/questions/{question_id}")
+async def set_remove_question(set_id: str, question_id: str) -> dict:
+    """Remove one question from a draft set."""
+    result = await remove_question_from_set(set_id, question_id)
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_409_CONFLICT, result.get("error") or "Could not remove the question")
+    await audit_log.record_system(
+        "platform.set_question_removed", entity="QuestionSet", entity_id=set_id,
+        after={"question_id": question_id, "count": result.get("question_count")})
+    return result
+
+
+@router.post("/sets/{set_id}/activate")
+async def set_activate(set_id: str) -> dict:
+    """Activate a draft set — refused until it holds exactly 10 questions."""
+    result = await activate_set(set_id)
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_409_CONFLICT, result.get("error") or "Could not activate the set")
+    await audit_log.record_system(
+        "platform.set_activated", entity="QuestionSet", entity_id=set_id,
+        after={"set_number": result.get("set_number")})
+    return result
+
+
+@router.post("/sets/{set_id}/deactivate")
+async def set_deactivate(set_id: str) -> dict:
+    """Revert an active set back to draft."""
+    from app.models.platform import QuestionSet
+    s = await QuestionSet.get(set_id)
+    if s is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
+    if s.status != "active":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Set is not active")
+    s.status = "draft"
+    s.updated_at = datetime.now(timezone.utc)
+    await s.save()
+    await audit_log.record_system(
+        "platform.set_deactivated", entity="QuestionSet", entity_id=set_id)
+    return {"ok": True, "set_number": s.set_number, "status": s.status}
+
+
+@router.delete("/sets/{set_id}")
+async def delete_set(set_id: str) -> dict:
+    """Delete a set (only drafts can be deleted)."""
+    from app.models.platform import QuestionSet
+    s = await QuestionSet.get(set_id)
+    if s is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
+    if s.status == "active":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            "Cannot delete an active set. Deactivate it first.")
+    await s.delete()
+    await audit_log.record_system(
+        "platform.set_deleted", entity="QuestionSet", entity_id=set_id)
+    return {"ok": True}
+
+
+# --------------------------------------------------------------------------
+# Question CRUD (edit / delete individual questions)
+# --------------------------------------------------------------------------
+
+@router.patch("/questions/{category}/{question_id}")
+async def update_question(category: str, question_id: str, body: dict) -> dict:
+    """Update an individual question by category and ID."""
+    from app.db import ensure_shared_models, control_db
+    models = await ensure_shared_models()
+    db = control_db()
+
+    category_map = {
+        "quiz": ("quiz_items", models.QuizItem),
+        "reading": ("reading_passages", models.ReadingPassage),
+        "listening": ("listening_passages", models.ListeningPassage),
+        "writing": ("writing_prompts", models.WritingPrompt),
+        "speaking": ("task_items", models.TaskItem),
+    }
+
+    if category not in category_map:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown category: {category}")
+
+    coll_name, model_cls = category_map[category]
+    doc = await db[coll_name].find_one({"_id": question_id})
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
+
+    # Apply updates
+    updates = {}
+    allowed_fields = {
+        "quiz": ["stem", "options", "correct_index", "explanation", "difficulty", "category"],
+        "reading": ["title", "body", "kind", "difficulty"],
+        "listening": ["title", "transcript", "audio_key", "accent", "kind", "difficulty"],
+        "writing": ["title", "prompt", "kind", "scenario", "min_words", "suggested_minutes", "difficulty"],
+        "speaking": ["prompt_text", "reference_text", "task_type", "prompt_audio_key", "difficulty"],
+    }
+
+    for field in allowed_fields.get(category, []):
+        if field in body:
+            updates[field] = body[field]
+
+    if not updates:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid fields to update")
+
+    await db[coll_name].update_one({"_id": question_id}, {"$set": updates})
+    await audit_log.record_system(
+        f"platform.update_question_{category}", entity=coll_name, entity_id=question_id)
+    return {"ok": True, "updated_fields": list(updates.keys())}
+
+
+@router.delete("/questions/{category}/{question_id}")
+async def delete_question(category: str, question_id: str) -> dict:
+    """Delete an individual question by category and ID.
+
+    Refuses to delete if the question is referenced by any active/draft set.
+    """
+    from app.db import ensure_shared_models, control_db
+    from app.models.platform import QuestionSet
+    models = await ensure_shared_models()
+    db = control_db()
+
+    category_map = {
+        "quiz": "quiz_items",
+        "reading": "reading_passages",
+        "listening": "listening_passages",
+        "writing": "writing_prompts",
+        "speaking": "task_items",
+    }
+
+    if category not in category_map:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unknown category: {category}")
+
+    coll_name = category_map[category]
+    doc = await db[coll_name].find_one({"_id": question_id})
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found")
+
+    # Check if referenced by any active/draft sets
+    active_sets = await QuestionSet.find(
+        {"status": {"$in": ["active", "draft"]}, "question_ids": question_id}
+    ).to_list(None)
+    if active_sets:
+        set_nums = [s.set_number for s in active_sets[:5]]
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Cannot delete: question is in {len(active_sets)} set(s) "
+            f"({', '.join(set_nums)}{'...' if len(active_sets) > 5 else ''}). "
+            f"Remove it from sets first."
+        )
+
+    await db[coll_name].delete_one({"_id": question_id})
+    await audit_log.record_system(
+        f"platform.delete_question_{category}", entity=coll_name, entity_id=question_id)
+    return {"ok": True}
 
 
 @router.get("/sets/summary")
@@ -1625,14 +2288,267 @@ async def sets_summary_by_company() -> dict:
     return out
 
 
-@router.post("/sets/generate")
-async def generate_sets(module: str, company: str = "") -> dict:
-    """Manually trigger set generation for a module."""
+@router.post("/sets/archive-empty")
+async def archive_empty_sets() -> dict:
+    """Archive all active sets where all question_numbers are empty strings."""
     from app.db import control_db
-    from app.set_engine import auto_create_sets
-    created = await auto_create_sets(module, control_db())
-    await audit_log.record_system("platform.generate_sets", entity="question_set", after={"module": module, "created": len(created)})
-    return {"created": len(created), "sets": created}
+    db = control_db()
+    # Find all active sets
+    all_sets = await db.question_sets.find({"status": "active"}).to_list(10000)
+    # Identify ghosts: every question_number is empty string
+    ghost_ids = []
+    for s in all_sets:
+        nums = s.get("question_numbers") or []
+        if all(n == "" for n in nums):
+            ghost_ids.append(s["_id"])
+    if ghost_ids:
+        result = await db.question_sets.update_many(
+            {"_id": {"$in": ghost_ids}},
+            {"$set": {"status": "archived"}}
+        )
+        return {"archived": result.modified_count, "remaining": len(all_sets) - result.modified_count}
+    return {"archived": 0, "remaining": len(all_sets)}
+
+
+@router.post("/sets/rebuild-broken")
+async def rebuild_broken_sets() -> dict:
+    """Archive sets with missing questions and rebuild from actual question banks.
+
+    One scheme everywhere: a reading/listening set holds QUIZ-ITEM ids (the
+    questions, which cite their passage), writing holds prompt ids, speaking
+    holds task-item ids. The bank for reading is quiz_items with category
+    reading_comprehension — never the passages themselves, whose per-passage
+    question counts would break the "one set = ten questions" promise.
+    """
+    from app.db import control_db
+    from app.models.platform import QuestionSet, ExamTest
+    import random
+    db = control_db()
+
+    MODULE_COLLECTIONS = {
+        "reading": "quiz_items",
+        "listening": "quiz_items",
+        "writing": "writing_prompts",
+        "speaking": "task_items",
+        "quiz": "quiz_items",
+    }
+    MODULE_CATEGORY = {
+        "reading": "reading_comprehension",
+        "listening": "audio_comprehension",
+        "quiz": {"$in": ["grammar", "vocabulary"]},
+    }
+
+    # 1. Find all active sets and check which have broken question_ids
+    all_sets = await QuestionSet.find({"status": "active"}).to_list(10000)
+    broken_ids = []
+    for s in all_sets:
+        coll_name = MODULE_COLLECTIONS.get(s.module)
+        if not coll_name or not s.question_ids:
+            if not s.question_ids:
+                broken_ids.append(s.id)
+            continue
+        # Check if question_ids exist in the collection
+        found = await db[coll_name].count_documents(
+            {"_id": {"$in": s.question_ids}}
+        )
+        if found < len(s.question_ids):
+            broken_ids.append(s.id)
+
+    # 2. Archive broken sets
+    if broken_ids:
+        await QuestionSet.find({"_id": {"$in": broken_ids}}).update(
+            {"$set": {"status": "archived"}}
+        )
+
+    # 3. Rebuild sets per module: group actual questions into sets of 10
+    exam_tests = await ExamTest.find({}).to_list(100)
+    companies_with_tests = set()
+    for t in exam_tests:
+        if t.company:
+            companies_with_tests.add(t.company)
+
+    created = {}
+    for module, coll_name in MODULE_COLLECTIONS.items():
+        # Get all questions (both general and company-specific)
+        # Reading and listening draw from quiz_items, so the category clause
+        # is what keeps a reading set reading (and a listening set listening).
+        base_query: dict = {"status": "published"}
+        cat = MODULE_CATEGORY.get(module)
+        if isinstance(cat, str):
+            base_query["category"] = cat
+        elif isinstance(cat, dict):
+            # {"$in": [...]} → {"category": {"$in": [...]}}
+            base_query["category"] = cat
+        all_questions = await db[coll_name].find(base_query).to_list(20000)
+        if not all_questions:
+            all_questions = await db[coll_name].find(
+                {**base_query, "status": {"$in": ["published", "draft"]}}
+            ).to_list(20000)
+
+        # Group by company, normalising the general tags to ""
+        by_company: dict[str, list] = {}
+        for q in all_questions:
+            co = (q.get("company") or "").strip()
+            if co.lower() in ("general", "all"):
+                co = ""
+            by_company.setdefault(co, []).append(q)
+
+        for company, questions in by_company.items():
+            if len(questions) < 10:
+                continue  # Need at least 10 for one set
+
+            # Check how many active sets already exist for this module+company
+            existing = await QuestionSet.find({
+                "module": module, "company": company, "status": "active"
+            }).to_list(100)
+            existing_count = len(existing)
+
+            # Calculate how many sets we need
+            needed = len(questions) // 10
+            if existing_count >= needed:
+                continue  # Already have enough sets
+
+            # Create new sets from remaining questions, using the shared
+            # _next_set_number for consistent, gap-free numbering.
+            from app.set_engine import _next_set_number, MODULE_PREFIXES
+            prefix = MODULE_PREFIXES.get(module, module.upper()[:4])
+            all_module_sets = await QuestionSet.find(
+                QuestionSet.module == module
+            ).to_list(None)
+
+            questions_to_use = questions[existing_count * 10:]
+            for i in range(0, len(questions_to_use), 10):
+                batch = questions_to_use[i:i+10]
+                if len(batch) < 10:
+                    break  # Skip incomplete sets
+                set_number = _next_set_number(prefix, company, all_module_sets)
+                # Add the new set to all_module_sets so the next call picks the
+                # next number instead of reusing the same one.
+                class _Placeholder:
+                    pass
+                ph = _Placeholder()
+                ph.set_number = set_number
+                all_module_sets.append(ph)
+                q_ids = [str(q["_id"]) for q in batch]
+                q_nums = [q.get("question_number", "") or str(q.get("_id", "")) for q in batch]
+                new_set = QuestionSet(
+                    set_number=set_number,
+                    module=module,
+                    company=company,
+                    question_ids=q_ids,
+                    question_numbers=[str(n) for n in q_nums],
+                    question_count=10,
+                    status="active",
+                )
+                await new_set.insert()
+                created.setdefault(module, 0)
+
+            created[module] = created.get(module, 0) + (len(questions_to_use) // 10)
+
+    return {
+        "archived_broken": len(broken_ids),
+        "created": created,
+    }
+
+
+# Literal paths are declared before the parameterised one below: FastAPI matches
+# in registration order, so "/sets/{set_id}" registered first would swallow
+# "/sets/summary" and answer "Set not found" for both summary routes.
+@router.get("/sets/{set_id}")
+async def get_set(set_id: str) -> dict:
+    """One set and the questions inside it, with full content and answer key.
+
+    The Question Bank expands a category to its sets, and a set to the ten
+    questions it holds — each with its stem, options, the correct answer and
+    the explanation, plus the parent passage (or transcript/audio for
+    listening) so a superadmin can review the whole question as the student
+    will see it. Read-only: nothing here scores.
+    """
+    from app.db import control_db
+    from app.models.platform import QuestionSet
+    from app.set_engine import MODULE_COLLECTIONS, MODULE_CATEGORY
+
+    s = await QuestionSet.get(set_id)
+    if s is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
+
+    coll_name = MODULE_COLLECTIONS.get(s.module)
+    if coll_name is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Set has unknown module '{s.module}'")
+
+    db = control_db()
+    docs = await db[coll_name].find(
+        {"_id": {"$in": [str(q) for q in s.question_ids]}}
+    ).to_list(None)
+    by_id = {str(d["_id"]): d for d in docs}
+
+    # Reading and listening questions hang off parent passages — fetch them
+    # once so every question can carry its passage inline.
+    pdocs_by_id: dict[str, dict] = {}
+    if s.module in ("reading", "listening"):
+        pids = list({str(d.get("passage_id")) for d in docs if d.get("passage_id")})
+        pcoll = ("reading_passages" if s.module == "reading"
+                 else "listening_passages")
+        for p in await db[pcoll].find({"_id": {"$in": pids}}).to_list(200):
+            pdocs_by_id[str(p["_id"])] = p
+
+    questions = []
+    missing = 0
+    for qid in s.question_ids:
+        d = by_id.get(str(qid))
+        if d is None:
+            # A set can outlive a question that was archived or deleted. The
+            # slot is reported rather than skipped, so the count on screen stays
+            # honest instead of quietly showing nine questions.
+            missing += 1
+            questions.append({"id": str(qid), "label": "", "missing": True})
+            continue
+        questions.append({
+            "id": str(d["_id"]),
+            "question_number": d.get("question_number", ""),
+            "label": (d.get("stem") or d.get("title")
+                      or d.get("prompt_text") or d.get("prompt") or ""),
+            "kind": (d.get("category") or d.get("kind")
+                     or d.get("task_type") or ""),
+            "company": d.get("company", ""),
+            "difficulty": float(d.get("difficulty") or 0),
+            "status": d.get("status", ""),
+            "stem": d.get("stem", ""),
+            "options": list(d.get("options") or []),
+            "correct_index": d.get("correct_index"),
+            "explanation": d.get("explanation", ""),
+            "body": (d.get("body") or d.get("transcript")
+                     or d.get("scenario") or d.get("reference_text") or ""),
+            # Where the audio lives, for the rows the UI can play (listening,
+            # speaking): a pre-rendered key, not a URL, same as the bank list.
+            "audio_key": d.get("audio_key") or d.get("prompt_audio_key") or "",
+            # The parent passage (reading/listening): full text, title and the
+            # audio key, so the superadmin sees the question in its context.
+            "passage": ({
+                "id": pid,
+                "title": p.get("title", ""),
+                "kind": p.get("kind", ""),
+                "body": p.get("body", ""),
+                "transcript": p.get("transcript", ""),
+                "audio_key": p.get("audio_key", ""),
+            } if (pid := str(d.get("passage_id") or "")) and (p := pdocs_by_id.get(pid)) else None),
+        })
+
+    return {
+        "id": str(s.id),
+        "set_number": s.set_number,
+        "module": s.module,
+        "company": s.company,
+        "status": s.status,
+        "question_count": s.question_count,
+        "usage_count": s.usage_count,
+        "is_used": s.is_used,
+        "last_used_at": s.last_used_at.isoformat() if s.last_used_at else None,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "missing_count": missing,
+        "questions": questions,
+    }
 
 
 @router.patch("/sets/{set_id}")
@@ -1690,9 +2606,10 @@ async def assign_for_attempt(body: dict) -> dict:
             "writing": test.writing_questions,
             "listening": test.listening_questions,
             "speaking": test.speaking_questions,
+            "quiz": getattr(test, 'quiz_questions', 0),
         }
     else:
-        config = {"reading": 10, "writing": 10, "listening": 10, "speaking": 0}
+        config = {"reading": 10, "writing": 10, "listening": 10, "speaking": 0, "quiz": 0}
 
     try:
         result = await assign_sets_for_attempt(config, company, control_db())
@@ -1715,7 +2632,7 @@ async def bulk_import_company_questions(body: dict) -> dict:
     """
     from app.db import control_db
     from app.models.platform import Company
-    from app.set_engine import generate_question_number, auto_create_sets
+    from app.set_engine import generate_question_number
     import uuid
 
     company_name = body.get("company", "")
@@ -1731,18 +2648,35 @@ async def bulk_import_company_questions(body: dict) -> dict:
 
     db = control_db()
     total = 0
+    section_module_map = {
+        "reading": "reading", "reading_comprehension": "reading",
+        "listening": "listening", "audio_comprehension": "listening",
+        "writing": "writing", "essay": "writing", "email": "writing",
+        "speaking": "speaking", "grammar": "quiz", "vocabulary": "quiz",
+    }
 
     for section in sections:
+        section_name = section.get("name", "reading").lower().strip()
+        module = section_module_map.get(section_name, "reading")
         questions = section.get("questions", [])
         for q in questions:
             diff_str = q.get("difficulty", "medium")
             difficulty_val = {"easy": 0.3, "medium": 0.5, "hard": 0.8, "medium_hard": 0.65}.get(diff_str, 0.5)
             correct_map = {"A": 0, "B": 1, "C": 2, "D": 3}
             correct_index = correct_map.get(q.get("correct_answer", "A"), 0)
-            qn = await generate_question_number("reading", db)
+            stem = q.get("question", "")
+            if not stem:
+                continue
+            existing = await QuizItem.find_one(
+                QuizItem.stem == stem,
+                QuizItem.company == company_name,
+            )
+            if existing:
+                continue
+            qn = await generate_question_number(module, db)
             qi = QuizItem(
                 id=str(uuid.uuid4()), question_number=qn, category="reading_comprehension",
-                stem=q.get("question", ""), options=q.get("options", []),
+                stem=stem, options=q.get("options", []),
                 correct_index=correct_index, explanation=q.get("explanation", ""),
                 company=company_name, difficulty=difficulty_val, seconds_allowed=30,
                 status="published",
@@ -1750,7 +2684,6 @@ async def bulk_import_company_questions(body: dict) -> dict:
             await qi.create()
             total += 1
 
-    await auto_create_sets("reading", db)
     await audit_log.record_system("platform.bulk_import_questions", entity="quiz_item",
                                    after={"company": company_name, "count": total})
     return {"ok": True, "imported": total, "company": company_name}

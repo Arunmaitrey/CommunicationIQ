@@ -1,4 +1,4 @@
-"""Tier 1 — Automatic Speech Recognition using faster-whisper.
+"""Automatic Speech Recognition using faster-whisper.
 
 Provides word-level transcription with timestamps for the scoring pipeline.
 Uses the small.en model for a good balance of speed and accuracy on CPU.
@@ -12,7 +12,9 @@ from pathlib import Path
 
 import numpy as np
 
-from app.engine.contracts.types import ProviderMeta, TranscriptResult, WordTiming
+from app.engine.contracts.types import (AudioRef, ProviderMeta,
+                                        TranscriptResult, WordTiming)
+from app.storage import get_storage
 
 log = logging.getLogger(__name__)
 
@@ -21,6 +23,22 @@ SAMPLE_RATE = 16000
 # Lazy-loaded model singleton — loaded on first use, reused across requests.
 _model = None
 _model_name = "small.en"
+
+
+class WhisperASR:
+    """Capability: ``asr`` — transcription via faster-whisper."""
+
+    contract_version = "1.0"
+    provider_key = "faster_whisper"
+    version = "0.1.0"
+
+    async def transcribe(self, audio: AudioRef, *, language: str = "en",
+                         hint_text: str = "") -> TranscriptResult:
+        audio_bytes = get_storage().get(audio.storage_key)
+        result = await _transcribe_bytes(audio_bytes, language=language)
+        result.meta = ProviderMeta(provider_id="", provider_key=self.provider_key,
+                                   version=self.version, tier=1)
+        return result
 
 
 def _get_model():
@@ -82,9 +100,8 @@ def _parse_wav(data: bytes) -> np.ndarray:
         return samples
 
 
-async def transcribe(audio_bytes: bytes, *, language: str = "en",
-                     hint_text: str = "") -> TranscriptResult:
-    """Transcribe audio using faster-whisper with word-level timestamps.
+async def _transcribe_bytes(audio_bytes: bytes, *, language: str = "en") -> TranscriptResult:
+    """Transcribe raw audio bytes using faster-whisper with word-level timestamps.
 
     Returns a TranscriptResult with the full text, per-word timings,
     and overall confidence.

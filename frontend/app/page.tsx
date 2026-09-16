@@ -18,11 +18,17 @@ export default function Index() {
   }, [user, loading, router]);
 
   if (loading || user) {
-    return <div className="p-8 text-xs text-muted">Loading…</div>;
+    return (
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <div className="w-10 h-10 rounded-full border-[3px] border-[var(--border)] border-t-[var(--primary)] animate-spin" />
+        <div className="text-xs text-muted">Loading…</div>
+      </div>
+    );
   }
 
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
+      <div className="bgfx" />
       {/* Top bar */}
       <header className="relative z-10 flex items-center justify-between px-6 lg:px-16 py-5 mx-auto w-full" style={{ maxWidth: 1280 }}>
         <Link href="/" className="hover:opacity-80 transition-opacity"><BrandLockup /></Link>
@@ -84,14 +90,14 @@ export default function Index() {
           <div className="mx-auto w-full px-6 lg:px-16" style={{ maxWidth: 1280 }}>
             <h2 className="text-lg font-bold mb-2 text-center">What you get</h2>
             <p className="text-xs text-center mb-6" style={{ color: "var(--muted)" }}>Four skills, one assessment, complete diagnosis.</p>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 reveal-stagger">
               {[
                 { icon: Mic, title: "Speaking", body: "Read aloud, repeat sentences, answer questions. Scored on pronunciation, fluency, timing and content.", color: "var(--primary)" },
                 { icon: Headphones, title: "Listening", body: "Hear a passage once, then answer questions — the way a placement round does it.", color: "var(--secondary)" },
                 { icon: BookOpen, title: "Reading", body: "Read a timed passage, then answer comprehension MCQs. Rate and accuracy measured separately.", color: "var(--accent)" },
                 { icon: PenLine, title: "Writing", body: "Essay and email tasks scored on content, grammar, vocabulary, coherence and mechanics.", color: "var(--rag-green)" },
               ].map(({ icon: Icon, title, body, color }) => (
-                <div key={title} className="rounded-ds p-5 border text-center" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
+                <div key={title} className="rounded-ds p-5 border text-center transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
                   <div className="w-10 h-10 rounded-full mx-auto mb-3 flex items-center justify-center" style={{ background: `${color}15` }}>
                     <Icon size={20} style={{ color }} />
                   </div>
@@ -108,13 +114,13 @@ export default function Index() {
           <div className="mx-auto w-full px-6 lg:px-16" style={{ maxWidth: 1280 }}>
             <h2 className="text-lg font-bold mb-2 text-center">How it works</h2>
             <p className="text-xs text-center mb-6" style={{ color: "var(--muted)" }}>Three steps from first login to knowing exactly where you stand.</p>
-            <div className="grid sm:grid-cols-3 gap-5">
+            <div className="grid sm:grid-cols-3 gap-5 reveal-stagger">
               {[
                 { step: "1", icon: Target, title: "Simulate the real test", body: "Take a full-length Versant-style exam with real timing, one-shot audio, and section-by-section progression. No pauses, no re-dos." },
                 { step: "2", icon: Zap, title: "Get scored instantly", body: "AI analyses pronunciation, fluency, reading rate, writing quality and listening comprehension across every dimension." },
                 { step: "3", icon: GraduationCap, title: "Diagnose and improve", body: "See exactly which skill is holding you back, what the gap is, and the specific drill that closes it." },
               ].map(({ step, icon: Icon, title, body }) => (
-                <div key={title} className="rounded-ds p-6 border relative text-center" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
+                <div key={title} className="rounded-ds p-6 border relative text-center transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
                   <div className="w-8 h-8 rounded-full mx-auto mb-3 flex items-center justify-center text-sm font-black text-white" style={{ background: "var(--primary)" }}>{step}</div>
                   <Icon size={20} style={{ color: "var(--primary)" }} className="mb-2 mx-auto" />
                   <h3 className="text-sm font-bold mb-1.5">{title}</h3>
@@ -129,14 +135,14 @@ export default function Index() {
         <section id="stats" className="py-14" style={{ background: "var(--surface)" }}>
           <div className="mx-auto w-full px-6 lg:px-16" style={{ maxWidth: 1280 }}>
             <h2 className="text-lg font-bold mb-6 text-center">Platform numbers</h2>
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 reveal-stagger">
               {[
                 { value: "4", label: "Skills assessed", sub: "Speaking, Listening, Reading, Writing" },
                 { value: "500+", label: "Reading questions", sub: "Across passages and articles" },
                 { value: "100+", label: "Writing prompts", sub: "Essays + email scenarios" },
                 { value: "6+", label: "Exam formats", sub: "Versant, diagnostic, company rounds" },
               ].map(({ value, label, sub }) => (
-                <div key={label} className="rounded-ds p-5 border text-center" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
+                <div key={label} className="rounded-ds p-5 border text-center transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md" style={{ background: "var(--card)", borderColor: "var(--line)" }}>
                   <div className="text-3xl font-black" style={{ color: "var(--primary)" }}>{value}</div>
                   <div className="text-xs font-bold mt-1">{label}</div>
                   <div className="text-[10px] mt-0.5" style={{ color: "var(--muted)" }}>{sub}</div>
@@ -151,7 +157,7 @@ export default function Index() {
           <div className="mx-auto w-full px-6 lg:px-16" style={{ maxWidth: 1280 }}>
             <h2 className="text-lg font-bold mb-2 text-center">One product, three consoles</h2>
             <p className="text-xs text-center mb-6" style={{ color: "var(--muted)" }}>Different roles, different views, one shared question bank.</p>
-            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 reveal-stagger">
               {[
                 { icon: Users, title: "Students", body: "Practise, take tests, watch the needle move. Track progress across every skill.", href: "/signup", link: "Create account" },
                 { icon: Shield, title: "Institution Admin", body: "Manage people, assessments, cohorts, and results. Export reports.", href: "/login", link: "Sign in" },
@@ -175,7 +181,7 @@ export default function Index() {
             <p className="text-xs text-center mb-6" style={{ color: "var(--muted)" }}>
               Prepare for the exact format your target company uses. Each round mirrors the real placement test structure.
             </p>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 max-w-3xl mx-auto">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 max-w-3xl mx-auto reveal-stagger">
               {[
                 { name: "Accenture", color: "#a100ff" },
                 { name: "TCS", color: "#0072c6" },

@@ -11,6 +11,7 @@ import {
 } from '../utils/proctoringStream';
 
 import {
+  CONFIRM_DURATIONS_MS,
   getConfirmDuration,
   MAX_VIOLATIONS,
   DETECTION_INTERVAL_MS,
@@ -26,6 +27,7 @@ import {
   requestFullscreen,
   exitFullscreen
 } from './detectors/fullscreenExit';
+import { subscribeClipboardGuard } from './detectors/clipboardGuard';
 import {
   loadPhoneDetector,
   releasePhoneDetector,
@@ -50,6 +52,7 @@ const ProctorCamera = ({
   const streamRef = useRef(null);
   const animationFrameRef = useRef(null);
   const lastDetectionTimeRef = useRef(0);
+  const warmupEndRef = useRef(0); // grace period after camera starts
 
   const activeViolationRef = useRef(null);
   const lookingAwayTrackerRef = useRef(null);
@@ -69,6 +72,13 @@ const ProctorCamera = ({
   const personCountRef = useRef(1);
 
   const pendingAutoEndRef = useRef(null);
+
+  // Copy/cut/paste attempts are blocked instantly (see clipboardGuard) and
+  // counted here so the attempt's proctor summary shows how often a
+  // candidate tried to move exam content in or out of the page.
+  const clipboardEventsRef = useRef(0);
+  const clipboardNoticeTimerRef = useRef(null);
+  const [clipboardNotice, setClipboardNotice] = useState(null);
 
   const persistedOnMount = readPersistedState(sessionId);
 
@@ -92,6 +102,52 @@ const ProctorCamera = ({
   const tabViolationCountRef = useRef(0);
 
   const shouldProctor = enabled && !!sessionId;
+
+  // ==================================================
+  // CLIPBOARD GUARD (copy / cut / paste / right-click)
+  // ==================================================
+  // Prevention, not detection: blocking is instant and capture-phase so
+  // nothing escapes through a bubbling shortcut. Repeated attempts do not
+  // count toward MAX_VIOLATIONS strikes (that pipeline is for sustained
+  // camera/tab issues) but they ARE tallied and logged, so the attempt's
+  // proctor summary shows how often copy/paste was attempted.
+  useEffect(() => {
+    if (!shouldProctor || isLocked || examCompleted || proctoringBlocked) return;
+
+    const showNotice = (message) => {
+      setClipboardNotice(message);
+      if (clipboardNoticeTimerRef.current) {
+        clearTimeout(clipboardNoticeTimerRef.current);
+      }
+      clipboardNoticeTimerRef.current = setTimeout(() => {
+        clipboardNoticeTimerRef.current = null;
+        setClipboardNotice(null);
+      }, 2500);
+    };
+
+    const handleBlocked = (eventType) => {
+      clipboardEventsRef.current += 1;
+      showNotice(
+        eventType === 'paste'
+          ? 'Paste is disabled during this exam'
+          : eventType === 'contextmenu'
+            ? 'Right-click is disabled during this exam'
+            : 'Copy is disabled during this exam'
+      );
+    };
+
+    const unsubscribe = subscribeClipboardGuard({
+      blockSelection: true,
+      onBlocked: handleBlocked
+    });
+    return () => {
+      unsubscribe();
+      if (clipboardNoticeTimerRef.current) {
+        clearTimeout(clipboardNoticeTimerRef.current);
+        clipboardNoticeTimerRef.current = null;
+      }
+    };
+  }, [shouldProctor, isLocked, examCompleted, proctoringBlocked]);
 
   // ==================================================
   // TEARDOWN
@@ -157,6 +213,12 @@ const ProctorCamera = ({
       away_events: faceEvalRef.current.away_events,
       multi_face_events: faceEvalRef.current.multi_face_events,
       violation_count: faceEvalRef.current.violation_count,
+      clipboard_events: clipboardEventsRef.current,
+      // What the multi-face count was actually based on, so a reviewer can
+      // tell a real second face from a body-count false positive rather than
+      // taking the number on trust (QA: counts with no evidence).
+      multi_face_faces: faceEvalRef.current.multi_face_faces || 0,
+      multi_face_bodies: faceEvalRef.current.multi_face_bodies || 0,
     }
     try {
       const token = getToken();
@@ -294,6 +356,9 @@ const ProctorCamera = ({
           tryPlay();
         }
         setFaceStatus('Waiting for face...');
+        // Give the camera and face detector 3 seconds to warm up before
+        // flagging violations — avoids false positives on slow hardware.
+        warmupEndRef.current = performance.now() + 3000;
       } catch (err) {
         console.error('[ProctorCamera] camera start failed:', err);
         setFaceStatus('Camera unavailable');
@@ -353,7 +418,7 @@ const ProctorCamera = ({
     }
   }, [sessionId, onViolation, onAutoEnd, teardown]);
 
-  const trackViolation = useCallback((type, now) => {
+  const trackViolation = useCallback((type, now, confirmMs = null) => {
     const active = activeViolationRef.current;
 
     if (!active || active.type !== type) {
@@ -364,7 +429,7 @@ const ProctorCamera = ({
 
     if (active.confirmed) return;
 
-    if (now - active.since >= getConfirmDuration(type)) {
+    if (now - active.since >= (confirmMs ?? getConfirmDuration(type))) {
       activeViolationRef.current = { ...active, confirmed: true };
       confirmViolation(type);
     } else {
@@ -425,6 +490,9 @@ const ProctorCamera = ({
       if (now - lastDetectionTimeRef.current >= DETECTION_INTERVAL_MS) {
         lastDetectionTimeRef.current = now;
 
+        // Skip violation tracking during warmup period
+        const inWarmup = now < warmupEndRef.current;
+
         // Phone + person-body detection: async YOLO inference, run
         // independently of the synchronous face checks below. Guarded so
         // a slow inference call can't stack up multiple overlapping runs.
@@ -434,11 +502,13 @@ const ProctorCamera = ({
           phoneCheckInFlightRef.current = true;
           runObjectDetection(phoneSessionRef.current, video)
             .then((objDetections) => {
-              const phoneViolation = checkMobilePhone(objDetections);
-              if (phoneViolation) {
-                trackPhoneViolation(performance.now());
-              } else {
-                clearPhoneViolation();
+              if (!inWarmup) {
+                const phoneViolation = checkMobilePhone(objDetections);
+                if (phoneViolation) {
+                  trackPhoneViolation(performance.now());
+                } else {
+                  clearPhoneViolation();
+                }
               }
 
               personCountRef.current = countPersons(objDetections) || 1;
@@ -459,10 +529,18 @@ const ProctorCamera = ({
           const multiFace = checkMultipleFaces(detections, personCountRef.current);
 
           if (noFace) {
-            trackViolation(noFace, now);
+            if (!inWarmup) trackViolation(noFace, now);
           } else if (multiFace) {
             faceEvalRef.current.face_detected = true
-            trackViolation(multiFace, now);
+            // A body-count-only reading is held for longer than a real second
+            // face before it counts (see detectors/multipleFaces.js), and the
+            // evidence is kept so the report can say what was seen.
+            const confirmMs = multiFace.basis === 'bodies'
+              ? CONFIRM_DURATIONS_MS.MULTIPLE_FACES_BODIES
+              : null;
+            faceEvalRef.current.multi_face_faces = multiFace.faceCount;
+            faceEvalRef.current.multi_face_bodies = multiFace.personCount;
+            if (!inWarmup) trackViolation(multiFace.type, now, confirmMs);
           } else {
             faceEvalRef.current.face_detected = true
             const landmarkResult = landmarker.detectForVideo(video, now);
@@ -475,7 +553,7 @@ const ProctorCamera = ({
             } else {
               const lookingAway = lookingAwayTrackerRef.current.check(faceLandmarks);
               if (lookingAway) {
-                trackViolation(lookingAway, now);
+                if (!inWarmup) trackViolation(lookingAway, now);
               } else {
                 clearActiveViolation();
                 setFaceStatus('Face detected');
@@ -556,13 +634,6 @@ const ProctorCamera = ({
       }
     };
 
-    const handleBlur = () => {
-      confirmViolation(VIOLATION_TYPES.TAB_SWITCH);
-      setTimeout(() => {
-        window.focus();
-      }, 100);
-    };
-
     const handleKeyDown = (e) => {
       if (
         (e.ctrlKey && e.key === 'Tab') ||
@@ -583,13 +654,11 @@ const ProctorCamera = ({
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('blur', handleBlur);
     document.addEventListener('keydown', handleKeyDown);
     document.addEventListener('contextmenu', handleContextMenu);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('blur', handleBlur);
       document.removeEventListener('keydown', handleKeyDown);
       document.removeEventListener('contextmenu', handleContextMenu);
     };
@@ -822,6 +891,13 @@ const ProctorCamera = ({
                 {violationCount}/{MAX_VIOLATIONS + 1}
               </span>
             </div>
+            {/* Auto-submission warning when violations reach threshold */}
+            {violationCount >= 3 && violationCount <= MAX_VIOLATIONS && (
+              <div className="px-2.5 py-1.5 text-[9px] font-semibold text-center border-t border-gray-200 dark:border-slate-700"
+                   style={{ background: 'color-mix(in srgb, #f59e0b 15%, #fff)', color: '#b45309' }}>
+                {MAX_VIOLATIONS + 1 - violationCount} violation{MAX_VIOLATIONS + 1 - violationCount !== 1 ? 's' : ''} left before auto-submit
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -862,6 +938,13 @@ const ProctorCamera = ({
               {violationCount}/{MAX_VIOLATIONS + 1}
             </span>
           </div>
+          {/* Auto-submission warning when violations reach threshold */}
+          {violationCount >= 3 && violationCount <= MAX_VIOLATIONS && (
+            <div className="px-3 py-2 text-[10px] font-semibold text-center border-t border-slate-700"
+                 style={{ background: 'color-mix(in srgb, #f59e0b 15%, #0f172a)', color: '#fbbf24' }}>
+              Warning: {MAX_VIOLATIONS + 1 - violationCount} violation{MAX_VIOLATIONS + 1 - violationCount !== 1 ? 's' : ''} remaining before auto-submission
+            </div>
+          )}
         </div>
       )}
 
@@ -873,6 +956,24 @@ const ProctorCamera = ({
           setFullscreenReady(isDocumentFullscreen());
         }}
       />
+
+      {/* Clipboard guard notice — separate from the violation toast pipeline
+          because a blocked copy/paste is a prevention message, not a strike. */}
+      {clipboardNotice && (
+        <div
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-[210] flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium shadow-lg"
+          style={{
+            background: 'var(--surface, #fff)',
+            color: 'var(--text, #111)',
+            border: '1px solid var(--rag-amber, #f59e0b)'
+          }}
+          role="alert"
+          aria-live="assertive"
+        >
+          <span aria-hidden="true">🚫</span>
+          {clipboardNotice}
+        </div>
+      )}
     </>
   );
 };

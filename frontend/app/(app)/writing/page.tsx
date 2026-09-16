@@ -13,7 +13,6 @@ import {
 import { FullscreenPrompt } from "@/components/FullscreenPrompt";
 import { FullscreenGuard } from "@/components/FullscreenGuard";
 import { CameraPreview } from "@/components/proctoring/CameraPreview";
-import { ExamSidebar, type ExamQuestionStatus } from "@/components/ExamSidebar";
 import { ReviewCard } from "@/components/ReviewCard";
 import { LevelSelect, type DifficultyLevel } from "@/components/LevelSelect";
 import { useProctoring } from "@/lib/proctoring";
@@ -62,7 +61,10 @@ function Writing() {
   const [showInstructions, setShowInstructions] = useState(false);
   const [writeSeconds, setWriteSeconds] = useState(0);
   const [difficulty, setDifficulty] = useState<DifficultyLevel>("");
+  const [sittingId, setSittingId] = useState<string | null>(null);
   const openedAt = useRef<number>(0);
+  const textRef = useRef(text);
+  textRef.current = text;
 
   const prompt = prompts[currentIndex] ?? null;
 
@@ -72,43 +74,53 @@ function Writing() {
     const key = `writing-draft-${prompt.id}`;
     const saved = window.localStorage.getItem(key);
     if (saved && !text) setText(saved);
+    // Save to localStorage on a 2s interval using ref to avoid stale closures
     const timer = window.setInterval(() => {
-      window.localStorage.setItem(key, text);
+      window.localStorage.setItem(key, textRef.current);
     }, 2_000);
     return () => window.clearInterval(timer);
-  }, [stage, prompt, text]);
+  }, [stage, prompt]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
 
-  // Auto-start: pick 10 random general prompts
+  // Auto-start: serve the student's next writing set in rotation.
+  // The set engine picks their first unfinished set (set 1 first, then set 2,
+  // ...), so a completed set is never served to the same student again until
+  // the whole rotation has been seen. Writing sets hold writing prompts only.
   async function autoStart() {
     setStage("loading");
     setProblem("");
     try {
-      // Fetch all prompts, filter to general, pick 10 random
-      const allPrompts = await writingApi.prompts();
-      const general = allPrompts.filter(
-        (p) => !p.company || p.company === "" || p.company === "General"
+      const chosen = await writingApi.nextSet();
+      const rows: WritingPromptRow[] = (chosen.prompts ?? []).map(
+        (row: any) => ({
+          id: row.prompt_id,
+          title: row.title,
+          kind: row.kind,
+          company: "",
+          scenario: row.scenario ?? "",
+          prompt: row.prompt ?? "",
+          min_words: row.min_words ?? 120,
+          suggested_minutes: row.suggested_minutes ?? 20,
+          key_points: row.key_points ?? [],
+          best_score: null,
+        })
       );
-      const pool = general.length > 0 ? general : allPrompts;
-      // Shuffle and take 10
-      const shuffled = [...pool].sort(() => Math.random() - 0.5);
-      const selected = shuffled.slice(0, Math.min(10, shuffled.length));
-      if (selected.length === 0) {
-        setProblem("No writing prompts available yet.");
+      if (rows.length === 0) {
+        setProblem("No writing sets are active yet. Ask your administrator to build one in the Question Bank.");
         setStage("intro");
         return;
       }
-      // Mark all selected prompts as attempted
-      for (const p of selected) {
+      for (const p of rows) {
         markAttempted("writing", p.id);
       }
-      setPrompts(selected);
+      setPrompts(rows);
       setCurrentIndex(0);
       setText("");
       setResult(null);
       openedAt.current = Date.now();
       setWriteSeconds(0);
+      setSittingId(chosen.sitting_id);
       setStage("write");
     } catch (err) {
       const msg = err instanceof ApiError ? err.detail : "Could not load writing prompts";
@@ -149,7 +161,10 @@ function Writing() {
       openedAt.current = Date.now();
       setStage("write");
     } else {
-      // All done — show review with camera stopped
+      // All done — close the sitting so the set leaves the rotation, then show review.
+      if (sittingId) {
+        void writingApi.completeSet(sittingId).catch(() => {});
+      }
       proctoring.stopCamera();
       setExamMode(false);
       setStage("review");
@@ -182,14 +197,6 @@ function Writing() {
     const isCompany = prompt.company && prompt.company !== "" && prompt.company !== "General";
     const companyLabel = isCompany ? "Company Round" : "General";
 
-    // Build question statuses for all prompts in the set
-    const questionStatuses: ExamQuestionStatus[] = prompts.map((p, i) => ({
-      id: p.id,
-      index: i + 1,
-      answered: i < currentIndex || (i === currentIndex && text.trim().length > 0),
-      selectedOption: null,
-    }));
-
     const totalWriteTime = 1200; // 20 minutes
     const remainingSeconds = Math.max(0, totalWriteTime - writeSeconds);
     const remainingMinutes = Math.floor(remainingSeconds / 60);
@@ -210,6 +217,12 @@ function Writing() {
           <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
             Task {currentIndex + 1} of {prompts.length}
           </span>
+          {isCompany && (
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                  style={{ background: "color-mix(in srgb, var(--secondary) 15%, var(--surface))", color: "var(--secondary)" }}>
+              {prompt.company}
+            </span>
+          )}
           <div className="flex-1" />
           <span className="text-xs text-muted">
             {currentIndex} of {prompts.length} completed

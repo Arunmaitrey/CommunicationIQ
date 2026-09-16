@@ -1,4 +1,4 @@
-"""Tier 1 — word accuracy against the item's reference text.
+"""Word accuracy against the item's reference text.
 
 For Repeat Sentence this is the task: reproduce the sentence. For Read Aloud
 it catches skipped, added and swapped words. It is computed by aligning the
@@ -133,7 +133,7 @@ class ReferenceMatchAccuracy:
                 task_type: str = "",
                 alternatives: tuple[str, ...] = ()) -> AccuracyResult:
         meta = ProviderMeta(provider_id="", provider_key=self.provider_key,
-                            version=self.version, tier=1)
+                            version=self.version, tier=1)  # ML-assisted
 
         reference = normalise(reference_text)
         heard = normalise(transcript.text)

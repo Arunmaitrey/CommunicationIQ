@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from app.config import settings
 from app.invitations import CANDIDATE_ROLE
 from app.db import ensure_platform_models, ensure_tenant_models, func, select, Session
+from app import audit
 from app import formats
 from app.deps import Principal, PlatformSession, TenantSession, require_roles
 from app.engine.audio import AudioDecodeError, decode_wav, signal_quality
@@ -46,7 +47,7 @@ from app.models.tenant import (Attempt, ConsentRecord, ExamReview, FeatureRecord
                                 ResponseAudio, ScoreRecord, SimulationProfile,
                                 TaskItem)
 from app.schemas import (AnswerSubmission, AttemptResult, CandidateResume,
-                         NarrationOut, PromptResponse, ResponseMetrics,
+                         PromptResponse, ResponseMetrics,
                          ReviewRequest, ReviewOut, RunnerItem, RunnerPayload,
                          StartAttemptRequest, WordTimingOut)
 from app.storage import get_storage, recording_key
@@ -294,6 +295,40 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
                 and source.status == "scored"):
             source_attempt_id = source.id
 
+    # One sitting at a time, across devices.
+    #
+    # QA: the same account could be open on a phone and on a laptop and start
+    # two different assessments at once, so two devices wrote into one
+    # candidate's record and neither knew about the other. A sitting that is
+    # still open and still inside its own clock is the candidate's current one:
+    # starting the same paper returns it (a reload is not a second sitting,
+    # which is also what makes "resume" work), and starting a different paper
+    # is refused until the open one is finished or ended. An expired sitting
+    # blocks nobody -- otherwise a candidate who walked away from a paper would
+    # be locked out of the product until an admin intervened.
+    open_attempt = (await session.execute(
+        select(Attempt).where(
+            Attempt.user_id == principal.user_id,
+            Attempt.status.in_(("created", "in_progress")),
+        ).order_by(Attempt.created_at.desc())
+    )).scalars().first()
+
+    if open_attempt is not None:
+        open_profile = await session.get(SimulationProfile, open_attempt.profile_id)
+        minutes = open_profile.estimated_minutes if open_profile else 0
+        still_open = not app_deadline.clock_for(
+            open_attempt.started_at or open_attempt.created_at, minutes).expired
+        if still_open:
+            if open_attempt.profile_id == profile.id:
+                # Same paper, still open: hand back where they left off rather
+                # than minting a second attempt against the same sitting.
+                return await _runner_payload(session, open_attempt, profile)
+            raise HTTPException(
+                status.HTTP_409_CONFLICT,
+                "You already have an assessment in progress"
+                + (f" ({open_profile.name})" if open_profile else "")
+                + ". Finish or end that one before starting another.")
+
     prior = (await session.execute(
         select(func.count()).select_from(Attempt)
         .where(Attempt.user_id == principal.user_id, Attempt.profile_id == profile.id)
@@ -398,6 +433,12 @@ async def start_attempt(body: StartAttemptRequest, principal: Principal,
                 position += 1
 
     await session.commit()
+    await audit.record(principal, "attempt.started",
+                       entity="Attempt", entity_id=attempt.id,
+                       after={"profile_id": profile.id, "mode": attempt.mode,
+                              "attempt_number": attempt.attempt_number,
+                              "status": "created", "ip": _client_ip(request)},
+                       ip_address=_client_ip(request))
     payload = await _runner_payload(session, attempt, profile)
     # Warm the prompt-audio cache for every clip this attempt will play. On
     # real hardware the first Listen & Repeat clip took 12 s and a later one
@@ -457,6 +498,36 @@ def _deduplicate(pool: list, used: set[str], key: str = "id") -> list:
     return [i for i in pool if getattr(i, key, None) not in used]
 
 
+# Company tags that mean "the shared pool". Anything else on a question is
+# another client's content.
+_GENERAL_COMPANY = {"", "general", "General", "GENERAL", "all", "All"}
+
+
+def _company_tiers(pool: list, company: str) -> list:
+    """This company's items first, then general items -- never another company's.
+
+    The previous rule was ``company != this company`` for the fallback pool,
+    which quietly means "every other client's questions too". QA caught a
+    Cognizant question inside an ADP paper and IBM/Infosys content in a
+    Deloitte sitting; this is that bug. A named item from a different company
+    is dropped rather than used to pad a section: a shorter paper is a
+    QA-visible gap, while another client's leaked content is a correctness and
+    confidentiality failure.
+    """
+    if not company:
+        return pool
+    mine: list = []
+    general: list = []
+    for item in pool:
+        tag = (getattr(item, "company", "") or "").strip()
+        if tag == company:
+            mine.append(item)
+        elif tag in _GENERAL_COMPANY:
+            general.append(item)
+        # else: authored for a different company - deliberately excluded
+    return mine + general
+
+
 # The most questions any single exam section will ever serve, whatever the
 # profile asks for. The question banks (superadmin) hold far more than one
 # sitting needs; a cap keeps every exam legible and answerable (Option B),
@@ -486,11 +557,9 @@ async def _pick_writing_prompts(session: TenantSession,
                                     WritingPrompt.kind.in_(sorted(allowed)))
     )).scalars().all())
 
-    # Prefer company-tagged prompts, fall back to general pool.
-    if company:
-        company_pool = [i for i in pool if getattr(i, "company", "") == company]
-        general_pool = [i for i in pool if getattr(i, "company", "") != company]
-        pool = company_pool + general_pool
+    # Prefer company-tagged prompts, then the general pool; never another
+    # company's prompts (see _company_tiers).
+    pool = _company_tiers(pool, company)
     pool = app_selection.eligible(pool, _pool_of(section), "writing_prompt")
 
     # Cross-exam deduplication: avoid prompts already used by this user.
@@ -533,11 +602,9 @@ async def _pick_quiz_items(session: TenantSession, section: ProfileSection,
                                QuizItem.status == "published")
     )).scalars().all())
 
-    # Prefer company-tagged questions, fall back to general pool.
-    if company:
-        company_pool = [i for i in pool if getattr(i, "company", "") == company]
-        general_pool = [i for i in pool if getattr(i, "company", "") != company]
-        pool = company_pool + general_pool
+    # Prefer company-tagged questions, then the general pool; never another
+    # company's questions (see _company_tiers).
+    pool = _company_tiers(pool, company)
 
     # Cross-exam deduplication: avoid questions already used by this user.
     if user_id:
@@ -616,11 +683,9 @@ async def _pick_items(session: TenantSession, section: ProfileSection,
     )).scalars().all())
 
     # When a profile targets a company, prefer its questions and fall back
-    # to general pool so the section is never empty.
-    if company:
-        company_pool = [i for i in pool if getattr(i, "company", "") == company]
-        general_pool = [i for i in pool if getattr(i, "company", "") != company]
-        pool = company_pool + general_pool
+    # to the general pool so the section is never empty. Another company's
+    # items are never a fallback (see _company_tiers).
+    pool = _company_tiers(pool, company)
 
     # Narrow before choosing, never after. Choosing adaptively and then
     # filtering would discard exactly the items the ability estimate picked.
@@ -981,6 +1046,7 @@ async def _runner_payload(session: TenantSession, attempt: Attempt,
             built = _written_item(r, section, prompt)
             built.section_budget_seconds = budgets.get(section.title, 0)
             built.answered = _answered(r)
+            built.is_practice = bool(getattr(r, "is_practice", False))
             for k, v in _flags(section).items():
                 setattr(built, k, v)
             payload_items.append(built)
@@ -993,6 +1059,7 @@ async def _runner_payload(session: TenantSession, attempt: Attempt,
             built = _select_item(r, section, question, passages)
             built.section_budget_seconds = budgets.get(section.title, 0)
             built.answered = _answered(r)
+            built.is_practice = bool(getattr(r, "is_practice", False))
             for k, v in _flags(section).items():
                 setattr(built, k, v)
             payload_items.append(built)
@@ -1035,6 +1102,7 @@ async def _runner_payload(session: TenantSession, attempt: Attempt,
             key_points=[str(c) for c in cues if str(c).strip()],
             section_budget_seconds=budgets.get(section.title, 0),
             answered=_answered(r),
+            is_practice=bool(getattr(r, "is_practice", False)),
             **_flags(section),
         ))
 
@@ -1111,7 +1179,7 @@ async def serve_prompt(attempt_id: str, response_id: str, principal: Principal,
     Until real prompt audio exists (SIM-06), the text is returned for the
     browser to speak. That does put the sentence in a network response a
     determined student could read, which is an accepted M1 trade-off in
-    practice mode and the reason pre-rendered audio is part of the Tier-1
+    practice mode and the reason pre-rendered audio is part of the speech engine
     work rather than optional polish.
     """
     await _own_attempt(session, principal, attempt_id)
@@ -1132,13 +1200,15 @@ async def serve_prompt(attempt_id: str, response_id: str, principal: Principal,
     # as "the prompt could not be played", and a candidate was asked four
     # questions about an announcement they never heard.
     spoken, accent = "", "indian"
+    audio_key = ""
     if item is not None:
         spoken = (item.reference_text
                   if app_sections.speaks_reference(section.task_type)
                   else item.prompt_text)
         accent = item.prompt_accent
+        audio_key = getattr(item, "prompt_audio_key", "")
     elif response.quiz_item_id:
-        spoken, accent = await _heard_stimulus(session, response, section)
+        spoken, accent, audio_key = await _heard_stimulus(session, response, section)
 
     if not spoken:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Item not found")
@@ -1157,11 +1227,13 @@ async def serve_prompt(attempt_id: str, response_id: str, principal: Principal,
     response.prompt_served_at = datetime.now(timezone.utc)
     await session.commit()
 
-    # Real prompt audio where the host can synthesise it (see app.tts). Runs off
-    # the event loop because it shells out. Returns None on a host without the
-    # tools, and the runner falls back to the browser voice -- so the count
-    # above is committed either way and one-shot holds regardless of audio.
-    audio_url = await asyncio.to_thread(tts.data_uri, spoken, accent)
+    # Use pre-recorded audio if available, otherwise synthesize via TTS.
+    audio_url = None
+    if audio_key:
+        # Build the URL the frontend can fetch directly from the asset endpoint.
+        audio_url = f"/api/v1/platform/assets/{audio_key}"
+    if not audio_url:
+        audio_url = await asyncio.to_thread(tts.data_uri, spoken, accent)
 
     return PromptResponse(
         text=spoken,
@@ -1171,8 +1243,8 @@ async def serve_prompt(attempt_id: str, response_id: str, principal: Principal,
     )
 
 
-async def _heard_stimulus(session, response, section) -> tuple[str, str]:
-    """The words behind a select-mode listening item, and the accent to say them in.
+async def _heard_stimulus(session, response, section) -> tuple[str, str, str]:
+    """The words behind a select-mode listening item, accent, and audio_key.
 
     Both listening task types store their audio as a ListeningPassage:
     comprehension shares one passage across several questions, response
@@ -1185,15 +1257,15 @@ async def _heard_stimulus(session, response, section) -> tuple[str, str]:
     if app_sections.skill_of(section.task_type) != "listening":
         # A reading question has nothing to play. Its passage is on the
         # screen, which is the task.
-        return "", "indian"
+        return "", "indian", ""
 
     question = await session.get(QuizItem, response.quiz_item_id or "")
     if question is None or not question.passage_id:
-        return "", "indian"
+        return "", "indian", ""
     passage = await session.get(ListeningPassage, question.passage_id)
     if passage is None:
-        return "", "indian"
-    return passage.transcript, passage.accent
+        return "", "indian", ""
+    return passage.transcript, passage.accent, getattr(passage, "audio_key", "")
 
 
 @router.post("/{attempt_id}/responses/{response_id}/audio",
@@ -1681,12 +1753,17 @@ async def submit(attempt_id: str, principal: Principal, session: TenantSession,
         log.warning("content scoring failed for attempt %s: %s", attempt_id, exc)
 
     outcome = await finalise_attempt(session, attempt_id)
+    await audit.record(principal, "attempt.submitted",
+                       entity="Attempt", entity_id=attempt_id,
+                       after={"status": "scored", "overall": outcome.overall,
+                              "responses_count": len(outcome.responses),
+                              "proctor_strikes": attempt.proctor_strikes,
+                              "elapsed_ms": outcome.elapsed_ms},
+                       ip_address=_client_ip(request))
     await _run_game_hook(session, platform, principal, attempt, outcome)
     attempt = (await session.execute(
         select(Attempt).where(Attempt.id == attempt_id)
     )).scalars().first() or attempt
-    await _ensure_and_kick_narration(session, background,
-                                     principal.tenant_slug or "", attempt)
     return await _result(session, attempt, scoring_ms=outcome.elapsed_ms,
                          biggest_lever_override=outcome.biggest_lever)
 
@@ -1699,6 +1776,7 @@ class ProctorEventIn(BaseModel):
     away_events: int = 0
     multi_face_events: int = 0
     violation_count: int = 0
+    clipboard_events: int = 0
 
 
 @router.post("/{attempt_id}/proctor-events", status_code=status.HTTP_204_NO_CONTENT)
@@ -1718,6 +1796,7 @@ async def record_proctor_event(attempt_id: str, payload: ProctorEventIn,
         "away_events": payload.away_events,
         "multi_face_events": payload.multi_face_events,
         "violation_count": payload.violation_count,
+        "clipboard_events": payload.clipboard_events,
         "recorded_at": datetime.now(timezone.utc).isoformat(),
     })
     attempt.proctor_violation_count = max(
@@ -2104,14 +2183,11 @@ async def export_csv(attempt_id: str, principal: Principal,
 
 @router.get("/{attempt_id}/result", response_model=AttemptResult)
 async def result(attempt_id: str, principal: Principal,
-                 session: TenantSession,
-                 background: BackgroundTasks) -> AttemptResult:
+                 session: TenantSession) -> AttemptResult:
     """The report. Polled by the result page while an attempt is still scoring.
 
-    The provider is NEVER called here. This endpoint only ensures the durable
-    narration job exists on the scored transition and reads its current state;
-    generation happens in a BackgroundTask and the sweeper, never inline, so a
-    hundred polls make zero provider calls.
+    Fully deterministic: the result is computed on read, no background jobs
+    and no provider calls.
     """
     attempt = await _own_attempt(session, principal, attempt_id)
 
@@ -2120,10 +2196,8 @@ async def result(attempt_id: str, principal: Principal,
         await finalise_attempt(session, attempt_id)
         attempt = (await session.execute(
             select(Attempt).where(Attempt.id == attempt_id)
-        )).scalars().first() or attempt
+    )).scalars().first() or attempt
 
-    await _ensure_and_kick_narration(session, background,
-                                     principal.tenant_slug or "", attempt)
     return await _result(session, attempt)
 
 
@@ -2185,64 +2259,6 @@ def _pauses_between(segments: list[dict]) -> list[dict]:
         if gap > 0:
             out.append({"start_ms": a["end_ms"], "end_ms": b["start_ms"], "ms": gap})
     return out
-
-
-async def _narration_out(session: TenantSession, attempt_id: str) -> NarrationOut | None:
-    """Read the AI narration for an attempt. Read-only — never calls a provider.
-
-    This is what the polled result endpoint exposes: whatever state the durable
-    job is in right now. It maps content fields only when the job is ready, so
-    a client can never mistake an in-flight job for a finished explanation.
-    """
-    from app.models.tenant import AttemptNarration
-
-    row = (await session.execute(
-        select(AttemptNarration).where(AttemptNarration.attempt_id == attempt_id)
-    )).scalars().first()
-    if row is None:
-        return None
-    ready = row.status == "ready"
-    return NarrationOut(
-        status=row.status,
-        headline=row.headline if ready else "",
-        summary=row.summary if ready else "",
-        primary_focus=row.primary_focus if ready else "",
-        practice_action=row.practice_action if ready else "",
-        caveats=list(row.caveats or []) if ready else [],
-        model_version=row.model_version if ready else "",
-        generated_at=row.generated_at if ready else None,
-    )
-
-
-async def _narration_kick_task(slug: str, narration_id: str) -> None:
-    """Fire-and-forget generation of one job. Failures are the job's problem,
-    recorded on its row and retried by the sweeper — never the request's."""
-    from app.narration.worker import kick
-    try:
-        await kick(slug, narration_id)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("narration kick failed id=%s: %s", narration_id, exc)
-
-
-async def _ensure_and_kick_narration(session: TenantSession,
-                                     background: BackgroundTasks,
-                                     slug: str, attempt: Attempt) -> None:
-    """On the scored transition, create the narration job once and kick it.
-
-    Safe to call on every poll: ensure_row is idempotent, and the fast-path
-    kick is scheduled only for a freshly created, still-unclaimed job. Never
-    raises into the report path — a narration problem cannot break a result.
-    """
-    if attempt.status != "scored":
-        return
-    try:
-        from app.narration import service
-        row = await service.ensure_row(session, attempt)
-    except Exception as exc:  # noqa: BLE001
-        log.warning("narration ensure failed for %s: %s", attempt.id, exc)
-        return
-    if row is not None and row.status == "pending" and row.attempt_count == 0:
-        background.add_task(_narration_kick_task, slug, row.id)
 
 
 def _diagnosis_out(primary, available: dict, source_attempt: Attempt,
@@ -2313,6 +2329,20 @@ async def _result(session: TenantSession, attempt: Attempt,
                                       biggest_lever)
 
     profile = await session.get(SimulationProfile, attempt.profile_id)
+
+    # Look up institution name for the report header.
+    institution_name = ""
+    try:
+        from app.db import control_db
+        db = control_db()
+        # The attempt stores tenant_id on the user record; look up the Tenant.
+        user_doc = await db.users.find_one({"_id": attempt.user_id})
+        if user_doc and user_doc.get("tenant_id"):
+            tenant_doc = await db.tenants.find_one({"_id": user_doc["tenant_id"]})
+            if tenant_doc:
+                institution_name = tenant_doc.get("name", "")
+    except Exception:
+        pass
 
     scores = list((await session.execute(
         select(ScoreRecord).where(ScoreRecord.attempt_id == attempt.id,
@@ -2485,11 +2515,11 @@ async def _result(session: TenantSession, attempt: Attempt,
     # The single source of truth for "what should I work on first?".
     #
     # app/diagnosis.py applies the product rule once; the summary sentence,
-    # the practice priorities, the practice result and the AI narration all
+    # the practice priorities and the practice result all
     # consume the object it returns. The frozen engine's ``biggest_lever``
     # is still computed (it is engine output and part of the scoring
     # snapshot) but it is no longer a diagnosis surface: nothing below
-    # pins it, renders it as advice, or hands it to the narrator.
+    # pins it or renders it as advice.
     from app import diagnosis as app_diagnosis
     lever = biggest_lever_override or biggest_lever(dimensions)
     counts: dict[str, int] = {}
@@ -2664,9 +2694,9 @@ async def _result(session: TenantSession, attempt: Attempt,
         responses=rows,
         scored_at=attempt.scored_at,
         scoring_ms=scoring_ms,
-        narration=await _narration_out(session, attempt.id),
         proctor_events=getattr(attempt, "proctor_events", []),
         proctor_strikes=getattr(attempt, "proctor_strikes", 0),
+        institution_name=institution_name,
         **_reporting_for(overall_row.score if overall_row else None,
                          dimensions, skill_out, dimension_notes,
                          _unscored_reasons(rows, dimensions), rows,

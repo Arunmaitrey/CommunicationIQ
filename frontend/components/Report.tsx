@@ -1,9 +1,9 @@
 "use client";
 import { useState } from "react";
-import { ChevronDown, Download, FileText, Loader2, Sparkles, ThumbsUp, TrendingUp } from "lucide-react";
+import { ChevronDown, Download, FileText, ThumbsUp, TrendingUp } from "lucide-react";
 import { Section } from "@/components/ui";
 import { DIMENSION_LABEL } from "@/lib/dimensions";
-import type { AttemptResult, EvidenceRow, Highlight, Narration, SectionResult,
+import type { AttemptResult, EvidenceRow, Highlight, SectionResult,
               SkillScore } from "@/lib/api";
 import { getToken } from "@/lib/api";
 
@@ -27,88 +27,6 @@ export function Summary({ text }: { text: string }) {
   );
 }
 
-
-/** "What your assessment says" — the AI explanation of the frozen result.
- *
- *  It never stands in for the deterministic report, which renders in full
- *  below it. Three honest states:
- *    ready       — the AI explanation, tagged as AI-generated and uncalibrated
- *    in-flight   — a "being prepared" note; the page keeps polling
- *    failed/none — a plain "couldn't generate" note, or nothing at all
- *
- *  It is never given the deterministic summary to display as if the model
- *  wrote it: when there is no AI text, it says so, and the real summary is
- *  the separate <Summary> card underneath.
- */
-export function NarrationCard({ narration }: { narration: Narration | null }) {
-  if (!narration) return null;
-
-  const inFlight = narration.status === "pending"
-    || narration.status === "processing"
-    || narration.status === "retry_pending";
-
-  return (
-    <div className="ds-card p-4 mb-4" style={{ borderColor: "var(--primary)" }}>
-      <div className="flex items-center gap-2 mb-2">
-        <Sparkles size={15} style={{ color: "var(--primary)" }} />
-        <span className="text-[11px] font-bold uppercase tracking-wider"
-              style={{ color: "var(--primary)" }}>
-          What your assessment says
-        </span>
-        {narration.status === "ready" && (
-          <span className="text-[10px] text-muted ml-auto">
-            Generated · not yet calibrated
-          </span>
-        )}
-      </div>
-
-      {inFlight && (
-        <div className="flex items-center gap-2">
-          <Loader2 size={15} className="animate-spin text-muted" />
-          <p className="text-sm text-muted leading-relaxed">
-            We&apos;re preparing your personalised explanation of these results.
-            Your full results are below.
-          </p>
-        </div>
-      )}
-
-      {narration.status === "failed" && (
-        <p className="text-sm text-muted leading-relaxed">
-          We couldn&apos;t generate the personalised explanation right now. Your
-          assessment results are still available below.
-        </p>
-      )}
-
-      {narration.status === "ready" && (
-        <>
-          <p className="text-base font-bold mb-1">{narration.headline}</p>
-          <p className="text-sm leading-relaxed mb-3">{narration.summary}</p>
-          <div className="grid sm:grid-cols-2 gap-3">
-            <div className="ds-inset p-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1">
-                Focus on
-              </div>
-              <p className="text-xs leading-relaxed">{narration.primary_focus}</p>
-            </div>
-            <div className="ds-inset p-3">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1">
-                Try this
-              </div>
-              <p className="text-xs leading-relaxed">{narration.practice_action}</p>
-            </div>
-          </div>
-          {narration.caveats.length > 0 && (
-            <ul className="mt-3 space-y-0.5">
-              {narration.caveats.map((c) => (
-                <li key={c} className="text-[11px] text-muted leading-relaxed">· {c}</li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
 
 const LABEL = DIMENSION_LABEL;
 

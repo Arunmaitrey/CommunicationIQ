@@ -1,4 +1,4 @@
-"""Tier 1 — fillers, repetitions and false starts (ENG-06).
+"""Fillers, repetitions and false starts (ENG-06).
 
 Reads the transcript and the pause structure together, because the two say
 different things: "um" is a filler wherever it appears, but a repeated word is
@@ -49,7 +49,7 @@ class TranscriptDisfluency:
     def analyse(self, transcript: TranscriptResult,
                 vad: VADResult) -> DisfluencyResult:
         meta = ProviderMeta(provider_id="", provider_key=self.provider_key,
-                            version=self.version, tier=1)
+                            version=self.version, tier=1)  # ML-assisted
 
         words = [w for w in transcript.words if _clean(w.word)]
         if len(words) < MIN_WORDS_TO_JUDGE:

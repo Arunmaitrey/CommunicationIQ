@@ -503,6 +503,8 @@ export interface GamificationConfig {
 export const api = {
   login: (email: string, password: string) =>
     post<{ token: string; user: SessionUser }>("/auth/login", { email, password }),
+  forgotPassword: (email: string) =>
+    post<{ ok: boolean }>("/auth/forgot-password", { email }),
   logout: () => post<{ ok: boolean }>("/auth/logout", {}),
   me: () => get<SessionUser>("/auth/me"),
   savePreferences: (prefs: Record<string, unknown>) =>
@@ -577,9 +579,6 @@ export const api = {
   platformBulkUploadQuestions: (body: { items: Record<string, unknown>[]; category: string; company: string }) =>
     post<{ ok: boolean; created: number; errors: { index: number; error: string }[]; total: number }>(
       "/platform/questions/bulk", body),
-  platformGenerateQuestions: () =>
-    post<{ ok: boolean; generated: Record<string, number> }>(
-      "/platform/questions/generate", {}),
   platformListCompanies: () =>
     get<{ id: string; name: string; slug: string; color: string; description: string; is_active: boolean; question_counts: Record<string, number> }[]>(
       "/platform/companies"),
@@ -616,7 +615,6 @@ export const api = {
   platformAudit: () => get<AuditRow[]>("/platform/audit"),
   platformReviews: () => get<ReviewRow[]>("/platform/reviews"),
   platformGamification: () => get<GamificationConfig>("/platform/gamification"),
-  narrationSettings: () => get<NarrationSettings>("/platform/narration/settings"),
 
   // Plans
   platformPlans: () => get<any[]>("/platform/plans"),
@@ -652,6 +650,14 @@ export const api = {
   createExamTest: (body: any) => post<{ id: string; ok: boolean }>("/platform/exam-tests", body),
   updateExamTest: (id: string, body: any) => request<any>(`/platform/exam-tests/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
   deleteExamTest: (id: string) => request<any>(`/platform/exam-tests/${id}`, { method: "DELETE" }),
+  examTestQuestions: (testId: string, module?: string) =>
+    get<any>(`/platform/exam-tests/${testId}/questions${module ? `?module=${module}` : ""}`),
+  addExamTestQuestion: (testId: string, module: string, questionId: string) =>
+    post<any>(`/platform/exam-tests/${testId}/questions`, { module, question_id: questionId }),
+  removeExamTestQuestion: (testId: string, module: string, questionId: string) =>
+    request<any>(`/platform/exam-tests/${testId}/questions`, {
+      method: "DELETE", body: JSON.stringify({ module, question_id: questionId }),
+    }),
 
   // Exam Schedules
   platformExamSchedules: () => get<any[]>("/platform/exam-schedules"),
@@ -660,13 +666,24 @@ export const api = {
   deleteExamSchedule: (id: string) => request<any>(`/platform/exam-schedules/${id}`, { method: "DELETE" }),
   studentExamSchedules: () => get<any[]>("/student/exam-schedules"),
 
-  // Question Sets
-  platformQuestionSets: (module?: string) => get<any[]>(`/platform/question-sets${module ? `?module=${module}` : ""}`),
-  generateQuestionSets: (module: string, count: number) => post<any>(`/platform/question-sets/generate?module=${module}&count=${count}`, {}),
-  autoCreateSets: () => post<any>("/platform/question-sets/auto-create", {}),
-  updateQuestionSet: (id: string, body: any) => request<any>(`/platform/question-sets/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  deleteQuestionSet: (id: string) => request<any>(`/platform/question-sets/${id}`, { method: "DELETE" }),
-  questionSetStats: () => get<any>("/platform/question-sets/stats"),
+  // Question Sets. The console (Question Bank, Question Sets, Exam Tests) talks
+  // to /platform/sets directly, so the six /question-sets wrappers that used to
+  // sit here were unreachable duplicates of one API described twice.
+  platformSets: (params: { module?: string; status?: string; company?: string } = {}) => {
+    const q = new URLSearchParams();
+    if (params.module) q.set("module", params.module);
+    if (params.status) q.set("status", params.status);
+    if (params.company) q.set("company", params.company);
+    const qs = q.toString();
+    return get<any[]>(`/platform/sets${qs ? `?${qs}` : ""}`);
+  },
+  platformSet: (id: string) => get<any>(`/platform/sets/${id}`),
+  createSet: (module: string, company = "") =>
+    post<any>("/platform/sets", { module, company }),
+  setSummary: () => get<any>("/platform/sets/summary"),
+  setSummaryByCompany: () => get<any>("/platform/sets/summary-by-company"),
+  updateSet: (id: string, body: any) => request<any>(`/platform/sets/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+  deleteSet: (id: string) => request<any>(`/platform/sets/${id}`, { method: "DELETE" }),
 
   // Public plans (for student home page)
   publicPlans: () => get<any[]>("/platform/plans"),
@@ -682,25 +699,6 @@ export const api = {
   notificationsReadAll: () => post<any>("/notifications/read-all", {}),
 };
 
-/** A stored secret, never returned whole. */
-export interface MaskedSecret { set: boolean; last4: string }
-
-export interface NarrationSettings {
-  narration_enabled: boolean;
-  narration_provider: string;
-  narration_model: string;
-  anthropic_api_key: MaskedSecret;
-  anthropic_base_url: string;
-  nvidia_base_url: string;
-  nvidia_model: string;
-  nvidia_api_key: MaskedSecret;
-  oss_base_url: string;
-  oss_model: string;
-  oss_api_key: MaskedSecret;
-  oss_temperature: number;
-  overridden: string[];
-  providers: string[];
-}
 
 // --------------------------------------------------------------------------
 // Attempt lifecycle (M1)
@@ -731,6 +729,8 @@ export interface RunnerItem {
   section_budget_seconds: number;
   /** The server already holds this item's answer; the runner resumes past it. */
   answered: boolean;
+  /** An unscored warm-up item. Shown, but never counted in question numbering. */
+  is_practice: boolean;
   /** Section behaviour as configuration (app.formats.section_behaviour). */
   fixed_window: boolean;
   allow_skip: boolean;
@@ -1002,7 +1002,7 @@ export interface AttemptResult {
   profile_id: string;
   profile_name: string;
   /** Format family (e.g. svar_style), so the page can say whose names the
-   *  sub-scores borrow: "Our estimate — not an SVAR result". */
+   *  sub-scores borrow: "Our estimate -- not an SVAR result". */
   profile_style: string;
   status: string;
   mode: string;
@@ -1020,6 +1020,8 @@ export interface AttemptResult {
   /** The single source of truth for "what should I work on first?". */
   primary_diagnosis: PrimaryDiagnosis | null;
   environment_note: string;
+  /** Institution / tenant name for the report header. */
+  institution_name: string;
 
   /* Reporting (Phase 8). All derived from measurements already in this
      payload, above the frozen scoring path. */
@@ -1057,7 +1059,6 @@ export interface AttemptResult {
   ip_address: string;
   started_at: string | null;
   submitted_at: string | null;
-  narration: Narration | null;
   previous: PreviousAttempt | null;
   priorities: ResultPriority[];
   practice: PracticeOutcome | null;
@@ -1067,19 +1068,6 @@ export interface AttemptResult {
   proctor_strikes: number;
 }
 
-/** The AI explanation and its job state. Content is populated only when
- *  status is "ready"; otherwise the card shows a being-prepared or
- *  couldn't-generate note — never deterministic text dressed up as AI. */
-export interface Narration {
-  status: "pending" | "processing" | "retry_pending" | "ready" | "failed";
-  headline: string;
-  summary: string;
-  primary_focus: string;
-  practice_action: string;
-  caveats: string[];
-  model_version: string;
-  generated_at: string | null;
-}
 
 const ATTEMPTS = "/student/attempts";
 
@@ -1445,6 +1433,10 @@ export const writingApi = {
   submit: (id: string, body: { text: string; minutes_spent: number }) =>
     post<WritingResult>(`/student/writing/prompts/${id}/submit`, body),
   submissions: () => get<WritingResult[]>("/student/writing/submissions"),
+  // Set-based rotation: the student's next unused writing set.
+  nextSet: () => get<any>("/student/writing/set/next"),
+  completeSet: (sittingId: string, score?: number | null) =>
+    post<any>("/student/writing/set/complete", { sitting_id: sittingId, score: score ?? null }),
 };
 
 // -- Reading ---------------------------------------------------------------
@@ -1487,6 +1479,10 @@ export const readingApi = {
            body: { answers: { item_id: string; selected_index: number | null }[];
                    read_ms: number }) =>
     post<ReadingResult>(`/student/reading/attempts/${attemptId}/submit`, body),
+  // Set-based rotation: the student's next unused reading set.
+  nextSet: () => get<any>("/student/reading/set/next"),
+  completeSet: (sittingId: string, score?: number | null) =>
+    post<any>("/student/reading/set/complete", { sitting_id: sittingId, score: score ?? null }),
 };
 
 // -- Listening -------------------------------------------------------------
@@ -1534,6 +1530,10 @@ export const listeningApi = {
            body: { answers: { item_id: string; selected_index: number | null }[];
                    plays_used: number }) =>
     post<ListeningResult>(`/student/listening/attempts/${attemptId}/submit`, body),
+  // Set-based rotation: the student's next unused listening set.
+  nextSet: () => get<any>("/student/listening/set/next"),
+  completeSet: (sittingId: string, score?: number | null) =>
+    post<any>("/student/listening/set/complete", { sitting_id: sittingId, score: score ?? null }),
 };
 
 
@@ -1572,6 +1572,10 @@ export const gameApi = {
 
 export const practiceApi = {
   nextQuiz: (count = 10, company?: string, difficulty?: string) => get<QuizItem[]>(`/student/quiz/next?count=${count}${company !== undefined ? `&company=${encodeURIComponent(company)}` : ""}${difficulty ? `&difficulty=${encodeURIComponent(difficulty)}` : ""}`),
+  // Speaking set rotation: the student's next unused speaking set.
+  nextSpeakingSet: () => get<any>("/student/speaking/set/next"),
+  completeSpeakingSet: (sittingId: string, score?: number | null) =>
+    post<any>("/student/speaking/set/complete", { sitting_id: sittingId, score: score ?? null }),
   submitQuiz: (answers: { item_id: string; selected_index: number | null }[]) =>
     post<QuizResult>("/student/quiz/submit", { answers }),
   mistakes: () => get<Mistake[]>("/student/mistakes"),
@@ -1582,8 +1586,6 @@ export const practiceApi = {
 
 export const operatorApi = {
   /** null = leave unchanged, "" = clear back to the environment default. */
-  updateNarrationSettings: (body: Record<string, unknown>) =>
-    put<NarrationSettings>("/platform/narration/settings", body),
   configureCapability: (capability: string, body: Record<string, unknown>) =>
     put<{ applied: boolean }>(`/platform/capabilities/${capability}`, body),
   setProviderActive: (id: string, active: boolean) =>

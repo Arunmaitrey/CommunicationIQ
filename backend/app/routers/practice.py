@@ -18,6 +18,7 @@ from beanie.operators import In, LTE, NE
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.deps import Principal, TenantModels, require_roles
+from app import audit
 from app.gamification import engine as game
 from app.schemas import (DrillCompletion, DrillOut, MistakeOut, QuizAnswer, QuizItemOut,
                          QuizResult, QuizResultItem, QuizSubmission)
@@ -71,7 +72,9 @@ async def next_quiz(principal: Principal, models: TenantModels,
     count = max(1, min(count, 200))
     weakest = await game.weakest_skills(models, principal.user_id, 2)
 
-    # Practice shows all published quiz items so students always have content.
+    # Practice shows published quiz items filtered by company.
+    # When company is not specified, default to general-only to prevent
+    # company-specific questions leaking to other companies' students.
     query = models.QuizItem.find(
         models.QuizItem.status == "published")
     if category:
@@ -81,6 +84,9 @@ async def next_quiz(principal: Principal, models: TenantModels,
             query = query.find(models.QuizItem.company == "")
         else:
             query = query.find(models.QuizItem.company == company)
+    else:
+        # No company param passed — default to general-only
+        query = query.find(models.QuizItem.company == "")
     # Difficulty filter
     if difficulty:
         from beanie.operators import GTE, LTE as DiffLTE
@@ -206,6 +212,12 @@ async def submit_quiz(body: QuizSubmission, principal: Principal,
     # Unconditional: the quest may already have been finished by an earlier
     # drill today, and the day still has to be counted exactly once.
     await game.qualify_today(models, config, principal.user_id)
+
+    await audit.record(principal, "quiz.submitted",
+                       entity="QuizItem", entity_id=body.session_id or "",
+                       after={"total": total, "correct": correct,
+                              "accuracy": round(accuracy, 3),
+                              "xp_awarded": award.awarded_xp})
 
     return QuizResult(
         total=total, correct=correct, accuracy=round(accuracy, 3),
@@ -477,3 +489,65 @@ def _drill_out(drill) -> DrillOut:
         mastery_before=drill.mastery_before, mastery_after=drill.mastery_after,
         created_at=drill.created_at, why="",
     )
+
+
+# --------------------------------------------------------------------------
+# Speaking sets — rotation practice for the speaking skill
+# --------------------------------------------------------------------------
+
+@router.get("/speaking/set/next")
+async def next_speaking_set(principal: Principal, models: TenantModels) -> dict:
+    """This student's next speaking practice set, in rotation.
+
+    Speaking sets hold TaskItems only — read aloud, repeat, short answer,
+    open response, story retell, sentence build. The rotation serves the first
+    set the student has not completed; items are shuffled inside the set with
+    their Q1..Q10 positions kept.
+    """
+    from app.practice_engine import next_set_for_practice
+    chosen = await next_set_for_practice(principal.user_id, "speaking")
+    if chosen is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "No speaking sets are active yet")
+
+    from app.db import control_db
+    db = control_db()
+    item_ids = [str(x) for x in chosen["question_ids"]]
+    docs = await db.task_items.find({"_id": {"$in": item_ids}}).to_list(100)
+    by_id = {str(d["_id"]): d for d in docs}
+
+    items = []
+    for pos, iid in enumerate(item_ids, start=1):
+        d = by_id.get(iid)
+        if d is None:
+            continue
+        items.append({
+            "position": pos,
+            "id": str(d["_id"]),
+            "task_type": d.get("task_type", ""),
+            "prompt_text": d.get("prompt_text", ""),
+            "reference_text": d.get("reference_text", ""),
+            "audio_key": d.get("prompt_audio_key", ""),
+            "seconds_allowed": d.get("seconds_allowed", 45),
+        })
+
+    return {
+        "sitting_id": chosen["sitting_id"],
+        "set_id": chosen["set_id"],
+        "set_number": chosen["set_number"],
+        "resumed": chosen["resumed"],
+        "items": items,
+    }
+
+
+@router.post("/speaking/set/complete")
+async def complete_speaking_set(body: dict, principal: Principal,
+                                models: TenantModels) -> dict:
+    """Close the sitting: the set leaves the rotation only now."""
+    from app.practice_engine import complete_sitting
+    result = await complete_sitting(
+        body.get("sitting_id", ""), principal.user_id,
+        score=body.get("score"))
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, result.get("error", "Sitting not found"))
+    return result

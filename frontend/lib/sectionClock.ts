@@ -47,10 +47,8 @@ export function groupNumbering(
   let no = 0, total = 0, mine = 0;
   for (const it of groupItems) {
     const clipScreen = it.ack_gate === "clip" && it.passage_ref !== "" && firstOfPassage.has(it.response_id);
-    if (clipScreen) total += 1;
     total += 1;
     if (mine === 0) {
-      if (clipScreen) no += 1;
       no += 1;
       if (it.response_id === responseId) mine = no;
     }

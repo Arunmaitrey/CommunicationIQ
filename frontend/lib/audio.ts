@@ -440,9 +440,18 @@ export async function playAudioUrl(url: string): Promise<boolean> {
   });
 }
 
-export async function speak(text: string, accent = "indian"): Promise<void> {
+/** Speak a prompt with the browser's speech engine.
+ *
+ *  Returns whether the engine actually started speaking. This matters because
+ *  Chrome parks the engine once a microphone is open: speak() then queues the
+ *  utterance, nothing plays, and no error event ever fires -- which is exactly
+ *  the "Listen carefully and then silence" report from QA. Detecting it here
+ *  lets the runner tell the student the audio failed instead of silently
+ *  moving them past a question they never heard.
+ */
+export async function speak(text: string, accent = "indian"): Promise<boolean> {
   const ss = typeof window !== "undefined" ? window.speechSynthesis : undefined;
-  if (!ss || !text) return;
+  if (!ss || !text) return false;
   const voice = await pickVoice(wantedLang(accent));
   return new Promise((resolve) => {
     const utterance = new SpeechSynthesisUtterance(text);
@@ -455,9 +464,14 @@ export async function speak(text: string, accent = "indian"): Promise<void> {
 
     // Resolve exactly once, however the utterance ends.
     let settled = false;
-    const done = () => { if (!settled) { settled = true; clearTimeout(guard); resolve(); } };
-    utterance.onend = done;
-    utterance.onerror = done;
+    let started = false;
+    const done = (played: boolean) => {
+      if (!settled) { settled = true; clearInterval(poll); clearTimeout(guard); clearTimeout(startGuard); resolve(played); }
+    };
+    utterance.onend = () => done(true);
+    // An error after playback began still counts as played; one before it
+    // means the candidate heard nothing.
+    utterance.onerror = () => done(started);
 
     // Chrome parks the speech engine after periods of inactivity and after a
     // getUserMedia session starts; speak() then silently does nothing until
@@ -467,11 +481,21 @@ export async function speak(text: string, accent = "indian"): Promise<void> {
     ss.resume();
     ss.speak(utterance);
 
+    // Watch the engine's queue: the moment speaking becomes true, playback is
+    // real and the failure path is off the table.
+    const poll = setInterval(() => {
+      if (ss.speaking || ss.pending) { started = true; clearInterval(poll); }
+    }, 250);
+
+    // If the queue never starts within 2.5s the voice silently failed (the
+    // parked-engine case above, or no voice installed at all). Report failure
+    // now rather than letting the student sit through the full-length guard.
+    const startGuard = setTimeout(() => { if (!started) done(false); }, 2500);
+
     // Safety net: if neither onend nor onerror ever fires -- a documented
-    // Chrome hang, and the case where the platform has no usable voice -- the
-    // runner must not sit on "Playing..." forever. Advance after a duration
-    // generous enough for the sentence to have finished if it did play.
-    const guard = setTimeout(done, Math.max(4000, text.length * 90));
+    // Chrome hang -- the runner must not sit on "Playing..." forever. Advance
+    // after a duration generous enough for the sentence to have finished.
+    const guard = setTimeout(() => done(started), Math.max(4000, text.length * 90));
   });
 }
 

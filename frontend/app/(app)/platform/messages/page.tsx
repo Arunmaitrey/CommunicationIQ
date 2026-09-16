@@ -96,7 +96,10 @@ function Messages() {
       </div>
 
       {loading ? (
-        <div className="text-xs text-muted p-4">Loading messages...</div>
+        <div className="flex flex-col items-center justify-center py-16 gap-3">
+          <div className="w-10 h-10 rounded-full border-[3px] border-[var(--border)] border-t-[var(--primary)] animate-spin" />
+          <div className="text-xs text-muted">Loading messages...</div>
+        </div>
       ) : messages.length === 0 ? (
         <div className="ds-card p-8 text-center">
           <MessageSquare size={32} className="mx-auto mb-2 text-muted" />
@@ -123,9 +126,9 @@ function Messages() {
                   </div>
                 </div>
                 <span className={`px-1.5 py-0.5 rounded text-[9px] font-medium ${
-                  msg.priority === "urgent" ? "bg-red-100 text-red-700" :
-                  msg.priority === "high" ? "bg-amber-100 text-amber-700" :
-                  "bg-gray-100 text-gray-600"
+                  msg.priority === "urgent" ? "status-pill status-bad" :
+                  msg.priority === "high" ? "status-pill status-warn" :
+                  "bg-surface2 text-muted"
                 }`}>
                   {msg.priority}
                 </span>

@@ -1,9 +1,8 @@
-"""Provider implementations, grouped by tier.
+"""Unified provider implementations.
 
-* ``tier0`` — heuristic/feature-based. No GPU, no API keys, no network.
-* ``tier1`` — local open models (faster-whisper, Silero-VAD, wav2vec2 GOP).
-* ``tier2`` — vendor APIs, promoted only after shadow evaluation.
+* ``energy_vad`` / ``feature_fluency`` — heuristic, no ML dependencies.
+* ``whisper_asr`` / ``wav2vec_gop`` / ``reference_accuracy`` / ``common_error_grammar`` / ``rubric_relevance`` / ``transcript_disfluency`` — ML-assisted, require torch.
 
 Nothing outside this package imports from it. Consumers go through the
-registry, which is what makes a tier swap a configuration change.
+registry, which is what makes a provider swap a configuration change.
 """

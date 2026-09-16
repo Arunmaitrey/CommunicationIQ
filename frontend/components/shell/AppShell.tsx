@@ -71,7 +71,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <div className={`flex-1 min-w-0 flex flex-col ${isExamRoute ? "" : ""}`}>
         {!isExamRoute && (
-        <header className="app-header flex items-center gap-3 px-4 h-14 border-b border-border bg-surface">
+        <header className="app-header flex items-center gap-3 px-4 h-14 border-b border-border">
           <button
             className="btn btn-icon btn-ghost md:hidden ds-focus"
             onClick={() => setMobileOpen(true)}
@@ -238,7 +238,7 @@ function NotificationBell({ user }: { user: SessionUser | null }) {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-96 max-h-[70vh] overflow-y-auto ds-card p-3 z-50 animate-fade-in">
+        <div className="absolute right-0 mt-2 w-72 sm:w-96 max-h-[70vh] overflow-y-auto ds-card p-3 z-50 animate-fade-in">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-bold">Notifications</span>
             {unread > 0 && (

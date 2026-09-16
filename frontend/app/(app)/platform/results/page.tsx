@@ -314,7 +314,7 @@ function StudentAttemptHistory({ studentId, tenantId, student }: {
                         </span>
                       )}
                       {a.proctor_strikes != null && a.proctor_strikes > 0 && (
-                        <span className="flex items-center gap-1 text-red-500 font-semibold">
+                        <span className="flex items-center gap-1 text-ragRed font-semibold">
                           <AlertTriangle size={9} />{a.proctor_strikes} strikes
                         </span>
                       )}

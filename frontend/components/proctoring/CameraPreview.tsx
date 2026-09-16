@@ -106,7 +106,7 @@ export function CameraPreview({
               className="text-[9px] font-bold px-1.5 py-0.5 rounded-full"
               style={{
                 background: strikes >= 3 ? "var(--rag-red)" : "var(--rag-amber)",
-                color: "white",
+                color: "var(--on-primary)",
               }}
             >
               {strikes}/3
@@ -130,11 +130,11 @@ export function CameraPreview({
               muted
               playsInline
               className="w-full"
-              style={{ height: 100, objectFit: "cover", transform: "scaleX(-1)", background: "#000" }}
+              style={{ height: 100, objectFit: "cover", transform: "scaleX(-1)", background: "var(--surface-2)" }}
             />
           ) : (
             <div className="w-full flex items-center justify-center"
-                 style={{ height: 100, background: "#1a1a2e" }}>
+                 style={{ height: 100, background: "var(--surface-2)" }}>
               <div className="text-center">
                 <Camera size={16} className="mx-auto mb-1 text-muted" />
                 <span className="text-[8px] text-muted">
@@ -146,14 +146,14 @@ export function CameraPreview({
           <div className="absolute bottom-1 left-1 right-1 flex items-center gap-1">
             <span
               className="text-[8px] px-1 py-0.5 rounded font-semibold flex items-center gap-0.5"
-              style={{ background: faceCount > 0 ? "var(--rag-green)" : "var(--rag-red)", color: "white" }}
+              style={{ background: faceCount > 0 ? "var(--rag-green)" : "var(--rag-red)", color: "var(--on-primary)" }}
             >
               {faceCount > 0 ? <Eye size={8} /> : <CameraOff size={8} />}
               {faceCount > 0 ? "Face OK" : "No face"}
             </span>
             {!isFocused && (
               <span className="text-[8px] px-1 py-0.5 rounded font-semibold"
-                style={{ background: "var(--rag-red)", color: "white" }}>
+                style={{ background: "var(--rag-red)", color: "var(--on-primary)" }}>
                 Tab left
               </span>
             )}

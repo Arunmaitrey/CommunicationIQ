@@ -43,16 +43,14 @@ SCORING_PATH = [
     "app/engine/contracts/types.py",
     "app/engine/contracts/speech.py",
     "app/engine/contracts/language.py",
-    "app/engine/providers/tier0/vad.py",
-    "app/engine/providers/tier0/fluency.py",
-    "app/engine/providers/tier1/model.py",
-    "app/engine/providers/tier1/asr.py",
-    "app/engine/providers/tier1/vad.py",
-    "app/engine/providers/tier1/accuracy.py",
-    "app/engine/providers/tier1/disfluency.py",
-    "app/engine/providers/tier1/grammar.py",
-    "app/engine/providers/tier1/relevance.py",
-    "app/engine/providers/tier1/pronunciation.py",
+    "app/engine/providers/energy_vad.py",
+    "app/engine/providers/feature_fluency.py",
+    "app/engine/providers/whisper_asr.py",
+    "app/engine/providers/reference_accuracy.py",
+    "app/engine/providers/transcript_disfluency.py",
+    "app/engine/providers/common_error_grammar.py",
+    "app/engine/providers/rubric_relevance.py",
+    "app/engine/providers/wav2vec_gop.py",
     "app/engine/psychometrics/bkt.py",
     "app/readiness.py",
 ]
@@ -86,7 +84,7 @@ def fingerprint() -> tuple[str, dict[str, str], dict[str, str]]:
 
     # The model weights matter as much as the code around them: swapping
     # small.en for base.en changes every transcript and therefore every score.
-    from app.engine.providers.tier1.pronunciation import MODEL_NAME as GOP_MODEL
+    from app.engine.providers.wav2vec_gop import MODEL_NAME as GOP_MODEL
 
     models = {"asr": settings.whisper_model,
               "asr_compute": settings.whisper_compute_type,

@@ -1,4 +1,4 @@
-"""Tier 1 — common-error detection (ENG-10).
+"""Common-error detection (ENG-10).
 
 Not a grammar model. A high-precision rule set aimed at the specific errors
 this population actually makes and a recruiter actually notices: preposition
@@ -126,7 +126,7 @@ class CommonErrorGrammar:
 
     def check(self, transcript: str, task_type: str = "") -> GrammarResult:
         meta = ProviderMeta(provider_id="", provider_key=self.provider_key,
-                            version=self.version, tier=1)
+                            version=self.version, tier=1)  # ML-assisted
 
         text = (transcript or "").strip()
         words = text.split()

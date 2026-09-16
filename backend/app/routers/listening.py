@@ -40,209 +40,139 @@ def _score(correct: int, total: int) -> float:
         return SCALE_MIN
     return round(SCALE_MIN + (SCALE_MAX - SCALE_MIN) * (correct / total), 1)
 
+@router.get("/set/next")
+async def next_listening_set(principal: Principal, models: TenantModels) -> dict:
+    """This student's next listening practice set, in rotation.
+
+    A listening set holds exactly ten audio-comprehension questions, each
+    carrying its parent passage (with its audio) inline. Questions are
+    shuffled inside the set; the served payload keeps Q1..Q10 positions.
+    """
+    from app.practice_engine import next_set_for_practice
+    chosen = await next_set_for_practice(principal.user_id, "listening")
+    if chosen is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "No listening sets are active yet")
+
+    from app.db import control_db
+    db = control_db()
+    qids = [str(x) for x in chosen["question_ids"]]
+    docs = await db.quiz_items.find({"_id": {"$in": qids}}).to_list(20)
+    by_id = {str(d["_id"]): d for d in docs}
+
+    passage_ids = list({d.get("passage_id") for d in docs if d.get("passage_id")})
+    pdocs = await db.listening_passages.find(
+        {"_id": {"$in": [str(x) for x in passage_ids]}}).to_list(50)
+    passages_by_id = {str(d["_id"]): d for d in pdocs}
+
+    questions = []
+    for qid in qids:
+        d = by_id.get(qid)
+        if d is None:
+            continue
+        pid = str(d.get("passage_id") or "")
+        p = passages_by_id.get(pid) or {}
+        questions.append({
+            "position": len(questions) + 1,
+            "id": qid,
+            "question_number": d.get("question_number", ""),
+            "stem": d.get("stem", ""),
+            "options": list(d.get("options") or []),
+            "passage": {
+                "id": pid,
+                "title": p.get("title", ""),
+                "kind": p.get("kind", "short_talk"),
+                "transcript": p.get("transcript", ""),
+                "audio_key": p.get("audio_key", ""),
+                "plays_allowed": p.get("plays_allowed", 1),
+                "approx_seconds": p.get("approx_seconds", 45),
+            } if p else None,
+        })
+
+    return {
+        "sitting_id": chosen["sitting_id"],
+        "set_id": chosen["set_id"],
+        "set_number": chosen["set_number"],
+        "resumed": chosen["resumed"],
+        "questions": questions,
+    }
+
+
+@router.post("/set/complete")
+async def complete_listening_set(body: dict, principal: Principal,
+                                 models: TenantModels) -> dict:
+    """Close the sitting: the set leaves the rotation only now."""
+    from app.practice_engine import complete_sitting
+    result = await complete_sitting(
+        body.get("sitting_id", ""), principal.user_id,
+        score=body.get("score"))
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, result.get("error", "Sitting not found"))
+    return result
+
+
 @router.get("/random", response_model=ListeningStart)
 async def random_passage(principal: Principal, models: TenantModels,
                           company: str = "") -> ListeningStart:
-    """Get a random listening passage for practice. Guarantees exactly 10 questions."""
-    import random as _rand
-    TARGET_QUESTIONS = 10
+    """Serve the student's next unanswered question from their listening set.
 
-    query = models.ListeningPassage.find(models.ListeningPassage.status == "published")
-    if company:
-        all_rows = []
-        for p in await query.to_list():
-            if p.company and p.company.lower() == company.lower():
-                all_rows.append(p)
-    else:
-        all_rows = await query.to_list()
-    if not all_rows:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No listening passages available")
+    Same rotation as reading: the engine picks the student's first unfinished
+    listening set; this endpoint hands out its questions one at a time
+    (skipping ones already answered), and the set leaves the rotation once all
+    ten are answered. Questions come only from the set — listening practice is
+    listening, never another skill's bank and never another company's.
+    """
+    from app.practice_engine import next_set_for_practice, complete_sitting
+    from app.db import control_db
 
-    # Exclude passages already attempted by this user
-    attempted = await models.ListeningAttempt.find(
-        models.ListeningAttempt.user_id == principal.user_id
-    ).to_list()
-    attempted_ids = {a.passage_id for a in attempted}
-    if attempted_ids:
-        all_rows = [p for p in all_rows if p.id not in attempted_ids]
+    db = control_db()
 
-    coll = models.QuizItem.get_motor_collection()
-    q_counts_raw = await coll.aggregate([
-        {"$match": {"category": "audio_comprehension", "status": "published"}},
-        {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
-    ]).to_list(None)
-    q_counts = {doc["_id"]: doc["count"] for doc in q_counts_raw}
+    for _attempt in range(4):  # at most: finish one full set, then serve next
+        chosen = await next_set_for_practice(principal.user_id, "listening")
+        if chosen is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND,
+                                "No listening sets are active yet")
+        sitting_id = chosen["sitting_id"]
+        set_qids = [str(x) for x in chosen["question_ids"]]
 
-    ready = [p for p in all_rows if q_counts.get(p.id, 0) >= TARGET_QUESTIONS]
-    partial = [p for p in all_rows if 0 < q_counts.get(p.id, 0) < TARGET_QUESTIONS]
-    empty = [p for p in all_rows if q_counts.get(p.id, 0) == 0]
+        attempted_rows = await models.ListeningAttempt.find(
+            models.ListeningAttempt.user_id == principal.user_id).to_list()
+        answered_items: set[str] = set()
+        for a in attempted_rows:
+            answered_items.update(str(x) for x in (a.item_ids or []))
+        remaining = [q for q in set_qids if q not in answered_items]
 
-    if ready:
-        passage = _rand.choice(ready)
-    elif partial:
-        passage = _rand.choice(partial)
-        existing = q_counts.get(passage.id, 0)
-        await _auto_generate_questions(models, passage, count=TARGET_QUESTIONS - existing)
-    elif empty:
-        passage = _rand.choice(empty)
-        await _auto_generate_questions(models, passage, count=TARGET_QUESTIONS)
-    else:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No listening passages available")
+        if not remaining:
+            await complete_sitting(sitting_id, principal.user_id,
+                                   score=None, db=db)
+            continue
 
-    total = int(await models.QuizItem.find(
-        models.QuizItem.passage_id == passage.id,
-        models.QuizItem.category == "audio_comprehension",
-        models.QuizItem.status == "published"
-    ).count())
-    if total == 0:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Could not prepare questions")
+        total = len(set_qids)
+        attempt = models.ListeningAttempt(user_id=principal.user_id,
+                                          passage_id=remaining[0], total=total)
+        attempt.item_ids = remaining
+        await attempt.create()
 
-    attempt = models.ListeningAttempt(user_id=principal.user_id,
-                                      passage_id=passage.id, total=total)
-    await attempt.create()
+        # ListeningStart keeps its shape; the audio shown is the first
+        # remaining question's parent passage.
+        first = await db.quiz_items.find_one({"_id": remaining[0]})
+        pid = str((first or {}).get("passage_id") or "")
+        passage = await db.listening_passages.find_one({"_id": pid}) if pid else None
+        if first is None or not passage:
+            raise HTTPException(status.HTTP_404_NOT_FOUND,
+                                "No listening passages available")
 
-    return ListeningStart(
-        attempt_id=attempt.id, passage_id=passage.id, title=passage.title,
-        kind=passage.kind, transcript=passage.transcript, accent=passage.accent,
-        plays_allowed=passage.plays_allowed, question_count=total,
-        audio_key=passage.audio_key,
-    )
-
-
-async def _auto_generate_questions(models, passage, count: int = 10) -> None:
-    """Generate comprehension questions for a listening passage."""
-    import random as _rand
-    transcript = passage.transcript or ""
-    title = passage.title or "the passage"
-    sentences = [s.strip() for s in transcript.replace('\n', ' ').split('.') if len(s.strip()) > 15]
-    if not sentences:
-        sentences = [title]
-    third = sentences[2] if len(sentences) > 2 else sentences[-1]
-    last = sentences[-1] if len(sentences) > 1 else sentences[0]
-
-    templates = [
-        {
-            "stem": f"What is the main topic discussed in this audio?",
-            "options": [
-                f"The audio discusses important aspects of {title.lower()}.",
-                "The audio is about an unrelated subject.",
-                "The audio discusses only historical dates.",
-                "The audio gives no information about the subject."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "Which detail is mentioned in the audio?",
-            "options": [
-                sentences[0][:120] + ('.' if not sentences[0].endswith('.') else ''),
-                "The audio rejects the subject completely.",
-                "The audio says the subject has no practical value.",
-                "The audio provides no explanation."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What can you infer from the audio?",
-            "options": [
-                f"The audio provides useful information about {title.lower()}.",
-                "The audio contradicts itself.",
-                "The audio has no clear point.",
-                "The audio is purely fictional."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What is the speaker's main purpose?",
-            "options": [
-                f"To inform listeners about {title.lower()}.",
-                "To entertain with a fictional story.",
-                "To persuade listeners to buy a product.",
-                "To criticize a specific individual."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What is the best summary of the audio?",
-            "options": [
-                transcript[:200] + ('...' if len(transcript) > 200 else ''),
-                "It says the topic has no value at all.",
-                "It focuses on a completely different subject.",
-                "It gives no practical information."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What is the tone of the speaker?",
-            "options": [
-                "Informative and professional.",
-                "Angry and emotional.",
-                "Humorous and sarcastic.",
-                "Confused and uncertain."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "Which additional detail supports the main idea?",
-            "options": [
-                third[:120] + ('.' if not third.endswith('.') else ''),
-                "The audio provides no supporting details.",
-                "All details are contradictory.",
-                "The audio only contains opinions, not facts."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What conclusion does the speaker reach?",
-            "options": [
-                last[:120] + ('.' if not last.endswith('.') else ''),
-                "The speaker reaches no conclusion.",
-                "The conclusion contradicts the main point.",
-                "The conclusion is unrelated to the topic."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "Who is the intended audience for this audio?",
-            "options": [
-                f"People interested in {title.lower()}.",
-                "Only children.",
-                "Only scientists.",
-                "Only politicians."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What type of audio is this?",
-            "options": [
-                f"An informational passage about {title.lower()}.",
-                "A fictional story.",
-                "A song.",
-                "A sports commentary."
-            ],
-            "correct_index": 0,
-        },
-    ]
-
-    for tmpl in templates[:count]:
-        correct_text = tmpl["options"][tmpl["correct_index"]]
-        shuffled = tmpl["options"][:]
-        _rand.shuffle(shuffled)
-        tmpl["options"] = shuffled
-        tmpl["correct_index"] = shuffled.index(correct_text)
-
-        item = models.QuizItem(
-            stem=tmpl["stem"],
-            options=tmpl["options"],
-            correct_index=tmpl["correct_index"],
-            explanation="Based on the audio content.",
-            category="audio_comprehension",
-            passage_id=passage.id,
-            company=passage.company or "",
-            status="published",
-            difficulty=0.5,
-            seconds_allowed=30,
+        return ListeningStart(
+            attempt_id=attempt.id, passage_id=pid, title=passage.get("title", ""),
+            kind=passage.get("kind", "short_talk"),
+            transcript=passage.get("transcript", ""),
+            accent=passage.get("accent", "indian"),
+            plays_allowed=int(passage.get("plays_allowed") or 1),
+            question_count=total,
+            audio_key=passage.get("audio_key", ""),
         )
-        await item.create()
+
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "No listening passages available")
 
 
 @router.get("/passages", response_model=list[ListeningPassageOut])
@@ -261,6 +191,11 @@ async def passages(principal: Principal,
     query = models.ListeningPassage.find(models.ListeningPassage.status == "published")
     if company:
         query = query.find(models.ListeningPassage.company == company)
+    else:
+        # No company specified — only show general passages
+        query = query.find(
+            models.ListeningPassage.company.in_(["", "general"])
+        )
     import random as _rand
     all_rows = await query.to_list()
     _rand.shuffle(all_rows)
@@ -345,11 +280,24 @@ async def questions(attempt_id: str, principal: Principal,
     if attempt.completed_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "That attempt is finished")
 
-    rows = await models.QuizItem.find(
-        models.QuizItem.passage_id == attempt.passage_id,
-        models.QuizItem.category == "audio_comprehension",
-        models.QuizItem.status == "published"
-    ).sort(models.QuizItem.id).to_list()
+    # Only return questions that are in this attempt's set (item_ids).
+    # If item_ids is empty (legacy attempt), return all passage questions.
+    if attempt.item_ids:
+        rows = await models.QuizItem.find(
+            models.QuizItem.id.in_(attempt.item_ids),
+            models.QuizItem.passage_id == attempt.passage_id,
+            models.QuizItem.category == "audio_comprehension",
+            models.QuizItem.status == "published"
+        ).to_list()
+    else:
+        rows = await models.QuizItem.find(
+            models.QuizItem.passage_id == attempt.passage_id,
+            models.QuizItem.category == "audio_comprehension",
+            models.QuizItem.status == "published"
+        ).to_list()
+
+    import random as _rand
+    _rand.shuffle(rows)
 
     return [ListeningQuestionOut(id=q.id, stem=q.stem, options=list(q.options))
             for q in rows]

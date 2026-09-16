@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app import writing as scorer
 from app.deps import Principal, TenantModels, require_roles
+from app import audit
 from app.gamification import engine as game
 from app.models.tenant import SkillMastery, WritingPrompt, WritingSubmissionRow
 from app.schemas import (WritingMeasureOut, WritingPromptOut, WritingResult,
@@ -43,6 +44,66 @@ async def _best_scores(models, user_id: str) -> dict[str, float]:
         {"$group": {"_id": "$prompt_id", "max": {"$max": "$overall"}}},
     ])
     return {doc["_id"]: doc["max"] async for doc in cursor}
+
+@router.get("/set/next")
+async def next_writing_set(principal: Principal, models: TenantModels) -> dict:
+    """This student's next writing practice set, in rotation.
+
+    Writing sets hold writing prompts only — emails, reports, summaries. The
+    rotation serves the first set the student has not completed, and questions
+    are shuffled inside the set with their Q1..Q10 positions kept.
+    """
+    from app.practice_engine import next_set_for_practice
+    chosen = await next_set_for_practice(principal.user_id, "writing")
+    if chosen is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "No writing sets are active yet")
+
+    from app.db import control_db
+    db = control_db()
+    prompt_ids = [str(x) for x in chosen["question_ids"]]
+    docs = await db.writing_prompts.find({"_id": {"$in": prompt_ids}}).to_list(100)
+    by_id = {str(d["_id"]): d for d in docs}
+
+    prompts_out = []
+    for pid in prompt_ids:
+        d = by_id.get(pid)
+        if d is None:
+            continue
+        prompts_out.append({
+            "position": len(prompts_out) + 1,
+            "prompt_id": pid,
+            "question_number": d.get("question_number", ""),
+            "title": d.get("title", ""),
+            "kind": d.get("kind", "email"),
+            "prompt": d.get("prompt", ""),
+            "scenario": d.get("scenario", ""),
+            "key_points": list(d.get("key_points") or []),
+            "min_words": d.get("min_words", 120),
+            "suggested_minutes": d.get("suggested_minutes", 20),
+        })
+
+    return {
+        "sitting_id": chosen["sitting_id"],
+        "set_id": chosen["set_id"],
+        "set_number": chosen["set_number"],
+        "resumed": chosen["resumed"],
+        "prompts": prompts_out,
+    }
+
+
+@router.post("/set/complete")
+async def complete_writing_set(body: dict, principal: Principal,
+                               models: TenantModels) -> dict:
+    """Close the sitting: the set leaves the rotation only now."""
+    from app.practice_engine import complete_sitting
+    result = await complete_sitting(
+        body.get("sitting_id", ""), principal.user_id,
+        score=body.get("score"))
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, result.get("error", "Sitting not found"))
+    return result
+
 
 @router.get("/prompts", response_model=list[WritingPromptOut])
 async def prompts(principal: Principal,
@@ -127,6 +188,13 @@ async def submit(prompt_id: str, body: WritingSubmission,
     if result.overall is not None:
         xp, day_counted, streak_now = await _reward(
             models, principal, row.id, result.overall)
+
+    await audit.record(principal, "writing.submitted",
+                       entity="WritingPrompt", entity_id=prompt_id,
+                       after={"submission_id": row.id,
+                              "word_count": result.word_count,
+                              "overall": result.overall,
+                              "xp_awarded": xp})
 
     return WritingResult(
         submission_id=row.id, title=prompt.title,

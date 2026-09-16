@@ -86,6 +86,17 @@ function Simulate() {
 
   const profiles = useMemo(() => data ?? [], [data]);
 
+  // Map profile_id to last scored attempt ID for Review button
+  const lastScoredByProfile = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const a of home.data?.recent_attempts ?? []) {
+      if (a.status === "scored" && !map.has(a.profile_id)) {
+        map.set(a.profile_id, a.id);
+      }
+    }
+    return map;
+  }, [home.data]);
+
   // Only companies that actually have a published round. A filter offering a
   // company with nothing behind it is a dead end dressed as a choice.
   const companies = useMemo(() => {
@@ -250,6 +261,7 @@ function Simulate() {
                 {family.profiles.map((p) => (
                   <ProfileCard key={p.id} profile={p} consented={consented}
                                starting={starting === p.id}
+                               lastScoredAttemptId={lastScoredByProfile.get(p.id)}
                                onStart={() => void start(p.id)} />
                 ))}
               </div>
@@ -290,8 +302,9 @@ function FilterChip({ label, active, onClick }: {
   );
 }
 
-function ProfileCard({ profile, consented, starting, onStart }: {
+function ProfileCard({ profile, consented, starting, lastScoredAttemptId, onStart }: {
   profile: SimulationProfile; consented: boolean; starting: boolean;
+  lastScoredAttemptId?: string;
   onStart: () => void;
 }) {
   const items = profile.sections.reduce((n, s) => n + s.item_count, 0);
@@ -302,6 +315,12 @@ function ProfileCard({ profile, consented, starting, onStart }: {
         <div className="flex items-center gap-2">
           {profile.is_baseline && <Badge tone="var(--accent)">Baseline</Badge>}
           {profile.company && <Badge tone="var(--primary)">{profile.company}</Badge>}
+          {lastScoredAttemptId && (
+            <Link href={`/results/${lastScoredAttemptId}`}
+              className="btn btn-ghost btn-sm ds-focus text-[10px]">
+              Review
+            </Link>
+          )}
           <button
             className="btn btn-primary btn-sm ds-focus"
             disabled={!consented || starting || items === 0}

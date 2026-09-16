@@ -1,14 +1,14 @@
 """Audio decoding and frame-level measurement.
 
-Everything the Tier-0 engine knows comes from here, and all of it is genuinely
+Everything the speech engine knows comes from here, and all of it is genuinely
 measured: no provider in this build infers a number it cannot compute from the
 samples in front of it.
 
 The client uploads 16 kHz mono 16-bit WAV. That is a deliberate choice for
-development — it is exactly what the Tier-1 models want and it needs no codec
+development — it is exactly what the ML models want and it needs no codec
 on the server — and a deliberate debt: at roughly 32 KB/s it is far too heavy
 for a hostel 3G connection (ACC-02/ACC-04). The fix is Opus upload with a
-decode at ingest, and it belongs with the Tier-1 work rather than here.
+decode at ingest.
 """
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def decode_wav(data: bytes) -> Waveform:
 def resample_to(wave_in: Waveform, target_rate: int) -> Waveform:
     """Linear resample. Adequate for envelope measurement, not for a model.
 
-    Tier 1 will want a proper polyphase resampler; every measurement in this
+     ML models will want a proper polyphase resampler; every measurement in this
     module works on the energy envelope, which linear interpolation does not
     meaningfully distort.
     """

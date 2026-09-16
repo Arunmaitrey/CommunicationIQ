@@ -537,13 +537,21 @@ async def tenant_audit_log(
     principal: Principal,
     limit: int = 100,
 ) -> list[dict]:
-    """Login/logout audit events for this institution only."""
+    """Audit events for this institution — all user-relevant actions."""
     tid = principal.tenant_id
     if not tid:
         return []
+    _AUDIT_ACTIONS = [
+        "auth.login", "auth.logout", "auth.signup", "auth.password_changed",
+        "user.preferences_updated", "user.avatar_updated",
+        "attempt.started", "attempt.submitted",
+        "quiz.submitted", "writing.submitted",
+        "plan.subscribed", "user.created", "user.updated",
+        "user.password_reset", "user.bulk_created",
+    ]
     cursor = AuditLog.find(
         AuditLog.tenant_id == tid,
-        AuditLog.action.in_(["auth.login", "auth.logout"]),
+        AuditLog.action.in_(_AUDIT_ACTIONS),
     ).sort(-AuditLog.at).limit(limit)
     results = await cursor.to_list()
     return [
@@ -556,6 +564,8 @@ async def tenant_audit_log(
             "entity_id": a.entity_id,
             "ip_address": getattr(a, 'ip_address', ''),
             "at": a.at.isoformat(),
+            "before": getattr(a, 'before', {}),
+            "after": getattr(a, 'after', {}),
         }
         for a in results
     ]

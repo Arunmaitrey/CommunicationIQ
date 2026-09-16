@@ -75,220 +75,145 @@ def _rate_note(wpm: int | None, correct: int, total: int) -> str:
     return (f"{wpm} words per minute is a normal working pace for this kind of "
             f"text.")
 
+@router.get("/set/next")
+async def next_reading_set(principal: Principal, models: TenantModels) -> dict:
+    """This student's next reading practice set, in rotation.
+
+    Serves the first set they have not completed (set 1 first, then set 2, ...),
+    questions shuffled inside the set but returned with their Q1..Q10 position.
+    A reading set holds exactly ten reading-comprehension questions, each
+    carrying its parent passage inline — nothing from any other skill, so
+    reading practice is reading.
+    """
+    from app.practice_engine import next_set_for_practice
+    chosen = await next_set_for_practice(principal.user_id, "reading")
+    if chosen is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND,
+                            "No reading sets are active yet")
+
+    from app.db import control_db
+    db = control_db()
+    qids = [str(x) for x in chosen["question_ids"]]
+    docs = await db.quiz_items.find({"_id": {"$in": qids}}).to_list(20)
+    by_id = {str(d["_id"]): d for d in docs}
+
+    # Parent passages, fetched once and shared by the questions that cite them.
+    passage_ids = list({d.get("passage_id") for d in docs if d.get("passage_id")})
+    pdocs = await db.reading_passages.find(
+        {"_id": {"$in": [str(x) for x in passage_ids]}}).to_list(50)
+    passages_by_id = {str(d["_id"]): d for d in pdocs}
+
+    questions = []
+    for pos, qid in enumerate(qids, start=1):
+        d = by_id.get(qid)
+        if d is None:
+            continue  # set integrity keeps this from happening; guarded anyway
+        pid = str(d.get("passage_id") or "")
+        p = passages_by_id.get(pid) or {}
+        questions.append({
+            "position": len(questions) + 1,
+            "id": qid,
+            "question_number": d.get("question_number", ""),
+            "stem": d.get("stem", ""),
+            "options": list(d.get("options") or []),
+            # The passage rides along so the UI can show it while answering.
+            "passage": {
+                "id": pid,
+                "title": p.get("title", ""),
+                "kind": p.get("kind", "article"),
+                "body": p.get("body", ""),
+                "word_count": p.get("word_count", 0),
+            } if p else None,
+        })
+
+    return {
+        "sitting_id": chosen["sitting_id"],
+        "set_id": chosen["set_id"],
+        "set_number": chosen["set_number"],
+        "resumed": chosen["resumed"],
+        "questions": questions,
+    }
+
+
+@router.post("/set/complete")
+async def complete_reading_set(body: dict, principal: Principal,
+                               models: TenantModels) -> dict:
+    """Close the sitting: the set leaves the rotation only now."""
+    from app.practice_engine import complete_sitting
+    result = await complete_sitting(
+        body.get("sitting_id", ""), principal.user_id,
+        score=body.get("score"))
+    if not result.get("ok"):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, result.get("error", "Sitting not found"))
+    return result
+
+
 @router.get("/random", response_model=ReadingStart)
 async def random_passage(principal: Principal, models: TenantModels,
                           company: str = "") -> ReadingStart:
-    """Get a random passage for practice. Guarantees exactly 10 questions.
+    """Serve the student's next unread question from their current reading set.
 
-    Finds a passage, ensures it has at least 10 linked quiz_items (generates
-    more if needed), then starts the attempt.
+    The unit of practice is a Question Set (ten reading-comprehension
+    questions). The engine picks the student's first unfinished set; this
+    endpoint hands out its questions one at a time (skipping ones already
+    answered), and the set leaves the rotation once all ten are answered — so
+    set 1 is never served again before set 2 has been, and no set repeats
+    until the whole rotation has been seen. Questions come only from the set:
+    reading practice is reading, never another skill's bank.
     """
-    TARGET_QUESTIONS = 10
+    from app.practice_engine import next_set_for_practice, complete_sitting
+    from app.db import control_db
 
-    query = models.ReadingPassage.find(models.ReadingPassage.status == "published")
-    if company:
-        all_rows = []
-        for p in await query.to_list():
-            if p.company and p.company.lower() == company.lower():
-                all_rows.append(p)
-    else:
-        all_rows = await query.to_list()
-    if not all_rows:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No reading passages available")
+    db = control_db()
 
-    # Exclude passages already attempted by this user
-    attempted = await models.ReadingAttempt.find(
-        models.ReadingAttempt.user_id == principal.user_id
-    ).to_list()
-    attempted_ids = {a.passage_id for a in attempted}
-    if attempted_ids:
-        all_rows = [p for p in all_rows if p.id not in attempted_ids]
+    for _attempt in range(4):  # at most: finish one full set, then serve next
+        chosen = await next_set_for_practice(principal.user_id, "reading")
+        if chosen is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND,
+                                "No reading sets are active yet")
+        sitting_id = chosen["sitting_id"]
+        set_qids = [str(x) for x in chosen["question_ids"]]
 
-    # Find which passages already have enough questions
-    coll = models.QuizItem.get_motor_collection()
-    q_counts_raw = await coll.aggregate([
-        {"$match": {"category": "reading_comprehension", "status": "published"}},
-        {"$group": {"_id": "$passage_id", "count": {"$sum": 1}}},
-    ]).to_list(None)
-    q_counts = {doc["_id"]: doc["count"] for doc in q_counts_raw}
+        # Questions in this set the student has already answered. Attempt rows
+        # keep the quiz item id, which is the same id the set stores.
+        attempted_rows = await models.ReadingAttempt.find(
+            models.ReadingAttempt.user_id == principal.user_id).to_list()
+        # item ids the student has answered at all (any attempt)
+        answered_items: set[str] = set()
+        for a in attempted_rows:
+            answered_items.update(str(x) for x in (a.item_ids or []))
+        remaining = [q for q in set_qids if q not in answered_items]
 
-    # Prefer passages that already have >=10 questions
-    ready = [p for p in all_rows if q_counts.get(p.id, 0) >= TARGET_QUESTIONS]
-    # Passages with some but not enough questions
-    partial = [p for p in all_rows if 0 < q_counts.get(p.id, 0) < TARGET_QUESTIONS]
-    # Passages with no questions at all
-    empty = [p for p in all_rows if q_counts.get(p.id, 0) == 0]
+        if not remaining:
+            # Set finished — close it so the rotation moves to the next set.
+            await complete_sitting(sitting_id, principal.user_id,
+                                   score=None, db=db)
+            continue
 
-    if ready:
-        passage = random.choice(ready)
-    elif partial:
-        passage = random.choice(partial)
-        # Top up to 10
-        existing = q_counts.get(passage.id, 0)
-        await _auto_generate_questions(models, passage, count=TARGET_QUESTIONS - existing)
-    elif empty:
-        passage = random.choice(empty)
-        await _auto_generate_questions(models, passage, count=TARGET_QUESTIONS)
-    else:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "No reading passages available")
+        # Open a fresh attempt scoped to this set's remaining questions.
+        total = len(set_qids)
+        attempt = models.ReadingAttempt(user_id=principal.user_id,
+                                        passage_id=set_qids[0], total=total)
+        attempt.item_ids = remaining
+        await attempt.create()
 
-    total = int(await models.QuizItem.find(
-        models.QuizItem.passage_id == passage.id,
-        models.QuizItem.category == "reading_comprehension",
-        models.QuizItem.status == "published"
-    ).count())
-    if total == 0:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Could not prepare questions for this passage")
+        # ReadingStart keeps its shape (the practice page depends on it); the
+        # passage shown is the first remaining question's parent.
+        first = await db.quiz_items.find_one({"_id": remaining[0]})
+        pid = str((first or {}).get("passage_id") or "")
+        passage = await db.reading_passages.find_one({"_id": pid}) if pid else None
+        if first is None or not passage:
+            raise HTTPException(status.HTTP_404_NOT_FOUND,
+                                "No reading passages available")
 
-    attempt = models.ReadingAttempt(user_id=principal.user_id,
-                                    passage_id=passage.id, total=total)
-    await attempt.create()
-
-    return ReadingStart(
-        attempt_id=attempt.id, passage_id=passage.id, title=passage.title,
-        kind=passage.kind, body=passage.body, word_count=passage.word_count,
-        question_count=total,
-    )
-
-
-async def _auto_generate_questions(models, passage, count: int = 10) -> None:
-    """Generate comprehension questions for a reading passage.
-
-    Uses simple template-based generation (no external API needed).
-    Creates quiz_items with category 'reading_comprehension' linked to the passage.
-    """
-    body = passage.body or ""
-    title = passage.title or "the passage"
-    sentences = [s.strip() for s in body.replace('\n', ' ').split('.') if len(s.strip()) > 20]
-    if not sentences:
-        sentences = [title]
-    # Get 3rd sentence or last for variety
-    third = sentences[2] if len(sentences) > 2 else sentences[-1]
-    last = sentences[-1] if len(sentences) > 1 else sentences[0]
-
-    templates = [
-        {
-            "stem": f"What is the main topic of {title}?",
-            "options": [
-                f"The passage discusses important aspects of {title.lower()}.",
-                "The passage is about an unrelated subject.",
-                "The passage discusses only historical dates.",
-                "The passage gives no information about the subject."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": f"Which idea is directly supported by the passage?",
-            "options": [
-                sentences[0][:120] + ('.' if not sentences[0].endswith('.') else ''),
-                "The passage rejects the subject completely.",
-                "The passage says the subject has no practical value.",
-                "The passage provides no explanation."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "Which statement is best supported by the passage?",
-            "options": [
-                f"The passage explains important points about {title.lower()}.",
-                "The passage says no consideration is necessary.",
-                "The passage gives no practical consideration.",
-                "The topic has no limitations or conditions."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What can be inferred from the passage?",
-            "options": [
-                f"The passage provides useful information about {title.lower()}.",
-                "The passage contradicts itself.",
-                "The passage has no clear point.",
-                "The passage is purely fictional."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What is the best summary of the passage?",
-            "options": [
-                body[:200] + ('...' if len(body) > 200 else ''),
-                "It says the topic has no value at all.",
-                "It focuses on a completely different subject.",
-                "It gives no practical information."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What is the author's main argument in this passage?",
-            "options": [
-                f"The author presents a case for the importance of {title.lower()}.",
-                "The author argues against the topic entirely.",
-                "The author provides no clear argument.",
-                "The author is purely describing historical events."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "Which detail from the passage is most important?",
-            "options": [
-                third[:120] + ('.' if not third.endswith('.') else ''),
-                "The passage mentions no important details.",
-                "All details mentioned are trivial.",
-                "The passage focuses only on opinions, not facts."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What conclusion does the passage lead to?",
-            "options": [
-                last[:120] + ('.' if not last.endswith('.') else ''),
-                "The passage reaches no conclusion.",
-                "The conclusion contradicts the passage.",
-                "The conclusion is unrelated to the topic."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What type of text is this passage?",
-            "options": [
-                f"A workplace text about {title.lower()}.",
-                "A fictional short story.",
-                "A poem.",
-                "A legal document."
-            ],
-            "correct_index": 0,
-        },
-        {
-            "stem": "What is the tone of this passage?",
-            "options": [
-                "Informative and professional.",
-                "Angry and emotional.",
-                "Humorous and satirical.",
-                "Confused and contradictory."
-            ],
-            "correct_index": 0,
-        },
-    ]
-
-    for tmpl in templates[:count]:
-        correct_text = tmpl["options"][tmpl["correct_index"]]
-        shuffled = tmpl["options"][:]
-        random.shuffle(shuffled)
-        tmpl["options"] = shuffled
-        tmpl["correct_index"] = shuffled.index(correct_text)
-
-        item = models.QuizItem(
-            stem=tmpl["stem"],
-            options=tmpl["options"],
-            correct_index=tmpl["correct_index"],
-            explanation="Based on the passage content.",
-            category="reading_comprehension",
-            passage_id=passage.id,
-            company=passage.company or "",
-            status="published",
-            difficulty=0.5,
-            seconds_allowed=30,
+        return ReadingStart(
+            attempt_id=attempt.id, passage_id=pid, title=passage.get("title", ""),
+            kind=passage.get("kind", "article"), body=passage.get("body", ""),
+            word_count=int(passage.get("word_count") or 0),
+            question_count=total,
         )
-        await item.create()
+
+    raise HTTPException(status.HTTP_404_NOT_FOUND, "No reading passages available")
 
 
 @router.get("/passages", response_model=list[ReadingPassageOut])
@@ -302,6 +227,11 @@ async def passages(principal: Principal,
     query = models.ReadingPassage.find(models.ReadingPassage.status == "published")
     if company:
         query = query.find(models.ReadingPassage.company == company)
+    else:
+        # No company specified — only show general passages
+        query = query.find(
+            models.ReadingPassage.company.in_(["", "general"])
+        )
     all_rows = await query.to_list()
     random.shuffle(all_rows)
     rows = all_rows[:max(1, min(limit, 50))]
@@ -379,11 +309,21 @@ async def questions(attempt_id: str, principal: Principal,
     if attempt.completed_at is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, "That attempt is finished")
 
-    rows = await models.QuizItem.find(
-        models.QuizItem.passage_id == attempt.passage_id,
-        models.QuizItem.category == "reading_comprehension",
-        models.QuizItem.status == "published"
-    ).sort(models.QuizItem.id).to_list()
+    # Only return questions that are in this attempt's set (item_ids).
+    # If item_ids is empty (legacy attempt), return all passage questions.
+    if attempt.item_ids:
+        rows = await models.QuizItem.find(
+            models.QuizItem.id.in_(attempt.item_ids),
+            models.QuizItem.passage_id == attempt.passage_id,
+            models.QuizItem.category == "reading_comprehension",
+            models.QuizItem.status == "published"
+        ).to_list()
+    else:
+        rows = await models.QuizItem.find(
+            models.QuizItem.passage_id == attempt.passage_id,
+            models.QuizItem.category == "reading_comprehension",
+            models.QuizItem.status == "published"
+        ).sort(models.QuizItem.id).to_list()
     random.shuffle(rows)
     return [ReadingQuestionOut(id=q.id, stem=q.stem, options=list(q.options))
             for q in rows]

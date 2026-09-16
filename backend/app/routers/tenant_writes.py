@@ -268,6 +268,27 @@ async def create_user(body: CreateUserRequest, principal: Principal,
     await audit.record(principal, "user.created", entity="User", entity_id=user.id,
                        after={"email": email, "role": body.role})
 
+    # System-triggered email: the account and temporary password go straight
+    # to the student. No admin send button anywhere.
+    import asyncio
+
+    async def _notify_created():
+        try:
+            from app.config import settings
+            from app.email_sender import send_template_email
+            await send_template_email(
+                "student_created", email,
+                {"name": user.full_name or email.split("@")[0],
+                 "email": email,
+                 "temp_password": password,
+                 "login_url": settings.app_url + "/login"},
+                tenant_id=principal.tenant_id or "",
+            )
+        except Exception:
+            pass
+
+    asyncio.create_task(_notify_created())
+
     out = _user_out(user)
     return out
 

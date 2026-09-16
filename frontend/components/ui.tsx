@@ -11,10 +11,10 @@ export function PageHeader({ title, sub, action }: {
   title: string; sub?: string; action?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 mb-5">
-      <div>
-        <h1 className="text-xl font-bold text-text">{title}</h1>
-        {sub && <p className="text-xs text-muted mt-1 max-w-2xl leading-relaxed">{sub}</p>}
+    <div className="flex items-start justify-between gap-4 mb-6">
+      <div className="min-w-0">
+        <h1 className="page-head-title">{title}</h1>
+        {sub && <p className="page-head-sub mt-1.5 max-w-2xl">{sub}</p>}
       </div>
       {action && <div className="shrink-0">{action}</div>}
     </div>

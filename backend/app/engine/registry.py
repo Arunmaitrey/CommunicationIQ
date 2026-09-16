@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 T = TypeVar("T")
 
 # Instances are cached per entrypoint: providers are expected to be stateless
-# request-wise, and a Tier-1 provider holding a loaded model must not be
+    # request-wise, and a ML provider holding a loaded model must not be
 # rebuilt per call.
 _instances: dict[str, Any] = {}
 
@@ -147,8 +147,8 @@ class Providers:
         # ever covered a provider that failed while *running*, never one that
         # was not installed, which is the main reason to configure one.
         #
-        # The visible cost was total: on a deployment without torch the Tier-1
-        # VAD would not import, the registered Tier-0 energy VAD was never
+        # The visible cost was total: on a deployment without torch the ML
+        # VAD would not import, the registered heuristic energy VAD was never
         # reached, and every response came back with no measures at all --
         # including the timing measures that need neither torch nor a
         # transcript.

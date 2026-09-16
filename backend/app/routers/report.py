@@ -134,8 +134,19 @@ def _html_report(
         html = "<ul>"
         for h in items:
             if isinstance(h, dict):
-                label = h.get("label", h.get("text", ""))
-                detail = h.get("detail", h.get("note", ""))
+                # Handle both old (label/text) and new (dimension/score) schemas
+                label = h.get("label", h.get("text", h.get("dimension", "")))
+                if label:
+                    label = label.replace("_", " ").title()
+                score = h.get("score")
+                delta = h.get("delta")
+                detail = h.get("detail", h.get("note", h.get("means", "")))
+                if score is not None and detail:
+                    detail = f"Score: {score:.0f} — {detail}"
+                elif score is not None:
+                    detail = f"Score: {score:.0f}"
+                elif delta is not None:
+                    detail = f"Change: {delta:+.0f}"
             else:
                 label = str(h)
                 detail = ""
@@ -150,9 +161,16 @@ def _html_report(
     rec_html = ""
     for rec in recommendations:
         if isinstance(rec, dict):
-            label = rec.get("label", rec.get("text", ""))
-            detail = rec.get("detail", rec.get("note", ""))
-            surface = rec.get("surface", "")
+            # Handle both old (label/text) and new (dimension/advice) schemas
+            label = rec.get("label", rec.get("text", rec.get("dimension", "")))
+            if label:
+                label = label.replace("_", " ").title()
+            detail = rec.get("detail", rec.get("note", rec.get("advice", "")))
+            surface = rec.get("surface", rec.get("url", ""))
+            current = rec.get("current")
+            target = rec.get("target")
+            if current is not None and target is not None:
+                detail = f"Current: {current:.0f} → Target: {target:.0f}" + (f" — {detail}" if detail else "")
             rec_html += f'<div class="rec"><strong>{_h(label)}</strong>'
             if detail:
                 rec_html += f'<br><span class="muted">{_h(detail)}</span>'

@@ -32,7 +32,7 @@ export function VoicePicker({ accent = "indian", sample }: {
   if (voices.length <= 1) return null;   // nothing to choose between
 
   const preview = () => {
-    void speak(sample ?? "This is the voice that will read your passage.", accent);
+    void speak(sample ?? "This is the voice that will read your passage.", accent); // fire-and-forget preview
   };
 
   return (

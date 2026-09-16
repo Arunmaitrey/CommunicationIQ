@@ -5,7 +5,7 @@ beanie==1.30.0
 pymongo==4.17.0
 pydantic==2.13.4
 pydantic-settings==2.7.0
-python-jose[cryptography]==3.3.0
+python-jose==3.3.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-multipart
@@ -13,9 +13,7 @@ httpx==0.28.1
 email-validator==2.2.0
 numpy==2.5.2
 sqlalchemy==2.0.41
-cryptography==50.0.1
-openpyxl==3.1.5
-torch==2.13.0
-torchaudio==2.11.0
+torch
+torchaudio
 transformers>=5.0.0
 faster-whisper>=1.0.0

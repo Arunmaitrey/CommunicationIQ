@@ -192,29 +192,57 @@ function Plans() {
             {plans.map((plan: any) => (
               <div key={plan.id} className="ds-card p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="flex-1">
+                  <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <Package size={14} style={{ color: "var(--primary)" }} />
                       <span className="text-sm font-bold">{plan.name}</span>
                       <Badge tone={plan.is_active ? "var(--rag-green)" : "var(--muted)"}>{plan.is_active ? "Active" : "Inactive"}</Badge>
                       {plan.is_default && <Badge tone="var(--primary)">Default</Badge>}
                     </div>
-                    <p className="text-[11px] text-muted mb-2">{plan.description}</p>
-                    <div className="flex flex-wrap gap-3 text-[10px] text-muted">
-                      <span>₹{plan.price_monthly}/mo · ₹{plan.price_yearly}/yr</span>
-                      <span>{plan.seat_limit} seats</span>
-                      <span>{plan.max_questions} questions</span>
-                      <span>{plan.max_exams_per_day} exams/day</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {plan.features?.map((f: string) => (
-                        <span key={f} className="text-[9px] px-1.5 py-0.5 rounded bg-surface2">{f}</span>
+                    <p className="text-[11px] text-muted mb-3">{plan.description}</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
+                      {[
+                        { label: "Monthly", value: `₹${plan.price_monthly}` },
+                        { label: "Yearly", value: `₹${plan.price_yearly}` },
+                        { label: "Seats", value: plan.seat_limit },
+                        { label: "Exams / day", value: plan.max_exams_per_day },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="rounded p-2" style={{ background: "var(--surface)" }}>
+                          <div className="text-[9px] font-bold uppercase tracking-wider text-muted">{label}</div>
+                          <div className="text-xs font-bold mt-0.5">{value}</div>
+                        </div>
                       ))}
                     </div>
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-1.5">Included</div>
+                    <ul className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-1.5">
+                      {plan.features?.map((f: string) => (
+                        <li key={f} className="flex items-center gap-1.5 text-[11px]">
+                          <Check size={11} style={{ color: "var(--rag-green)" }} className="shrink-0" />
+                          <span className="capitalize">{f}</span>
+                        </li>
+                      ))}
+                      {[
+                        { k: "has_proctoring", label: "Proctoring" },
+                        { k: "has_analytics", label: "Analytics" },
+                        { k: "has_custom_branding", label: "Custom branding" },
+                        { k: "has_api_access", label: "API access" },
+                      ].map(({ k, label }) => (
+                        plan[k] && (
+                          <li key={k} className="flex items-center gap-1.5 text-[11px]">
+                            <Check size={11} style={{ color: "var(--rag-green)" }} className="shrink-0" />
+                            <span>{label}</span>
+                          </li>
+                        )
+                      ))}
+                      <li className="flex items-center gap-1.5 text-[11px]">
+                        <Check size={11} style={{ color: "var(--rag-green)" }} className="shrink-0" />
+                        <span>{plan.max_questions} questions</span>
+                      </li>
+                    </ul>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 shrink-0">
                     <button onClick={() => startEdit(plan)} className="p-1.5 rounded hover:bg-surface2"><Edit size={12} /></button>
-                    <button onClick={() => remove(plan.id)} className="p-1.5 rounded hover:bg-surface2 text-red-500"><Trash2 size={12} /></button>
+                    <button onClick={() => remove(plan.id)} className="p-1.5 rounded hover:bg-surface2 text-ragRed"><Trash2 size={12} /></button>
                   </div>
                 </div>
               </div>

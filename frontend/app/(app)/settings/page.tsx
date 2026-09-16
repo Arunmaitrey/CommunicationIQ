@@ -8,90 +8,141 @@ import { ROLE_LABEL } from "@/lib/roles";
 import { api, API_BASE, ApiError, getToken } from "@/lib/api"
 import { useToast } from "@/components/Toast"
 
+type SettingsTab = "account" | "security" | "profile" | "notifications" | "appearance";
+
+const TABS: { id: SettingsTab; label: string; forStudent?: boolean }[] = [
+  { id: "account", label: "Account" },
+  { id: "security", label: "Security" },
+  { id: "profile", label: "Profile", forStudent: true },
+  { id: "notifications", label: "Notifications" },
+  { id: "appearance", label: "Appearance" },
+];
+
 export default function SettingsPage() {
   const { user } = useRole();
   const { theme, setTheme } = useTheme();
+  const [tab, setTab] = useState<SettingsTab>("account");
+
+  const visibleTabs = TABS.filter((t) => !t.forStudent || user?.role === "student");
 
   return (
     <>
       <PageHeader
         title="Settings"
-        sub="Your account and how the app looks to you. A theme is a personal preference — it follows your account on this device, not the machine."
+        sub="Your account and how the app looks to you."
       />
 
-      <Section title="Account" className="mb-4">
-        <div className="flex items-center gap-4 mb-4">
-          <div className="relative group">
-            <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold overflow-hidden"
-              style={{ background: "var(--brand-grad)", color: "white" }}>
-              {user?.avatar_url ? (
-                <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
-              ) : (
-                <span>{user?.full_name?.charAt(0) || user?.email?.charAt(0) || "U"}</span>
-              )}
+      {/* Tab bar */}
+      <div className="flex gap-1 mb-4 overflow-x-auto pb-1">
+        {visibleTabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors ds-focus ${
+              tab === t.id
+                ? "text-white"
+                : "text-muted hover:text-text hover:bg-surface2"
+            }`}
+            style={tab === t.id ? { background: "var(--primary)" } : undefined}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      {tab === "account" && (
+        <Section title="Account details" className="mb-4">
+          <p className="text-xs text-muted mb-4 leading-relaxed">
+            Your identity on this platform. This information is visible to your institution administrators.
+          </p>
+          <div className="flex items-center gap-4 mb-4">
+            <div className="relative group">
+              <div className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-bold overflow-hidden"
+                style={{ background: "var(--brand-grad)", color: "white" }}>
+                {user?.avatar_url ? (
+                  <img src={user.avatar_url} alt="Avatar" className="w-full h-full object-cover" />
+                ) : (
+                  <span>{user?.full_name?.charAt(0) || user?.email?.charAt(0) || "U"}</span>
+                )}
+              </div>
+              <AvatarUploadButton />
             </div>
-            <AvatarUploadButton />
+            <dl className="grid sm:grid-cols-2 gap-3 text-xs flex-1">
+              <Field label="Name" value={user?.full_name ?? "—"} />
+              <Field label="Email" value={user?.email ?? "—"} />
+              <Field label="Role" value={user ? ROLE_LABEL[user.role] ?? user.role : "—"} />
+              <Field label="Institution" value={user?.tenant_name ?? "Platform console"} />
+            </dl>
           </div>
-          <dl className="grid sm:grid-cols-2 gap-3 text-xs flex-1">
-            <Field label="Name" value={user?.full_name ?? "—"} />
-            <Field label="Email" value={user?.email ?? "—"} />
-            <Field label="Role" value={user ? ROLE_LABEL[user.role] ?? user.role : "—"} />
-            <Field label="Institution" value={user?.tenant_name ?? "Platform console"} />
-          </dl>
-        </div>
-      </Section>
+        </Section>
+      )}
 
-      <Section title="Change Password" className="mb-4">
-        <ChangePasswordForm />
-      </Section>
+      {tab === "security" && (
+        <Section title="Change Password" className="mb-4">
+          <p className="text-xs text-muted mb-4 leading-relaxed">
+            Update your password regularly to keep your account secure. Your new password must be at least 8 characters.
+          </p>
+          <ChangePasswordForm />
+        </Section>
+      )}
 
-      {user?.role === "student" && (
-        <Section title="Profile" className="mb-4">
+      {tab === "profile" && user?.role === "student" && (
+        <Section title="Student Profile" className="mb-4">
+          <p className="text-xs text-muted mb-4 leading-relaxed">
+            Your academic details help tailor the assessment experience. Roll number and branch are used for institutional reporting.
+          </p>
           <StudentProfileForm />
         </Section>
       )}
 
-      <Section title="Notification Preferences" className="mb-4">
-        <NotificationPrefs />
-      </Section>
+      {tab === "notifications" && (
+        <Section title="Notification Preferences" className="mb-4">
+          <p className="text-xs text-muted mb-4 leading-relaxed">
+            Choose what notifications you receive. Practice reminders help maintain your streak; exam alerts notify you of upcoming deadlines.
+          </p>
+          <NotificationPrefs />
+        </Section>
+      )}
 
-      <Section title={`Theme — ${THEMES.length} available`}>
-        <p className="text-xs text-muted mb-4 leading-relaxed">
-          Every screen in the product is built from the same design tokens, so all
-          sixteen work everywhere — including the test runner and the score reveal.
-          Pick whichever you can read for twenty minutes at a stretch.
-        </p>
+      {tab === "appearance" && (
+        <Section title="Appearance">
+          <p className="text-xs text-muted mb-4 leading-relaxed">
+            Every screen in the product is built from the same design tokens, so all themes work everywhere.
+            Pick whichever you can read for twenty minutes at a stretch. Your choice is saved to your account.
+          </p>
 
-        {THEME_GROUPS.map((group) => (
-          <div key={group} className="mb-4 last:mb-0">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-2">
-              {group}
+          {THEME_GROUPS.map((group) => (
+            <div key={group} className="mb-4 last:mb-0">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-2">
+                {group}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+                {THEMES.filter((t) => t.group === group).map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setTheme(t.id as ThemeId)}
+                    className="ds-card p-2.5 text-left hover:bg-surface2 transition-colors ds-focus"
+                    style={t.id === theme ? { borderColor: "var(--primary)" } : undefined}
+                  >
+                    <div data-theme={t.id} className="rounded mb-2 p-2.5 flex gap-1.5"
+                         style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
+                      <i className="block w-4 h-4 rounded" style={{ background: "var(--primary)" }} />
+                      <i className="block w-4 h-4 rounded" style={{ background: "var(--secondary)" }} />
+                      <i className="block w-4 h-4 rounded" style={{ background: "var(--accent)" }} />
+                      <i className="block w-4 h-4 rounded" style={{ background: "var(--surface-2)" }} />
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-semibold flex-1 truncate">{t.label}</span>
+                      {t.id === theme && <Check size={13} className="text-primary shrink-0" />}
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
-              {THEMES.filter((t) => t.group === group).map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTheme(t.id as ThemeId)}
-                  className="ds-card p-2.5 text-left hover:bg-surface2 transition-colors ds-focus"
-                  style={t.id === theme ? { borderColor: "var(--primary)" } : undefined}
-                >
-                  <div data-theme={t.id} className="rounded mb-2 p-2.5 flex gap-1.5"
-                       style={{ background: "var(--bg)", border: "1px solid var(--border)" }}>
-                    <i className="block w-4 h-4 rounded" style={{ background: "var(--primary)" }} />
-                    <i className="block w-4 h-4 rounded" style={{ background: "var(--secondary)" }} />
-                    <i className="block w-4 h-4 rounded" style={{ background: "var(--accent)" }} />
-                    <i className="block w-4 h-4 rounded" style={{ background: "var(--surface-2)" }} />
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs font-semibold flex-1 truncate">{t.label}</span>
-                    {t.id === theme && <Check size={13} className="text-primary shrink-0" />}
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </Section>
+          ))}
+        </Section>
+      )}
     </>
   );
 }

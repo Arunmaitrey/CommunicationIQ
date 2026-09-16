@@ -148,13 +148,13 @@ function Practise() {
           should still end up doing the right thing. */}
       {suggestionIsSpeaking ? (
         <button onClick={() => void startSpeaking()} disabled={starting}
-                className="ds-card p-5 mb-4 block w-full hover:bg-surface2 transition-colors ds-focus"
+                className="ds-card card-interactive p-5 mb-4 block w-full ds-focus"
                 style={{ borderColor: "var(--primary)", cursor: "pointer" }}>
           {suggestionInner}
         </button>
       ) : (
         <Link href={suggestion.href}
-              className="ds-card p-5 mb-4 block hover:bg-surface2 transition-colors ds-focus"
+              className="ds-card card-interactive p-5 mb-4 block ds-focus"
               style={{ borderColor: "var(--primary)" }}>
           {suggestionInner}
         </Link>
@@ -176,7 +176,7 @@ function Practise() {
       <Section title="Quick extras" className="mt-4">
         <div className="grid sm:grid-cols-2 gap-3">
           <Link href="/quiz"
-                className="ds-card p-3 hover:bg-surface2 transition-colors ds-focus">
+                className="ds-card card-interactive p-3 ds-focus">
             <div className="flex items-center justify-between gap-2">
               <div className="text-sm font-semibold">Grammar &amp; vocabulary</div>
               <span className="text-[11px] font-bold ds-focus flex items-center gap-1"
@@ -278,7 +278,7 @@ function SkillTile({ module: m, starting, onStartSpeaking }: {
 
   return (
     <Link href={m.href}
-          className="ds-card p-3 hover:bg-surface2 transition-colors ds-focus flex flex-col">
+          className="ds-card card-interactive p-3 ds-focus flex flex-col">
       {body}
       <div className="flex items-center justify-between gap-2 mt-2.5 pt-2.5 border-t border-border">
         <span className="text-[10px] text-muted">Begins straight away.</span>

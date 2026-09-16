@@ -141,10 +141,34 @@ export function useProctoring() {
       }
       // Ctrl+U (view source), F12, Ctrl+Shift+I/J/C
       if (e.key === "F12") {
-        addEvent("devtools_open", "high", "F12 pressed");
+        e.preventDefault();
+        e.stopPropagation();
+        addEvent("devtools_open", "high", "F12 blocked");
+        return;
       }
       if (e.ctrlKey && e.shiftKey && (e.key === "I" || e.key === "J" || e.key === "C")) {
-        addEvent("devtools_open", "medium", `Ctrl+Shift+${e.key}`);
+        e.preventDefault();
+        e.stopPropagation();
+        addEvent("devtools_open", "high", `Ctrl+Shift+${e.key} blocked`);
+        return;
+      }
+      if (e.ctrlKey && e.key === "u") {
+        e.preventDefault();
+        e.stopPropagation();
+        addEvent("devtools_open", "medium", "Ctrl+U blocked");
+        return;
+      }
+      if (e.ctrlKey && e.key === "s") {
+        e.preventDefault();
+        e.stopPropagation();
+        addEvent("devtools_open", "low", "Ctrl+S blocked");
+        return;
+      }
+      if (e.ctrlKey && e.key === "p") {
+        e.preventDefault();
+        e.stopPropagation();
+        addEvent("devtools_open", "low", "Ctrl+P blocked");
+        return;
       }
       // Copy detection (Ctrl+C)
       if (e.ctrlKey && e.key === "c" && !window.getSelection()?.toString()) {

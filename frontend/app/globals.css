@@ -48,6 +48,14 @@
   --rag-green: #16a34a;
   --rag-amber: #d97706;
   --rag-red:   #dc2626;
+  --rag-violet: #7c3aed;
+
+  /* Semantic aliases — reference theme tokens so they auto-adapt per theme. */
+  --fg: var(--muted);
+  --on-primary: #fff;
+  --inset: var(--surface-2);
+  --card: var(--surface);
+  --line: var(--border);
 }
 
 /* Dark surfaces need lighter, less saturated RAG or the red goes muddy. */
@@ -61,6 +69,7 @@
   --rag-green: #34d399;
   --rag-amber: #fbbf24;
   --rag-red:   #fb7185;
+  --rag-violet: #a78bfa;
 }
 
 :root,
@@ -217,17 +226,17 @@
    soft radial circles; this one decorates with words instead (see .word-field
    below), which is the whole reason it exists as a separate skin. */
 [data-theme="campus"] {
-  --bg: #f2faf7; --surface: #ffffff; --surface-2: #e9f4f0;
-  --text: #10201c; --muted: #4f645e; --border: #d8e7e1;
-  --primary: #0d9488; --secondary: #0f766e; --accent: #d97706;
-  --success: #0d9488; --warning: #a86a00; --error: #c2410c;
+  --bg: #f5f3ff; --surface: #ffffff; --surface-2: #ede9fe;
+  --text: #1e1033; --muted: #5b4a7a; --border: #ddd6fe;
+  --primary: #7c3aed; --secondary: #6d28d9; --accent: #a855f7;
+  --success: #16a34a; --warning: #9333ea; --error: #dc2626;
   --radius: 14px;
-  --shadow: 0 1px 2px rgba(16,32,28,.05), 0 10px 30px rgba(13,148,136,.07);
+  --shadow: 0 1px 2px rgba(30,16,51,.05), 0 10px 30px rgba(124,58,237,.08);
   /* Local stacks keep production builds independent of Google Fonts. */
   --font: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-display: "Trebuchet MS", "Segoe UI", "Helvetica Neue", Arial, system-ui, sans-serif;
   --font-mono: "Cascadia Code", "SFMono-Regular", Consolas, ui-monospace, monospace;
-  --brand-grad: linear-gradient(135deg, #0d9488, #5eead4);
+  --brand-grad: linear-gradient(135deg, #7c3aed, #c084fc);
   /* Intentionally none. The word field is the decoration. */
   --bg-fx: none;
   --glass: 0;
@@ -417,6 +426,36 @@ body {
   transition: background .4s ease, color .4s ease;
   -webkit-font-smoothing: antialiased;
 }
+/* Smooth, premium feel — consistent across every surface. */
+html { scroll-behavior: smooth; }
+body { text-rendering: optimizeLegibility; }
+
+/* Recharts tooltips inherit the theme instead of fighting it. */
+.recharts-default-tooltip {
+  border-radius: 10px !important;
+  font-size: 12px;
+  box-shadow: var(--shadow) !important;
+}
+.recharts-tooltip-wrapper { outline: none; }
+
+/* The top application bar — sticky with a soft blur so content scrolling
+   underneath reads as depth, not clutter. */
+.app-header {
+  position: sticky; top: 0; z-index: 20;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  background: color-mix(in srgb, var(--surface) 86%, transparent);
+  box-shadow: 0 1px 0 var(--border), 0 6px 18px -12px color-mix(in srgb, var(--text) 22%, transparent);
+}
+/* Page headers: a little more air and hierarchy than a bare title. */
+.page-head-title {
+  font-size: 1.35rem; font-weight: 800; letter-spacing: -0.02em;
+  color: var(--text); line-height: 1.2;
+}
+.page-head-sub { font-size: .8125rem; color: var(--muted); line-height: 1.55; }
+@media (max-width: 640px) {
+  .page-head-title { font-size: 1.15rem; }
+}
 .bgfx {
   position: fixed; inset: 0; z-index: -1; pointer-events: none;
   background: var(--bg-fx); transition: background .5s ease;
@@ -444,12 +483,38 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  /* The inset hairline is the light catch of a physical card's top edge —
+     invisible on white, a soft lift on tinted/dark surfaces. It lives in the
+     shadow so it never disturbs flex/grid layout. */
+  box-shadow: var(--shadow),
+              inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent);
 }
 .ds-inset { background: var(--surface-2); border-radius: calc(var(--radius) - 4px); }
 
+/* A card the user can click. Lifts gently and lets the primary colour
+   announce the affordance — nothing more, because a whole grid of jumping
+   cards reads as noise rather than navigation. */
+.card-interactive {
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.card-interactive:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--primary) 35%, var(--border));
+  box-shadow: var(--shadow),
+              0 12px 28px -14px color-mix(in srgb, var(--primary) 35%, transparent),
+              inset 0 1px 0 color-mix(in srgb, #fff 35%, transparent);
+}
+.card-interactive:active { transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .card-interactive { transition: none; }
+  .card-interactive:hover { transform: none; }
+}
+
 /* Focus ring — one definition for every interactive element */
-.ds-focus:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.ds-focus:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
 
 /* Buttons */
 .btn {
@@ -457,21 +522,50 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
   border-radius: var(--radius);
   padding: .625rem 1rem;
   font-size: .8125rem; font-weight: 600; line-height: 1;
-  transition: filter .15s ease, background .15s ease, transform .05s ease;
+  transition: filter .15s ease, background .15s ease, transform .15s ease,
+              box-shadow .15s ease, border-color .15s ease;
   cursor: pointer; white-space: nowrap;
 }
 .btn:active { transform: translateY(1px); }
-.btn:disabled { opacity: .55; cursor: not-allowed; }
-.btn-primary { background: var(--brand-grad); color: #fff; }
-.btn-primary:hover { filter: brightness(1.08); }
-.btn-ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
-.btn-ghost:hover { background: var(--surface-2); }
-.btn-soft { background: color-mix(in srgb, var(--primary) 12%, transparent); color: var(--primary); }
-.btn-soft:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
-.btn-danger { background: color-mix(in srgb, var(--error) 14%, transparent); color: var(--error); }
-.btn-danger:hover { background: color-mix(in srgb, var(--error) 22%, transparent); }
+.btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; }
+.btn-primary {
+  background: var(--brand-grad); color: #fff;
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
+              0 6px 16px -6px color-mix(in srgb, var(--primary) 55%, transparent);
+}
+.btn-primary:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 color-mix(in srgb, #fff 18%, transparent) inset,
+              0 10px 22px -8px color-mix(in srgb, var(--primary) 70%, transparent);
+}
+.btn-ghost {
+  background: transparent; color: var(--text); border: 1px solid var(--border);
+}
+.btn-ghost:hover {
+  background: var(--surface-2); border-color: color-mix(in srgb, var(--text) 18%, var(--border));
+}
+.btn-soft {
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary); border: 1px solid transparent;
+}
+.btn-soft:hover {
+  background: color-mix(in srgb, var(--primary) 20%, transparent);
+  transform: translateY(-1px);
+}
+.btn-danger {
+  background: color-mix(in srgb, var(--error) 14%, transparent);
+  color: var(--error); border: 1px solid transparent;
+}
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--error) 24%, transparent);
+  transform: translateY(-1px);
+}
 .btn-sm { padding: .375rem .625rem; font-size: .75rem; border-radius: calc(var(--radius) - 4px); }
-.btn-icon { padding: .5rem; border-radius: calc(var(--radius) - 2px); }
+.btn-icon {
+  padding: .5rem; border-radius: calc(var(--radius) - 2px);
+}
+.btn-icon:hover { transform: translateY(-1px); }
 
 /* Inputs */
 .ds-label { display: block; font-size: .75rem; font-weight: 600; color: var(--muted); margin-bottom: .375rem; }
@@ -482,9 +576,13 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
   border-radius: calc(var(--radius) - 2px);
   padding: .55rem .75rem;
   font-size: .8125rem; color: var(--text);
-  transition: border-color .15s ease, box-shadow .15s ease;
+  transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
 }
 .ds-input::placeholder, .ds-textarea::placeholder { color: var(--muted); opacity: .7; }
+.ds-input:hover:not(:focus), .ds-select:hover:not(:focus),
+.ds-textarea:hover:not(:focus) {
+  border-color: color-mix(in srgb, var(--text) 18%, var(--border));
+}
 .ds-input:focus, .ds-select:focus, .ds-textarea:focus {
   outline: none; border-color: var(--primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
@@ -503,6 +601,22 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
   padding: .1rem .4rem; font-size: 10px; font-weight: 600; color: var(--muted);
 }
 
+/* Status pills — theme-safe replacements for the old tailwind palette chips
+   (bg-green-100 text-green-700 etc). One class pair, every theme. */
+.status-pill {
+  display: inline-flex; align-items: center;
+  border-radius: 999px; padding: .15rem .55rem;
+  font-size: 11px; font-weight: 600; line-height: 1.4;
+}
+.status-ok   { background: color-mix(in srgb, var(--rag-green) 15%, transparent); color: var(--rag-green); }
+.status-warn { background: color-mix(in srgb, var(--rag-amber) 15%, transparent); color: var(--rag-amber); }
+.status-bad  { background: color-mix(in srgb, var(--rag-red) 15%, transparent); color: var(--rag-red); }
+.status-info { background: color-mix(in srgb, var(--primary) 15%, transparent); color: var(--primary); }
+.status-brand{ background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+/* Faint secondary text (replaces text-muted/30, which tailwind cannot build
+   against a var() colour). */
+.text-ghost { color: color-mix(in srgb, var(--muted) 55%, transparent); }
+
 /* AI marker — anything AI-generated carries this */
 .ai-chip {
   display: inline-flex; align-items: center; gap: .3rem;
@@ -514,14 +628,20 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 }
 
 /* Tables */
-.ds-table { width: 100%; text-align: left; font-size: .75rem; }
+.ds-table { width: 100%; text-align: left; font-size: .75rem; border-collapse: separate; border-spacing: 0; }
 .ds-table th {
   border-bottom: 1px solid var(--border); padding: .5rem .75rem;
   font-weight: 600; color: var(--muted); white-space: nowrap;
+  text-transform: uppercase; letter-spacing: .04em; font-size: .6875rem;
 }
 .ds-table td { border-bottom: 1px solid var(--border); padding: .625rem .75rem; color: var(--text); }
 .ds-table tbody tr { transition: background .12s ease; }
 .ds-table tbody tr:hover { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
+/* Subtle zebra so a wide row of figures stays on its line. */
+.ds-table tbody tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--surface-2) 22%, transparent);
+}
+.ds-table tbody tr:nth-child(even):hover td { background: color-mix(in srgb, var(--surface-2) 70%, transparent); }
 
 /* Progress bars */
 .ds-track { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
@@ -670,8 +790,21 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
   color: var(--rail-muted);
   transition: background .15s ease, color .15s ease;
 }
-.rail-item:hover { color: var(--rail-text); background: rgba(255, 255, 255, .07); }
-.rail-item.is-active { color: var(--rail-text); background: var(--rail-2); }
+.rail-item:hover {
+  color: var(--rail-text);
+  background: rgba(255, 255, 255, .07);
+}
+.rail-item.is-active {
+  color: var(--rail-text);
+  background: var(--rail-2);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--rail-text) 10%, transparent) inset;
+}
+.rail-item.is-active::before {
+  content: ""; position: absolute; left: 0; top: 22%; bottom: 22%;
+  width: 3px; border-radius: 0 3px 3px 0;
+  background: color-mix(in srgb, var(--rail-text) 72%, transparent);
+}
+.rail-item { position: relative; }
 
 /* ---------------------------------------------------------------------------
    5 · MOTION & EFFECTS
@@ -727,6 +860,18 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 }
 
 @keyframes fade-up { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+/* Staggered content reveal — sections arrive softly, one after another. */
+.reveal-stagger > * { animation: fade-up .5s cubic-bezier(.4, 0, .2, 1) backwards; }
+.reveal-stagger > *:nth-child(1) { animation-delay: .02s; }
+.reveal-stagger > *:nth-child(2) { animation-delay: .07s; }
+.reveal-stagger > *:nth-child(3) { animation-delay: .12s; }
+.reveal-stagger > *:nth-child(4) { animation-delay: .17s; }
+.reveal-stagger > *:nth-child(5) { animation-delay: .22s; }
+.reveal-stagger > *:nth-child(6) { animation-delay: .27s; }
+.reveal-stagger > *:nth-child(7) { animation-delay: .32s; }
+.reveal-stagger > *:nth-child(8) { animation-delay: .37s; }
+.reveal-stagger > *:nth-child(n+9) { animation-delay: .42s; }
+
 /* `backwards`, not `both`. With `both` the final keyframe stays applied, so
    every page wrapper kept a transform — and a transformed ancestor becomes the
    containing block for `position: fixed` children, which centred modals in the
@@ -755,7 +900,8 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .animate-fade-up, .animate-fade-in, .animate-slide-in-r, .copilot-dot { animation: none; }
+  .animate-fade-up, .animate-fade-in, .animate-slide-in-r, .copilot-dot,
+  .reveal-stagger > * { animation: none; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1171,168 +1317,6 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
 }
 
 /* ---------------------------------------------------------------------------
-   AI narrator avatar for listening practice (components/brand/AiNarrator.tsx)
-
-   A headphoned AI face that speaks: equalizer mouth and sound rings animate
-   while a passage plays (.is-speaking) and settle to a calm idle when it
-   stops. CSS only, theme-tokened, so it clears the CSP and tints with the
-   live palette.
---------------------------------------------------------------------------- */
-.ai-narrator {
-  position: relative;
-  width: 168px; height: 168px;
-  margin: 0 auto 8px;
-  display: flex; align-items: center; justify-content: center;
-}
-
-/* Head: a soft AI orb, breathing gently at rest, alert while speaking. */
-.ai-narrator__head {
-  position: relative;
-  width: 108px; height: 108px;
-  border-radius: 50%;
-  background:
-    radial-gradient(120% 120% at 32% 26%,
-      color-mix(in srgb, var(--rail-text, #fff) 26%, transparent) 0%,
-      color-mix(in srgb, var(--primary) 78%, #0a1220) 34%,
-      color-mix(in srgb, var(--accent) 60%, #0a1220) 100%);
-  box-shadow:
-    inset 0 3px 8px color-mix(in srgb, var(--rail-text, #fff) 34%, transparent),
-    inset 0 -10px 20px rgba(0,0,0,.35),
-    0 16px 34px color-mix(in srgb, var(--primary) 30%, transparent);
-  animation: ai-breathe 4s ease-in-out infinite;
-}
-.ai-narrator.is-speaking .ai-narrator__head {
-  animation: ai-nod 1.2s ease-in-out infinite;
-}
-
-/* Headphones. */
-.ai-narrator__band {
-  position: absolute; left: 50%; top: -10px;
-  width: 118px; height: 70px;
-  transform: translateX(-50%);
-  border: 7px solid color-mix(in srgb, var(--rail-text, #fff) 70%, var(--primary));
-  border-bottom: none;
-  border-radius: 60px 60px 0 0;
-  opacity: .85;
-}
-.ai-narrator__cup {
-  position: absolute; top: 42px;
-  width: 22px; height: 40px; border-radius: 8px;
-  background: linear-gradient(180deg,
-    color-mix(in srgb, var(--rail-text, #fff) 55%, var(--primary)),
-    color-mix(in srgb, var(--primary) 60%, #05080f));
-  box-shadow: 0 3px 8px rgba(0,0,0,.4);
-}
-.ai-narrator__cup--l { left: -10px; }
-.ai-narrator__cup--r { right: -10px; }
-/* Cups light up while speaking. */
-.ai-narrator.is-speaking .ai-narrator__cup {
-  box-shadow: 0 3px 8px rgba(0,0,0,.4),
-              0 0 14px color-mix(in srgb, var(--accent) 70%, transparent);
-}
-
-.ai-narrator__face {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  gap: 12px;
-}
-
-/* Eyes: bright, with a slow blink. Speaking makes them a touch brighter. */
-.ai-narrator__eye {
-  position: absolute; top: 40px;
-  width: 12px; height: 12px; border-radius: 50%;
-  background: var(--rail-text, #fff);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--rail-text, #fff) 80%, transparent);
-  animation: ai-blink 5s ease-in-out infinite;
-}
-.ai-narrator__eye--l { left: 34px; }
-.ai-narrator__eye--r { right: 34px; }
-
-/* Mouth: five equalizer bars. Flat and low at rest; dancing while speaking. */
-.ai-narrator__mouth {
-  position: absolute; bottom: 30px; left: 50%;
-  transform: translateX(-50%);
-  display: flex; align-items: center; gap: 4px;
-  height: 26px;
-}
-.ai-narrator__mouth i {
-  width: 5px; height: 5px; border-radius: 3px;
-  background: var(--rail-text, #fff);
-  box-shadow: 0 0 8px color-mix(in srgb, var(--rail-text, #fff) 60%, transparent);
-  transition: height .2s ease;
-}
-.ai-narrator.is-speaking .ai-narrator__mouth i {
-  animation: ai-talk 0.7s ease-in-out infinite;
-  animation-delay: var(--d);
-}
-
-/* Sound rings, only while speaking. */
-.ai-narrator__waves {
-  position: absolute; left: 50%; top: 50%;
-  width: 0; height: 0; transform: translate(-50%, -50%);
-}
-.ai-narrator__waves span {
-  position: absolute; left: 50%; top: 50%;
-  width: 118px; height: 118px; margin: -59px 0 0 -59px;
-  border-radius: 50%;
-  border: 2px solid color-mix(in srgb, var(--accent) 60%, transparent);
-  opacity: 0;
-}
-.ai-narrator.is-speaking .ai-narrator__waves span {
-  animation: ai-ring 2.4s ease-out infinite;
-  animation-delay: calc(var(--i) * .8s);
-}
-
-/* "AI voice" tag pinned under the chin. */
-.ai-narrator__tag {
-  position: absolute; bottom: 2px; left: 50%;
-  transform: translateX(-50%);
-  font-size: 10px; font-weight: 700;
-  letter-spacing: .08em; text-transform: uppercase;
-  padding: 2px 8px; border-radius: 999px;
-  color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
-}
-
-@keyframes ai-breathe {
-  0%, 100% { transform: scale(1); }
-  50%      { transform: scale(1.03); }
-}
-@keyframes ai-nod {
-  0%, 100% { transform: translateY(0) scale(1.02); }
-  50%      { transform: translateY(-3px) scale(1.02); }
-}
-@keyframes ai-blink {
-  0%, 92%, 100% { transform: scaleY(1); }
-  96%           { transform: scaleY(.1); }
-}
-@keyframes ai-talk {
-  0%, 100% { height: 5px; }
-  50%      { height: 22px; }
-}
-@keyframes ai-ring {
-  0%   { opacity: 0; transform: scale(.7); }
-  15%  { opacity: .8; }
-  100% { opacity: 0; transform: scale(1.9); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .ai-narrator__head, .ai-narrator__eye,
-  .ai-narrator.is-speaking .ai-narrator__head,
-  .ai-narrator.is-speaking .ai-narrator__mouth i,
-  .ai-narrator.is-speaking .ai-narrator__waves span {
-    animation: none;
-  }
-  /* A steady "on air" look without motion: mouth mid-open, one ring resting. */
-  .ai-narrator.is-speaking .ai-narrator__mouth i { height: 14px; }
-  .ai-narrator.is-speaking .ai-narrator__waves span:first-child {
-    opacity: .3; transform: scale(1.3);
-  }
-}
-
-/* ---------------------------------------------------------------------------
    SVAR-style runner skin. A deliberate visual match to the real SVAR test
    screens, applied only inside the runner when the format is svar_style, so a
    student practising for that test sits something that looks like it. Fixed
@@ -1505,18 +1489,219 @@ h1, h2, h3, h4 { letter-spacing: -0.01em; }
    in place of the app chrome -- the reference header is minimal, and the blue
    section banner below already says which part you are in. */
 .svar-topbar {
-  display: flex; align-items: center; gap: 14px;
-  padding: 0 20px; height: 48px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 0 12px; height: 48px; flex-shrink: 0;
   background: #fff; border-bottom: 1px solid var(--svar-line);
 }
+@media (min-width: 640px) {
+  .svar-topbar { gap: 14px; padding: 0 20px; }
+}
+.svar-topbar .svar-brand { display: none; }
+@media (min-width: 640px) {
+  .svar-topbar .svar-brand { display: inline; }
+}
 .svar-topbar .svar-count {
-  color: var(--svar-navy); font-weight: 800; font-size: .95rem; letter-spacing: .02em;
+  color: var(--svar-navy); font-weight: 800; font-size: .85rem; letter-spacing: .02em;
   font-variant-numeric: tabular-nums;
 }
-.svar-topbar .svar-timer { font-variant-numeric: tabular-nums; font-weight: 700; }
-.svar-topbar .svar-owed { color: #b45309; font-weight: 700; font-size: .8rem; }
+@media (min-width: 640px) {
+  .svar-topbar .svar-count { font-size: .95rem; }
+}
+.svar-topbar .svar-timer { font-variant-numeric: tabular-nums; font-weight: 700; font-size: .8rem; }
+@media (min-width: 640px) {
+  .svar-topbar .svar-timer { font-size: inherit; }
+}
+.svar-topbar .svar-owed { color: #b45309; font-weight: 700; font-size: .7rem; }
+@media (min-width: 640px) {
+  .svar-topbar .svar-owed { font-size: .8rem; }
+}
 /* One continuous fill over the whole 70-item sitting, not one bar per part. */
 .svar-progressbar { height: 4px; background: var(--svar-line); flex-shrink: 0; }
 .svar-progressbar > span {
   display: block; height: 100%; background: var(--svar-navy); transition: width .3s ease;
+}
+
+/* ---------------------------------------------------------------------------
+   PRICING CARDS — student-facing plans page
+   ------------------------------------------------------------------------- */
+
+.pricing-plans {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 16px 64px;
+}
+
+.pricing-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 32px 28px;
+  padding-bottom: 88px;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  background: var(--surface);
+  text-align: center;
+  transition: all 0.35s ease;
+}
+
+.pricing-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12);
+}
+
+.pricing-card.pricing-featured {
+  transform: translateY(-8px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+}
+
+.pricing-card.pricing-featured:hover {
+  transform: translateY(-14px) scale(1.02);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
+.pricing-card > *:not(:last-child) {
+  margin-bottom: 24px;
+}
+
+.pricing-card .pricing-heading h4 {
+  font-size: 20px;
+  font-weight: 700;
+  padding-bottom: 8px;
+  margin: 0;
+}
+
+.pricing-card .pricing-heading p {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.pricing-card .pricing-price {
+  font-size: 48px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.pricing-card .pricing-price-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+.pricing-card .pricing-savings {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 999px;
+}
+
+.pricing-card .pricing-features {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  flex: 1;
+}
+
+.pricing-card .pricing-features li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.pricing-card .pricing-features li + li {
+  border-top: 1px solid var(--border);
+}
+
+.pricing-card .pricing-features li strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.pricing-card .pricing-cta {
+  position: absolute;
+  bottom: 28px;
+  left: 28px;
+  right: 28px;
+  padding: 14px 24px;
+  border-radius: 8px;
+  border: 2px solid;
+  font-size: 16px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  background: inherit;
+  color: inherit;
+}
+
+.pricing-card .pricing-cta:hover:not(:disabled) {
+  background: transparent;
+}
+
+.pricing-card .pricing-cta:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.pricing-card .pricing-cta:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.pricing-billing-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 40px;
+}
+
+.pricing-billing-btn {
+  font-size: 14px;
+  font-weight: 600;
+  padding: 8px 20px;
+  border-radius: 999px;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pricing-billing-btn-active {
+  color: #fff;
+}
+
+.pricing-billing-btn-inactive {
+  background: transparent;
+  color: var(--muted);
+}
+
+.pricing-billing-save {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #059669;
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .pricing-plans {
+    grid-template-columns: 1fr;
+    max-width: 400px;
+  }
+  .pricing-card.pricing-featured {
+    transform: none;
+  }
+  .pricing-card.pricing-featured:hover {
+    transform: translateY(-8px);
+  }
 }

@@ -311,7 +311,7 @@ function Tenants() {
   return (
     <>
       <PageHeader
-        title="Tenants"
+        title="Institutions"
         sub="Every customer on the platform — colleges, schools, corporates and partners. Each one gets its own database schema; nothing here can read inside them."
       />
 
@@ -474,6 +474,15 @@ function TenantCard({ tenant, types, open, busy, onToggle, onRun }: {
     setShowStudents(true);
   }
 
+  async function refreshStudents() {
+    setLoadingStudents(true);
+    try {
+      const data = await api.platformTenantUsers(tenant.id);
+      setStudents(data as UserRow[]);
+    } catch { /* silent */ }
+    setLoadingStudents(false);
+  }
+
   const overSeats = tenant.seats_used > tenant.seat_limit;
 
   return (
@@ -483,6 +492,9 @@ function TenantCard({ tenant, types, open, busy, onToggle, onRun }: {
         <div className="flex items-center gap-2">
           <span className="text-[11px] text-muted">{tenant.tenant_type_label}</span>
           <Badge tone={STATUS_TONE[tenant.status] ?? "var(--muted)"}>{tenant.status}</Badge>
+          <button className="btn btn-ghost btn-sm ds-focus" onClick={loadStudents}>
+            <Users size={13} /> {showStudents ? "Hide members" : "Members"}
+          </button>
           <button className="btn btn-ghost btn-sm ds-focus" onClick={onToggle}>
             {open ? "Close" : "Manage"}
           </button>
@@ -511,6 +523,38 @@ function TenantCard({ tenant, types, open, busy, onToggle, onRun }: {
 
         </div>
       </div>
+
+      {showStudents && (
+        <div className="mt-3 pt-3" style={{ borderTop: "1px solid var(--border)" }}>
+          {loadingStudents ? (
+            <div className="text-[11px] text-muted">Loading members...</div>
+          ) : students.length === 0 ? (
+            <div className="text-[11px] text-muted">No users yet</div>
+          ) : (
+            <div className="space-y-1">
+              {students.map((u) => (
+                <div key={u.id} className="flex items-center gap-2 text-[11px] py-1 px-2 rounded" style={{ background: "var(--surface)" }}>
+                  <span className="font-medium flex-1 truncate">{u.full_name}</span>
+                  <span className="text-muted truncate">{u.email}</span>
+                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                    background: u.role === "tenant_admin" ? "var(--accent)" : u.role === "student" ? "var(--primary)" : "var(--muted)",
+                    color: "white"
+                  }}>{u.role}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {!loadingStudents && (
+            <button className="btn btn-ghost btn-sm ds-focus mt-2" onClick={() => setShowBulkUsers(!showBulkUsers)}>
+              <Plus size={12} /> {showBulkUsers ? "Close bulk add" : "Bulk add users"}
+            </button>
+          )}
+          {showBulkUsers && !loadingStudents && (
+            <BulkUserForm tenantId={tenant.id} seatLimit={tenant.seat_limit} seatsUsed={tenant.seats_used}
+              onDone={() => { setShowBulkUsers(false); void refreshStudents(); }} />
+          )}
+        </div>
+      )}
 
       {open && (
         <div className="pt-3 space-y-4" style={{ borderTop: "1px solid var(--border)" }}>
@@ -623,34 +667,6 @@ function TenantCard({ tenant, types, open, busy, onToggle, onRun }: {
                 </div>
               </div>
             </div>
-          </div>
-
-          <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>
-            <div className="flex items-center justify-between">
-              <button type="button" className="btn btn-ghost btn-sm ds-focus w-full text-left"
-                      onClick={loadStudents}>
-                {showStudents ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                Students & users ({tenant.seats_used} active)
-              </button>
-            </div>
-            {showStudents && (
-              <div className="mt-2 space-y-1">
-                {loadingStudents ? <div className="text-[11px] text-muted">Loading...</div> : (
-                  students.length === 0 ? <div className="text-[11px] text-muted">No users yet</div> : (
-                    students.map((u) => (
-                      <div key={u.id} className="flex items-center gap-2 text-[11px] py-1 px-2 rounded" style={{ background: "var(--surface)" }}>
-                        <span className="font-medium flex-1 truncate">{u.full_name}</span>
-                        <span className="text-muted truncate">{u.email}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
-                          background: u.role === "tenant_admin" ? "var(--accent)" : u.role === "student" ? "var(--primary)" : "var(--muted)",
-                          color: "white"
-                        }}>{u.role}</span>
-                      </div>
-                    ))
-                  )
-                )}
-              </div>
-            )}
           </div>
 
           <div className="pt-3" style={{ borderTop: "1px solid var(--border)" }}>

@@ -142,6 +142,9 @@ function LoginForm() {
             Don&apos;t have an account?{' '}
             <Link href="/signup" className="underline ds-focus">Sign up</Link>
           </p>
+          <p className="text-xs text-muted mt-2 text-center">
+            <Link href="/forgot-password" className="underline ds-focus">Forgot password?</Link>
+          </p>
         </div>
       </div>
       </div>
@@ -150,7 +153,12 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="p-8 text-xs text-muted">Loading…</div>}>
+    <Suspense fallback={
+      <div className="flex flex-col items-center justify-center py-16 gap-3">
+        <div className="w-10 h-10 rounded-full border-[3px] border-[var(--border)] border-t-[var(--primary)] animate-spin" />
+        <div className="text-xs text-muted">Loading…</div>
+      </div>
+    }>
       <LoginForm />
     </Suspense>
   );

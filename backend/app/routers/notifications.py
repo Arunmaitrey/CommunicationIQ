@@ -211,8 +211,14 @@ async def _tenant_admin_items(db, principal: Principal) -> list[dict]:
     return items
 
 
-async def _platform_items(db, principal: Principal) -> list[dict]:
-    """Open contact messages waiting in the super-admin inbox."""
+async def _platform_items(db) -> list[dict]:
+    """Open contact messages waiting in the super-admin inbox.
+
+    Takes no Principal: the feed this serves is the platform inbox itself, and
+    the two call sites already establish that the caller is a super admin. The
+    parameter used to be declared and never read, which made every
+    GET /notifications for a super admin a 500 (missing positional argument).
+    """
     now = _now()
     items = []
     msgs = await db.contact_messages.find(

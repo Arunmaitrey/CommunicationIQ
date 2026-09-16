@@ -1,4 +1,4 @@
-"""Tier 1 — goodness of pronunciation (ENG-04).
+"""Goodness of pronunciation (ENG-04).
 
 How clearly was each word articulated, measured by forced-aligning the target
 text against a wav2vec2 CTC model's own frame posteriors and reading off how
@@ -33,8 +33,9 @@ import numpy as np
 
 from app.engine.contracts.types import (AlignmentResult, AudioRef, ProviderMeta,
                                         PronunciationResult)
-from app.engine.providers.tier1.accuracy import normalise
-from app.engine.providers.tier1.asr import SAMPLE_RATE, load_samples
+from app.engine.providers.reference_accuracy import normalise
+from app.engine.providers.whisper_asr import SAMPLE_RATE, load_samples
+from app.storage import get_storage
 
 log = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ class Wav2VecGOP:
     async def score(self, audio: AudioRef, *, reference_text: str,
                     alignment: AlignmentResult | None = None,
                     l1_language: str = "") -> PronunciationResult:
-        samples = load_samples(audio.storage_key)
+        samples = load_samples(get_storage().get(audio.storage_key))
         return self.analyse(samples, reference_text)
 
     @staticmethod
@@ -156,7 +157,7 @@ class Wav2VecGOP:
         import torchaudio
 
         meta = ProviderMeta(provider_id="", provider_key=self.provider_key,
-                            version=self.version, tier=1)
+                            version=self.version, tier=1)  # ML-assisted
 
         target = _tokenisable(reference_text)
         if not target or samples.size < SAMPLE_RATE // 4:

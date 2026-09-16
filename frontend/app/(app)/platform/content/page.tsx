@@ -1,14 +1,28 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   BookOpen, Mic, Headphones, PenLine, FileText, Plus, X, Trash2,
-  ChevronDown, ChevronRight, ChevronLeft, AlertTriangle, Upload, Volume2, Loader2, Play,
+  ChevronDown, ChevronRight, ChevronLeft, AlertTriangle, Upload, Volume2, Loader2, Play, Square,
+  Search, CheckCircle2,
 } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useToast } from "@/components/Toast";
 import { ErrorNote, PageHeader, Section, Skeleton } from "@/components/ui";
 import { PLATFORM_ROLES } from "@/lib/roles";
 import { API_BASE, getToken } from "@/lib/api";
+
+let _globalAudio: HTMLAudioElement | null = null;
+let _globalPlayingKey: string | null = null;
+const _globalListeners: Array<() => void> = [];
+function _notifyGlobalListeners() { _globalListeners.forEach((fn) => fn()); }
+function _setGlobalAudio(el: HTMLAudioElement | null, key: string | null) {
+  _globalAudio = el;
+  _globalPlayingKey = key;
+  _notifyGlobalListeners();
+}
+function _stopGlobalAudio() {
+  if (_globalAudio) { _globalAudio.pause(); _globalAudio.currentTime = 0; _globalAudio = null; _globalPlayingKey = null; _notifyGlobalListeners(); }
+}
 
 const CATEGORIES = [
   { key: "reading_comprehension", label: "Reading Comprehension" },
@@ -50,8 +64,6 @@ const SECTION_CONFIG = [
   },
 ];
 
-const PAGE_SIZE = 15;
-
 export default function QuestionBankPage() {
   return (
     <RequireAuth roles={PLATFORM_ROLES}>
@@ -62,30 +74,44 @@ export default function QuestionBankPage() {
 
 function AudioPlayer({ audioKey, color, bg }: { audioKey: string; color: string; bg: string }) {
   const [playing, setPlaying] = useState(false);
-  const ref = useState<{ el: HTMLAudioElement | null }>({ el: null });
+  const ref = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const check = () => {
+      if (_globalPlayingKey !== audioKey) {
+        if (ref.current && !ref.current.paused) { ref.current.pause(); ref.current.currentTime = 0; }
+        setPlaying(false);
+      }
+    };
+    _globalListeners.push(check);
+    return () => { _globalListeners.splice(_globalListeners.indexOf(check), 1); };
+  }, [audioKey]);
 
   const toggle = () => {
     if (!audioKey) return;
-    const url = `${API_BASE}/platform/assets/${audioKey}`;
-    if (ref[0].el && !ref[0].el.paused) {
-      ref[0].el.pause();
-      ref[0].el.currentTime = 0;
+    if (playing) {
+      ref.current?.pause();
+      if (ref.current) ref.current.currentTime = 0;
+      _setGlobalAudio(null, null);
       setPlaying(false);
       return;
     }
-    const a = ref[0].el || new Audio();
-    ref[0].el = a;
+    _stopGlobalAudio();
+    const url = `${API_BASE}/platform/assets/${audioKey}`;
+    const a = ref.current || new Audio();
+    ref.current = a;
     a.src = url;
-    a.onended = () => setPlaying(false);
-    a.onerror = () => { setPlaying(false); };
-    a.play().then(() => setPlaying(true)).catch(() => {});
+    a.onended = () => { _setGlobalAudio(null, null); setPlaying(false); };
+    a.onerror = () => { _setGlobalAudio(null, null); setPlaying(false); };
+    _setGlobalAudio(a, audioKey);
+    a.play().then(() => setPlaying(true)).catch(() => { _setGlobalAudio(null, null); });
   };
 
   return (
     <button onClick={toggle}
       className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium hover:bg-surface2 transition-colors"
       style={{ background: bg, color }}>
-      {playing ? <><X size={11} /> Stop</> : <><Volume2 size={11} /> Play</>}
+      {playing ? <><Square size={10} /> Stop</> : <><Volume2 size={11} /> Play</>}
     </button>
   );
 }
@@ -135,6 +161,460 @@ function AudioUploadButton({ onUploaded }: { onUploaded: () => void }) {
   );
 }
 
+/**
+ * One category's sets: the unit the assessment actually assigns.
+ *
+ * Sets are built by hand. "New set" makes an empty draft scoped to the chosen
+ * company; opening it shows the ten slots, a picker of bank questions that are
+ * still free, and Activate — which the server refuses until the set genuinely
+ * holds ten. Nothing is auto-filled from the bank.
+ */
+// A category can own dozens of sets; render the first screenful and offer the rest.
+const SETS_PER_VIEW = 24;
+
+function SetPanel({ module, label, color, bg, sets, onRefresh, onBulkUpload }: {
+  module: string;
+  label: string;
+  color: string;
+  bg: string;
+  sets: any[];
+  onRefresh: () => void;
+  onBulkUpload: (module: string) => void;
+}) {
+  const { toast } = useToast();
+  const [showAllSets, setShowAllSets] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<any>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [creating, setCreating] = useState(false);
+  // Manual building state for the open draft set.
+  const [candidates, setCandidates] = useState<any[]>([]);
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
+  const [addingId, setAddingId] = useState<string | null>(null);
+  const [activating, setActivating] = useState(false);
+
+  const visible = sets;
+  const shownSets = showAllSets ? visible : visible.slice(0, SETS_PER_VIEW);
+
+  const openSet = async (setId: string) => {
+    if (openId === setId) { setOpenId(null); setDetail(null); return; }
+    setOpenId(setId);
+    setDetail(null);
+    setLoadingDetail(true);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/sets/${setId}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error("Could not load this set");
+      const d = await res.json();
+      setDetail(d);
+      // Drafts are where the work happens: load the picker straight away.
+      if (d.status === "draft") loadCandidates(setId);
+    } catch (e: any) {
+      toast("error", e?.message || "Could not load this set");
+      setOpenId(null);
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const loadCandidates = async (setId: string, search = "") => {
+    setLoadingCandidates(true);
+    try {
+      const token = getToken();
+      const res = await fetch(
+        `${API_BASE}/platform/sets/${setId}/candidates?limit=30${search ? `&search=${encodeURIComponent(search)}` : ""}`,
+        { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+      if (res.ok) {
+        const d = await res.json();
+        setCandidates(d.candidates || []);
+      } else {
+        setCandidates([]);
+      }
+    } catch { setCandidates([]); }
+    finally { setLoadingCandidates(false); }
+  };
+
+  const addQuestion = async (setId: string, questionId: string) => {
+    setAddingId(questionId);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/sets/${setId}/questions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ question_id: questionId }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { toast("error", body?.detail || "Could not add the question"); return; }
+      toast("success", `Added — ${body.question_count}/10 in this set`);
+      // Refresh the open set and its picker together.
+      const t2 = getToken();
+      const d2 = await fetch(`${API_BASE}/platform/sets/${setId}`, { headers: t2 ? { Authorization: `Bearer ${t2}` } : {} });
+      if (d2.ok) setDetail(await d2.json());
+      loadCandidates(setId, candidateSearch);
+      onRefresh();
+    } catch (e: any) {
+      toast("error", e?.message || "Could not add the question");
+    } finally { setAddingId(null); }
+  };
+
+  const removeQuestion = async (setId: string, questionId: string) => {
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/sets/${setId}/questions/${questionId}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { toast("error", body?.detail || "Could not remove the question"); return; }
+      toast("success", `Removed — ${body.question_count}/10 in this set`);
+      const t2 = getToken();
+      const d2 = await fetch(`${API_BASE}/platform/sets/${setId}`, { headers: t2 ? { Authorization: `Bearer ${t2}` } : {} });
+      if (d2.ok) setDetail(await d2.json());
+      loadCandidates(setId, candidateSearch);
+      onRefresh();
+    } catch (e: any) {
+      toast("error", e?.message || "Could not remove the question");
+    }
+  };
+
+  const activateSet = async (setId: string) => {
+    setActivating(true);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/sets/${setId}/activate`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { toast("error", body?.detail || "Could not activate the set"); return; }
+      toast("success", `${body.set_number} is live`);
+      const t2 = getToken();
+      const d2 = await fetch(`${API_BASE}/platform/sets/${setId}`, { headers: t2 ? { Authorization: `Bearer ${t2}` } : {} });
+      if (d2.ok) setDetail(await d2.json());
+      onRefresh();
+    } catch (e: any) {
+      toast("error", e?.message || "Could not activate the set");
+    } finally { setActivating(false); }
+  };
+
+  const deactivateSet = async (setId: string) => {
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/sets/${setId}/deactivate`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { toast("error", body?.detail || "Could not deactivate the set"); return; }
+      toast("success", `${body.set_number} reverted to draft`);
+      const t2 = getToken();
+      const d2 = await fetch(`${API_BASE}/platform/sets/${setId}`, { headers: t2 ? { Authorization: `Bearer ${t2}` } : {} });
+      if (d2.ok) setDetail(await d2.json());
+      onRefresh();
+    } catch (e: any) {
+      toast("error", e?.message || "Could not deactivate the set");
+    }
+  };
+
+  const deleteSet = async (setId: string) => {
+    if (!confirm("Delete this set? This cannot be undone.")) return;
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/sets/${setId}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { toast("error", body?.detail || "Could not delete the set"); return; }
+      toast("success", "Set deleted");
+      setDetail(null);
+      onRefresh();
+    } catch (e: any) {
+      toast("error", e?.message || "Could not delete the set");
+    }
+  };
+
+  const deleteQuestion = async (category: string, questionId: string) => {
+    if (!confirm("Delete this question? This cannot be undone.")) return;
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/questions/${category}/${questionId}`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { toast("error", body?.detail || "Could not delete the question"); return; }
+      toast("success", "Question deleted");
+      // Refresh the detail view
+      if (detail) {
+        const t2 = getToken();
+        const d2 = await fetch(`${API_BASE}/platform/sets/${detail._id || detail.id}`, { headers: t2 ? { Authorization: `Bearer ${t2}` } : {} });
+        if (d2.ok) setDetail(await d2.json());
+      }
+      onRefresh();
+    } catch (e: any) {
+      toast("error", e?.message || "Could not delete the question");
+    }
+  };
+
+  const createSet = async () => {
+    setCreating(true);
+    try {
+      const token = getToken();
+      const res = await fetch(`${API_BASE}/platform/sets`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ module, company: "" }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast("error", body?.detail || "Could not create a set");
+        return;
+      }
+      toast("success", `Created empty draft ${body.set_number} — open it and add 10 questions`);
+      onRefresh();
+    } catch (e: any) {
+      toast("error", e?.message || "Could not create a set");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="px-4 py-3 border-b" style={{ borderColor: "var(--border)", background: "color-mix(in srgb, var(--surface-2) 60%, transparent)" }}>
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[11px] font-bold uppercase tracking-wider" style={{ color }}>
+          {label} sets
+        </span>
+        <span className="text-[11px] text-muted">{visible.length} set{visible.length === 1 ? "" : "s"}</span>
+        <div className="flex-1" />
+        <button onClick={() => onBulkUpload(module)}
+          className="flex items-center gap-1 px-2.5 py-1 text-[11px] rounded-md ds-focus"
+          style={{ background: bg, color }}>
+          <Upload size={11} /> Bulk upload
+        </button>
+        <button onClick={createSet} disabled={creating}
+          className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md ds-focus text-white disabled:opacity-50"
+          style={{ background: "var(--brand-grad)" }}>
+          {creating ? <Loader2 size={11} className="animate-spin" /> : <Plus size={11} />}
+          New set
+        </button>
+      </div>
+
+      {visible.length === 0 ? (
+        <p className="text-[11px] text-muted mt-2">
+          No sets yet for this selection. Click <strong>New set</strong> to create an
+          empty draft, open it and add its ten questions from the bank.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5 mt-2">
+          {shownSets.map((s) => {
+            const isOpen = openId === s.id;
+            return (
+              <button key={s.id} onClick={() => openSet(s.id)}
+                title={`${s.set_number} · ${s.question_count} questions · ${s.status}${s.usage_count ? ` · used ${s.usage_count}x` : ""}`}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium ds-focus"
+                style={isOpen
+                  ? { background: color, color: "white" }
+                  : { background: bg, color }}>
+                {isOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                {s.set_number || "set"}
+                <span className="opacity-75">{s.question_count}q</span>
+                {s.status !== "active" && <span className="opacity-75">· {s.status}</span>}
+              </button>
+            );
+          })}
+          {!showAllSets && visible.length > SETS_PER_VIEW && (
+            <button onClick={() => setShowAllSets(true)}
+              className="px-2.5 py-1 rounded-md text-[11px] font-medium ds-focus"
+              style={{ background: "var(--surface-2)", color }}>
+              +{visible.length - SETS_PER_VIEW} more
+            </button>
+          )}
+        </div>
+      )}
+
+      {openId && (
+        <div className="mt-3 rounded-lg border" style={{ borderColor: "var(--border)", background: "var(--surface)" }}>
+          {loadingDetail ? (
+            <div className="p-4 flex items-center gap-2 text-[11px] text-muted">
+              <Loader2 size={13} className="animate-spin" /> Loading the questions in this set…
+            </div>
+          ) : detail ? (
+            <>
+              <div className="flex items-center gap-2 px-3 py-2 border-b" style={{ borderColor: "var(--border)" }}>
+                <span className="text-[11px] font-bold">{detail.set_number}</span>
+                <span className="text-[10px] text-muted">
+                  {detail.company || "General"} · {detail.question_count}/10 questions · {detail.status}
+                  {detail.usage_count ? ` · used ${detail.usage_count}×` : ""}
+                </span>
+                {detail.missing_count > 0 && (
+                  <span className="text-[10px] font-semibold" style={{ color: "var(--rag-red)" }}>
+                    {detail.missing_count} missing
+                  </span>
+                )}
+                <div className="flex-1" />
+                {detail.status === "draft" && (
+                  <button onClick={() => activateSet(detail.id)} disabled={activating}
+                    title="A set goes live only with exactly 10 questions"
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md ds-focus text-white disabled:opacity-50"
+                    style={{ background: detail.question_count === 10 ? "var(--rag-green)" : "var(--surface-2)", color: detail.question_count === 10 ? "white" : "var(--muted)" }}>
+                    {activating ? <Loader2 size={11} className="animate-spin" /> : <CheckCircle2 size={11} />}
+                    Activate
+                  </button>
+                )}
+                {detail.status === "active" && (
+                  <button onClick={() => deactivateSet(detail.id)}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md ds-focus"
+                    style={{ background: "var(--surface-2)", color: "var(--rag-amber)" }}>
+                    Deactivate
+                  </button>
+                )}
+                {detail.status !== "active" && (
+                  <button onClick={() => deleteSet(detail.id)}
+                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md ds-focus"
+                    style={{ background: "var(--surface-2)", color: "var(--rag-red)" }}>
+                    <Trash2 size={11} /> Delete
+                  </button>
+                )}
+                <button onClick={() => { setOpenId(null); setDetail(null); }}
+                  className="text-muted hover:text-ragRed" title="Close"><X size={13} /></button>
+              </div>
+              {/* The ten slots. Empty ones are shown, not hidden, so the admin
+                  always sees how far the set is from the ten it needs. */}
+              <div className="divide-y" style={{ borderColor: "var(--border)" }}>
+                {(detail.questions || []).map((q: any, i: number) => (
+                  <div key={q.id || i} className="p-3">
+                    <div className="flex items-start gap-2">
+                      <span className="text-[10px] font-bold w-5 shrink-0 mt-0.5" style={{ color }}>{i + 1}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {q.kind && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-medium" style={{ background: bg, color }}>{q.kind}</span>
+                          )}
+                          {q.question_number && <span className="text-[9px] text-muted font-mono">{q.question_number}</span>}
+                          {q.status && q.status !== "published" && (
+                            <span className="text-[9px] font-semibold" style={{ color: "var(--rag-amber)" }}>{q.status}</span>
+                          )}
+                          <span className="text-[9px] text-muted">{typeof q.difficulty === "number" ? q.difficulty.toFixed(1) : ""}</span>
+                        </div>
+                        <div className="text-xs font-medium mt-1">
+                          {q.missing ? <em className="text-muted">This question no longer exists</em> : (q.label || "—")}
+                        </div>
+                        {(q.options || []).length > 0 && (
+                          <div className="mt-1.5 space-y-0.5">
+                            {q.options.map((opt: string, oi: number) => (
+                              <div key={oi} className="flex items-start gap-1.5 text-[11px]">
+                                <span className="w-4 h-4 rounded flex items-center justify-center text-[9px] font-bold shrink-0"
+                                  style={{
+                                    background: oi === q.correct_index ? "var(--rag-green)" : "var(--surface-2)",
+                                    color: oi === q.correct_index ? "white" : "var(--muted)",
+                                  }}>
+                                  {String.fromCharCode(65 + oi)}
+                                </span>
+                                <span className={oi === q.correct_index ? "font-semibold" : "text-muted"}>{opt}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {q.body && (
+                          <div className="mt-1.5 text-[10px] text-muted leading-relaxed max-h-20 overflow-y-auto">{q.body}</div>
+                        )}
+                        {q.explanation && (
+                          <div className="mt-1.5 text-[10px] text-muted"><strong>Explanation:</strong> {q.explanation}</div>
+                        )}
+                      </div>
+                      {detail.status === "draft" && !q.missing && (
+                        <div className="flex flex-col gap-1">
+                          <button onClick={() => removeQuestion(detail.id, q.id)}
+                            title="Remove from this set"
+                            className="shrink-0 p-1.5 rounded-md text-muted hover:text-ragAmber ds-focus">
+                            <X size={12} />
+                          </button>
+                          <button onClick={() => deleteQuestion(q.module || detail.module, q.id)}
+                            title="Delete from bank entirely"
+                            className="shrink-0 p-1.5 rounded-md text-muted hover:text-ragRed ds-focus">
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      )}
+                      {q.audio_key && (
+                        <AudioPlayer audioKey={q.audio_key} color={color} bg={bg} />
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {/* Empty slots up to ten. */}
+                {detail.status === "draft" &&
+                  Array.from({ length: Math.max(0, 10 - (detail.question_count || 0)) }).map((_, i) => (
+                    <div key={`slot-${i}`} className="p-3 flex items-center gap-2">
+                      <span className="text-[10px] font-bold w-5 shrink-0" style={{ color: "var(--muted)" }}>
+                        {(detail.question_count || 0) + i + 1}
+                      </span>
+                      <span className="text-[11px] text-muted italic">Empty slot — add a question from the bank below</span>
+                    </div>
+                  ))}
+              </div>
+              {/* Manual picker: only in drafts, only questions the engine would
+                  actually accept (same scope, still free of other live sets). */}
+              {detail.status === "draft" && (
+                <div className="border-t p-3" style={{ borderColor: "var(--border)", background: "color-mix(in srgb, var(--surface-2) 50%, transparent)" }}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-[11px] font-bold" style={{ color }}>Add from bank</span>
+                    <span className="text-[10px] text-muted">
+                      {detail.question_count}/10 filled · {detail.company ? `company: ${detail.company}` : "general bank"}
+                    </span>
+                    <div className="flex-1" />
+                    <div className="relative">
+                      <Search size={11} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted" />
+                      <input value={candidateSearch}
+                        onChange={(e) => { setCandidateSearch(e.target.value); loadCandidates(detail.id, e.target.value); }}
+                        placeholder="Search the bank…"
+                        className="text-[11px] pl-6 pr-2 py-1 rounded border bg-transparent w-44"
+                        style={{ borderColor: "var(--border)" }} />
+                    </div>
+                  </div>
+                  {loadingCandidates ? (
+                    <div className="flex items-center gap-2 text-[11px] text-muted py-2">
+                      <Loader2 size={12} className="animate-spin" /> Loading questions…
+                    </div>
+                  ) : candidates.length === 0 ? (
+                    <p className="text-[11px] text-muted py-2">
+                      No questions left in this scope. Add questions to the bank first,
+                      or clear the search.
+                    </p>
+                  ) : (
+                    <div className="max-h-56 overflow-y-auto rounded-md border divide-y" style={{ borderColor: "var(--border)" }}>
+                      {candidates.map((c: any) => (
+                        <div key={c.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                          <span className="text-[9px] text-muted font-mono shrink-0 w-20 truncate">
+                            {c.question_number || "—"}
+                          </span>
+                          <span className="text-[11px] flex-1 min-w-0 truncate">{c.label || "—"}</span>
+                          {c.kind && <span className="text-[9px] text-muted shrink-0">{c.kind}</span>}
+                          <button onClick={() => addQuestion(detail.id, c.id)} disabled={addingId === c.id || detail.question_count >= 10}
+                            className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-md ds-focus text-white disabled:opacity-50 shrink-0"
+                            style={{ background: "var(--brand-grad)" }}>
+                            {addingId === c.id ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
+                            Add
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function QuestionBank() {
   const { toast } = useToast();
   const [data, setData] = useState<any>(null);
@@ -144,14 +624,13 @@ function QuestionBank() {
   const [showAdd, setShowAdd] = useState(false);
   const [addType, setAddType] = useState("");
   const [items, setItems] = useState<Record<string, any[]>>({});
-  const [page, setPage] = useState<Record<string, number>>({});
-  const [expandedQuestions, setExpandedQuestions] = useState<Record<string, boolean>>({});
-  const [promptAudioFiles, setPromptAudioFiles] = useState<any[]>([]);
-  const [audioExpanded, setAudioExpanded] = useState(false);
-  const [audioPage, setAudioPage] = useState(0);
   const [showBulkUpload, setShowBulkUpload] = useState(false);
+  const [bulkModule, setBulkModule] = useState<string | null>(null);
   const [dbCompanies, setDbCompanies] = useState<{name: string; color: string}[]>([]);
-  const AUDIO_PAGE_SIZE = 20;
+  // Question sets, grouped by module. Loaded once and refreshed after a set is
+  // created, so every expanded category can show its own sets without a request
+  // per section.
+  const [sets, setSets] = useState<any[]>([]);
   // Update module-level company list for child modals
   _allCompanies = Array.from(new Set(dbCompanies.map((c: any) => c.name)));
 
@@ -180,46 +659,29 @@ function QuestionBank() {
         setLoading(false);
       })
       .catch((e) => { setError(e?.message || "Failed"); setLoading(false); });
-    fetch(`${API_BASE}/platform/prompt-audio`, {
+    loadSets();
+  };
+
+  const loadSets = () => {
+    const token = getToken();
+    fetch(`${API_BASE}/platform/sets`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
-    }).then((r) => r.ok ? r.json() : { files: [] })
-      .then((d) => setPromptAudioFiles(d.files || []))
+    }).then((r) => r.ok ? r.json() : [])
+      .then((d) => setSets(Array.isArray(d) ? d : []))
       .catch(() => {});
   };
 
   useEffect(() => { loadData(); }, []);
 
-  const handleDelete = async (collection: string, itemId: string) => {
-    if (!confirm("Delete this question?")) return;
-    const token = getToken();
-    try {
-      await fetch(`${API_BASE}/platform/questions/${collection}/${itemId}`, {
-        method: "DELETE", headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      toast("success", "Question deleted");
-      loadData();
-    } catch { toast("error", "Failed to delete question"); }
-  };
-
   const toggleSection = (key: string) => {
     setExpanded((prev) => ({ ...prev, [key]: !prev[key] }));
-    if (!expanded[key]) setPage((prev) => ({ ...prev, [key]: 0 }));
   };
 
   const openAdd = (type: string) => { setAddType(type); setShowAdd(true); };
 
-  const getPageItems = (sectionKey: string) => {
-    const allItems = items[sectionKey] || [];
-    const p = page[sectionKey] || 0;
-    return allItems.slice(p * PAGE_SIZE, (p + 1) * PAGE_SIZE);
-  };
-
-  const totalPages = (sectionKey: string) => Math.ceil((items[sectionKey]?.length || 0) / PAGE_SIZE);
-
   if (loading && !data) return <Skeleton rows={5} />;
   if (error && !data) return <ErrorNote message={error} />;
 
-  const counts = data?.counts || {};
   const activeCounts = {
     quiz_items: (items.quiz || []).length,
     task_items: (items.speaking || []).length,
@@ -227,9 +689,6 @@ function QuestionBank() {
     listening_passages: (items.listening || []).length,
     reading_passages: (items.reading || []).length,
   };
-  const totalQuestions = (activeCounts.quiz_items || 0) + (activeCounts.task_items || 0) +
-    (activeCounts.writing_prompts || 0) + (activeCounts.listening_passages || 0) + (activeCounts.reading_passages || 0);
-
   return (
     <>
       <PageHeader title="Question Bank" sub="Manage questions for reading, writing, listening, speaking and grammar. Filter by company to see company-specific questions." />
@@ -252,7 +711,7 @@ function QuestionBank() {
               s.key === "speaking" ? "task_items" : s.key === "writing" ? "writing_prompts" : "quiz_items";
             const count = activeCounts[countKey] || 0;
             return (
-              <div key={s.key} className="ds-card p-3 text-center cursor-pointer hover:bg-surface2 transition-colors"
+              <div key={s.key} className="ds-card card-interactive p-3 text-center cursor-pointer"
                 onClick={() => { toggleSection(s.key); if (!expanded[s.key]) setTimeout(() => document.getElementById(`section-${s.key}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 100); }}>
                 <Icon size={18} style={{ color: s.color }} className="mx-auto mb-1" />
                 <div className="text-2xl font-bold" style={{ color: s.color }}>{count}</div>
@@ -262,97 +721,13 @@ function QuestionBank() {
           })}
         </div>
 
-      <div className="ds-card p-3 mb-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-4">
-            <span className="text-xs font-semibold">
-              All Questions: {totalQuestions}
-            </span>
-          </div>
-          <span className="text-[11px] text-muted">{PAGE_SIZE} per page</span>
-        </div>
-      </div>
-
-      {/* Prompt Audio Bank */}
-      <div className="ds-card overflow-hidden mb-4">
-        <button onClick={() => setAudioExpanded(!audioExpanded)}
-          className="w-full flex items-center gap-3 p-4 text-left hover:bg-surface2 transition-colors">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: "color-mix(in srgb, var(--primary) 8%, transparent)" }}>
-            <Volume2 size={16} style={{ color: "var(--primary)" }} />
-          </div>
-          <div className="flex-1">
-            <div className="text-sm font-bold">Prompt Audio Bank</div>
-            <div className="text-[11px] text-muted">{promptAudioFiles.length} pre-rendered clips (M4A + WAV)</div>
-          </div>
-          <div onClick={(e) => e.stopPropagation()}>
-            <AudioUploadButton onUploaded={() => loadData()} />
-          </div>
-          {audioExpanded ? <ChevronDown size={16} className="text-muted" /> : <ChevronRight size={16} className="text-muted" />}
-        </button>
-        {audioExpanded && (
-          <div className="border-t p-4" style={{ borderColor: "var(--border)" }}>
-            {promptAudioFiles.length === 0 ? (
-              <div className="text-center py-4">
-                <p className="text-xs text-muted mb-3">No pre-rendered audio files found.</p>
-                <AudioUploadButton onUploaded={() => loadData()} />
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2 max-h-72 overflow-y-auto">
-                  {promptAudioFiles.slice(audioPage * AUDIO_PAGE_SIZE, (audioPage + 1) * AUDIO_PAGE_SIZE).map((f: any) => (
-                    <div key={f.name} className="flex items-center gap-2 p-2 rounded border text-xs" style={{ borderColor: "var(--border)" }}>
-                      <button onClick={() => {
-                        const a = new Audio(`${API_BASE}/platform/assets/${f.name}`);
-                        a.play().catch(() => toast("error", "Could not play audio"));
-                      }} className="shrink-0 w-6 h-6 rounded flex items-center justify-center hover:bg-surface2 transition-colors"
-                        style={{ background: "color-mix(in srgb, var(--primary) 10%, transparent)", color: "var(--primary)" }}>
-                        <Volume2 size={12} />
-                      </button>
-                      <div className="flex-1 min-w-0">
-                        <div className="truncate font-mono text-[10px]">{f.name}</div>
-                        <div className="text-muted text-[10px]">{f.ext.toUpperCase()} · {(f.size / 1024).toFixed(0)} KB</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-                {promptAudioFiles.length > AUDIO_PAGE_SIZE && (
-                  <div className="flex items-center justify-between mt-3 pt-3 border-t" style={{ borderColor: "var(--border)" }}>
-                    <span className="text-[11px] text-muted">
-                      Showing {audioPage * AUDIO_PAGE_SIZE + 1}–{Math.min((audioPage + 1) * AUDIO_PAGE_SIZE, promptAudioFiles.length)} of {promptAudioFiles.length}
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <button disabled={audioPage === 0} onClick={() => setAudioPage(audioPage - 1)}
-                        className="p-1 rounded disabled:opacity-30 hover:bg-surface2"><ChevronLeft size={14} /></button>
-                      {Array.from({ length: Math.ceil(promptAudioFiles.length / AUDIO_PAGE_SIZE) }, (_, i) => (
-                        <button key={i} onClick={() => setAudioPage(i)}
-                          className="w-6 h-6 rounded text-[11px] font-medium"
-                          style={{ background: i === audioPage ? "var(--primary)" : "transparent", color: i === audioPage ? "white" : "var(--muted)" }}>
-                          {i + 1}
-                        </button>
-                      ))}
-                      <button disabled={audioPage >= Math.ceil(promptAudioFiles.length / AUDIO_PAGE_SIZE) - 1}
-                        onClick={() => setAudioPage(audioPage + 1)}
-                        className="p-1 rounded disabled:opacity-30 hover:bg-surface2"><ChevronRight size={14} /></button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-      </div>
-
       <div className="space-y-3">
         {SECTION_CONFIG.map((section) => {
           const Icon = section.icon;
-          const sectionItems = items[section.key] || [];
           const isExpanded = expanded[section.key] || false;
           const countKey = section.key === "reading" ? "reading_passages" : section.key === "listening" ? "listening_passages" :
             section.key === "speaking" ? "task_items" : section.key === "writing" ? "writing_prompts" : "quiz_items";
           const count = activeCounts[countKey] || 0;
-          const p = page[section.key] || 0;
-          const tp = totalPages(section.key);
-          const pageItems = getPageItems(section.key);
 
           return (
             <div key={section.key} id={`section-${section.key}`} className="ds-card overflow-hidden">
@@ -375,131 +750,15 @@ function QuestionBank() {
 
               {isExpanded && (
                 <div className="border-t" style={{ borderColor: "var(--border)" }}>
-                  {sectionItems.length === 0 ? (
-                    <div className="p-6 text-center">
-                      <p className="text-xs text-muted mb-3">No {section.label.toLowerCase()} questions yet.</p>
-                      <button onClick={() => openAdd(section.addType)} className="text-xs px-3 py-1.5 rounded-md"
-                        style={{ background: section.bg, color: section.color }}>
-                        <Plus size={12} className="inline mr-1" /> Add first question
-                      </button>
-                    </div>
-                  ) : (
-                    <>
-                      <div className="divide-y" style={{ borderColor: "var(--border)" }}>
-                        {pageItems.map((item: any, idx: number) => {
-                          const qKey = `${section.key}-${item.id || idx}`;
-                          const isQExpanded = expandedQuestions[qKey] || false;
-                          return (
-                            <div key={item.id || idx}>
-                              <button onClick={() => setExpandedQuestions((prev) => ({ ...prev, [qKey]: !prev[qKey] }))}
-                                className="w-full flex items-center gap-3 p-3 text-left hover:bg-surface2 transition-colors">
-                                <span className="text-[11px] text-muted w-6 shrink-0">{p * PAGE_SIZE + idx + 1}</span>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2">
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium shrink-0"
-                                      style={{ background: section.bg, color: section.color }}>
-                                      {item.category || item.task_type || item.kind || "—"}
-                                    </span>
-                                    <span className="text-xs font-semibold truncate">{item.stem || item.title || item.prompt_text || item.prompt || "—"}</span>
-                                  </div>
-                                </div>
-                                {(section.key === "listening" || section.key === "speaking") && (
-                                  <div className="shrink-0">
-                                    {item.audio_key ? (
-                                      <AudioPlayer audioKey={item.audio_key} color={section.color} bg={section.bg} />
-                                    ) : null}
-                                  </div>
-                                )}
-                                <span className="text-[10px] text-muted shrink-0">{typeof item.difficulty === "number" ? item.difficulty.toFixed(1) : "—"}</span>
-                                <button onClick={(e) => { e.stopPropagation(); handleDelete(item._collection, item.id); }}
-                                  className="text-muted hover:text-red-500 transition-colors shrink-0" title="Delete">
-                                  <Trash2 size={12} />
-                                </button>
-                                {isQExpanded ? <ChevronDown size={14} className="text-muted shrink-0" /> : <ChevronRight size={14} className="text-muted shrink-0" />}
-                              </button>
-                              {isQExpanded && (
-                                <div className="px-3 pb-3 pt-1" style={{ background: "var(--surface-2)" }}>
-                                  {section.key === "quiz" && (
-                                    <div className="space-y-1.5">
-                                      <div className="text-xs font-semibold mb-2">{item.stem}</div>
-                                      {item.options?.map((opt: string, oi: number) => (
-                                        <div key={oi} className="flex items-center gap-2 text-[11px]">
-                                          <span className="w-5 h-5 rounded flex items-center justify-center text-[9px] font-bold shrink-0"
-                                            style={{
-                                              background: oi === item.correct_index ? "var(--rag-green)" : "var(--surface)",
-                                              color: oi === item.correct_index ? "white" : "var(--muted)",
-                                            }}>
-                                            {String.fromCharCode(65 + oi)}
-                                          </span>
-                                          <span>{opt}</span>
-                                          {oi === item.correct_index && <span className="text-[9px] font-bold" style={{ color: "var(--rag-green)" }}>Correct</span>}
-                                        </div>
-                                      ))}
-                                      {item.explanation && (
-                                        <div className="mt-2 p-2 rounded text-[11px] text-muted" style={{ background: "var(--surface)" }}>
-                                          <strong>Explanation:</strong> {item.explanation}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                  {section.key === "reading" && (
-                                    <div className="space-y-2">
-                                      {item.title && <div className="text-xs font-semibold">{item.title}</div>}
-                                      {item.body && <div className="text-[11px] text-muted leading-relaxed max-h-32 overflow-y-auto">{item.body}</div>}
-                                    </div>
-                                  )}
-                                  {section.key === "listening" && (
-                                    <div className="space-y-2">
-                                      {item.title && <div className="text-xs font-semibold">{item.title}</div>}
-                                      {item.transcript && <div className="text-[11px] text-muted leading-relaxed max-h-32 overflow-y-auto">{item.transcript}</div>}
-                                    </div>
-                                  )}
-                                  {section.key === "writing" && (
-                                    <div className="space-y-2">
-                                      {item.title && <div className="text-xs font-semibold">{item.title}</div>}
-                                      {item.prompt && <div className="text-[11px] text-muted">{item.prompt}</div>}
-                                      {item.scenario && <div className="text-[11px] text-muted italic">{item.scenario}</div>}
-                                      {item.key_points?.length > 0 && (
-                                        <div className="flex flex-wrap gap-1 mt-1">
-                                          {item.key_points.map((kp: string, ki: number) => (
-                                            <span key={ki} className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: section.bg, color: section.color }}>{kp}</span>
-                                          ))}
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                  {section.key === "speaking" && (
-                                    <div className="space-y-2">
-                                      {item.prompt_text && <div className="text-xs font-semibold">{item.prompt_text}</div>}
-                                      {item.reference_text && <div className="text-[11px] text-muted italic">{item.reference_text}</div>}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                      {tp > 1 && (
-                        <div className="flex items-center justify-between p-3 border-t" style={{ borderColor: "var(--border)" }}>
-                          <span className="text-[11px] text-muted">Showing {p * PAGE_SIZE + 1}–{Math.min((p + 1) * PAGE_SIZE, sectionItems.length)} of {sectionItems.length}</span>
-                          <div className="flex items-center gap-1">
-                            <button disabled={p === 0} onClick={() => setPage((prev) => ({ ...prev, [section.key]: p - 1 }))}
-                              className="p-1 rounded disabled:opacity-30 hover:bg-surface2"><ChevronLeft size={14} /></button>
-                            {Array.from({ length: tp }, (_, i) => (
-                              <button key={i} onClick={() => setPage((prev) => ({ ...prev, [section.key]: i }))}
-                                className="w-6 h-6 rounded text-[11px] font-medium"
-                                style={{ background: i === p ? section.color : "transparent", color: i === p ? "white" : "var(--muted)" }}>
-                                {i + 1}
-                              </button>
-                            ))}
-                            <button disabled={p >= tp - 1} onClick={() => setPage((prev) => ({ ...prev, [section.key]: p + 1 }))}
-                              className="p-1 rounded disabled:opacity-30 hover:bg-surface2"><ChevronRight size={14} /></button>
-                          </div>
-                        </div>
-                      )}
-                    </>
-                  )}
+                  <SetPanel
+                    module={section.key}
+                    label={section.label}
+                    color={section.color}
+                    bg={section.bg}
+                    sets={sets.filter((s) => s.module === section.key)}
+                    onRefresh={loadSets}
+                    onBulkUpload={(m) => { setBulkModule(m); setShowBulkUpload(true); }}
+                  />
                 </div>
               )}
             </div>
@@ -508,7 +767,9 @@ function QuestionBank() {
       </div>
 
       {showAdd && <AddQuestionModal type={addType} onClose={() => setShowAdd(false)} onCreated={() => { setShowAdd(false); loadData(); }} />}
-      {showBulkUpload && <BulkUploadModal onClose={() => setShowBulkUpload(false)} onCreated={() => { setShowBulkUpload(false); loadData(); }} />}
+      {showBulkUpload && <BulkUploadModal initialCategory={bulkModule || "quiz"}
+        onClose={() => { setShowBulkUpload(false); setBulkModule(null); }}
+        onCreated={() => { setShowBulkUpload(false); setBulkModule(null); loadData(); }} />}
     </>
   );
 }
@@ -763,7 +1024,7 @@ return (
               <label className="block">
                 <span className="text-[11px] text-muted font-medium flex items-center gap-1"><Upload size={11} /> Audio File (optional)</span>
                 <input type="file" accept="audio/*" onChange={(e) => set("audioFile", e.target.files?.[0] || null)} className="w-full text-xs mt-1" />
-                {form.audioKey && <span className="text-[10px] text-green-600 mt-1 block">Uploaded: {form.audioKey}</span>}
+                {form.audioKey && <span className="text-[10px] text-success mt-1 block">Uploaded: {form.audioKey}</span>}
               </label>
             </>
           )}
@@ -824,7 +1085,7 @@ return (
               <label className="block">
                 <span className="text-[11px] text-muted font-medium flex items-center gap-1"><Upload size={11} /> Audio File *</span>
                 <input type="file" accept="audio/*" onChange={(e) => set("audioFile", e.target.files?.[0] || null)} className="w-full text-xs mt-1" />
-                {form.audioKey && <span className="text-[10px] text-green-600 mt-1 block">Uploaded: {form.audioKey}</span>}
+                {form.audioKey && <span className="text-[10px] text-success mt-1 block">Uploaded: {form.audioKey}</span>}
               </label>
               <div className="grid grid-cols-2 gap-3">
                 <label className="block">
@@ -915,12 +1176,16 @@ return (
   );
 }
 
-function BulkUploadModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void; }) {
+function BulkUploadModal({ onClose, onCreated, initialCategory = "quiz" }:
+  { onClose: () => void; onCreated: () => void; initialCategory?: string; }) {
   const { toast } = useToast();
   const [step, setStep] = useState<"select" | "upload" | "preview" | "done">("select");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [category, setCategory] = useState("quiz");
+  // Opened from a category, so it starts on that category rather than always
+  // on quiz: the admin who clicked "Bulk upload 10" under Listening meant
+  // listening.
+  const [category, setCategory] = useState(initialCategory);
   const [company, setCompany] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [jsonText, setJsonText] = useState("");
@@ -1148,7 +1413,7 @@ function BulkUploadModal({ onClose, onCreated }: { onClose: () => void; onCreate
                 <div className="text-[11px] font-semibold mb-1">Issues</div>
                 {preview.problems.slice(0, 20).map((p: any, i: number) => (
                   <div key={i} className="text-[10px] flex items-start gap-2 py-0.5">
-                    <span className={p.severity === "error" ? "text-red-500" : "text-amber-500"}>
+                    <span className={p.severity === "error" ? "text-ragRed" : "text-ragAmber"}>
                       {p.severity === "error" ? "❌" : "⚠"}
                     </span>
                     <span>Row {p.row}: {p.field} — {p.message}</span>

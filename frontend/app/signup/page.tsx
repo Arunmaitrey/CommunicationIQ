@@ -138,6 +138,13 @@ export default function SignupPage() {
             Already have an account?{" "}
             <Link href="/login" className="underline ds-focus">Sign in</Link>
           </p>
+
+          <p className="text-[10px] text-muted mt-3 text-center leading-relaxed">
+            By creating an account, you agree to our{" "}
+            <Link href="/terms" className="underline ds-focus">Terms &amp; Conditions</Link>{" "}
+            and{" "}
+            <Link href="/privacy" className="underline ds-focus">Privacy Policy</Link>.
+          </p>
         </div>
       </div>
     </div>

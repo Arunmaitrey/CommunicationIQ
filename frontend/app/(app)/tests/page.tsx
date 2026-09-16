@@ -60,6 +60,14 @@ function Tests() {
     }
   }
 
+  // Map profile_id to last scored attempt ID for Review button
+  const lastScoredByProfile = new Map<string, string>();
+  for (const a of data?.recent_attempts ?? []) {
+    if (a.status === "scored" && !lastScoredByProfile.has(a.profile_id)) {
+      lastScoredByProfile.set(a.profile_id, a.id);
+    }
+  }
+
   if (loading) return <Skeleton rows={6} />;
   if (error) return <ErrorNote message={error} />;
 
@@ -175,6 +183,7 @@ function Tests() {
               <TestCard key={p.id} profile={p} first consented={consented}
                         starting={starting === p.id} anyStarting={starting !== ""}
                         inProgressAttemptId={inProgressByProfile.get(p.id)}
+                        lastScoredAttemptId={lastScoredByProfile.get(p.id)}
                         onStart={() => void start(p.id)}
                         onResume={() => resume(inProgressByProfile.get(p.id)!)} />
             ))}
@@ -214,6 +223,7 @@ function Tests() {
                     <TestCard key={p.id} profile={p} consented={consented}
                               starting={starting === p.id} anyStarting={starting !== ""}
                               inProgressAttemptId={inProgressByProfile.get(p.id)}
+                              lastScoredAttemptId={lastScoredByProfile.get(p.id)}
                               onStart={() => void start(p.id)}
                               onResume={() => resume(inProgressByProfile.get(p.id)!)} />
                   ))}
@@ -258,6 +268,7 @@ function Tests() {
                     <TestCard key={p.id} profile={p} consented={consented}
                               starting={starting === p.id} anyStarting={starting !== ""}
                               inProgressAttemptId={inProgressByProfile.get(p.id)}
+                              lastScoredAttemptId={lastScoredByProfile.get(p.id)}
                               onStart={() => void start(p.id)}
                               onResume={() => resume(inProgressByProfile.get(p.id)!)} />
                   ))}
@@ -276,9 +287,10 @@ function Tests() {
   );
 }
 
-function TestCard({ profile: p, first, consented, starting, anyStarting, inProgressAttemptId, onStart, onResume }: {
+function TestCard({ profile: p, first, consented, starting, anyStarting, inProgressAttemptId, lastScoredAttemptId, onStart, onResume }: {
   profile: SimulationProfile; first?: boolean; consented: boolean;
   starting: boolean; anyStarting: boolean; inProgressAttemptId?: string;
+  lastScoredAttemptId?: string;
   onStart: () => void; onResume: () => void;
 }) {
   const items = p.sections.reduce((n, s) => n + s.item_count, 0);
@@ -339,10 +351,16 @@ function TestCard({ profile: p, first, consented, starting, anyStarting, inProgr
                      : "Locked until you have consented above."}
         </span>
         <div className="flex items-center gap-2 shrink-0">
+          {lastScoredAttemptId && (
+            <Link href={`/results/${lastScoredAttemptId}`}
+              className="btn btn-ghost btn-sm ds-focus text-[10px]">
+              Review
+            </Link>
+          )}
           {inProgressAttemptId && (
             <button
-              className="btn btn-sm ds-focus"
-              style={{ background: "var(--rag-green)", color: "white" }}
+              className="btn btn-primary btn-sm ds-focus"
+              style={{ background: "var(--rag-green)" }}
               disabled={!consented || anyStarting}
               onClick={onResume}
               title={consented ? "" : "Consent is required before recording"}

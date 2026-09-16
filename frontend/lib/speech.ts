@@ -35,14 +35,19 @@
 
 /** Below this, a frame is silence.
  *
- *  −55 dBFS is well under conversational speech at a normal microphone gain
+ *  −58 dBFS is well under conversational speech at a normal microphone gain
  *  (roughly −30 to −15) and above the noise floor of a quiet room (−65 and
  *  down). Deliberately generous: a false "you said nothing" shown to somebody
  *  who did speak is a worse failure than letting a genuinely silent recording
  *  through, because the second is caught by the server and reported honestly
  *  while the first calls the candidate a liar about their own answer.
+ *
+ *  Lowered from −55 to −58 so that quieter speakers (students in exam halls,
+ *  phone microphones with aggressive noise suppression, non-native speakers
+ *  who speak softly) are not falsely gated out during Listen & Repeat and
+ *  Story Retell. The server's own VAD remains the authority on scoring.
  */
-export const SILENCE_DBFS = -55;
+export const SILENCE_DBFS = -58;
 
 /** The opening stretch of every recording that neither gate listens to.
  *  The start tone plays through the speakers a moment before the recorder

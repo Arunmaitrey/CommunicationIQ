@@ -8,7 +8,7 @@ export function BrandMark({ size = 26 }: { size?: number }) {
       className="inline-flex items-center justify-center rounded-ds font-black shrink-0"
       style={{
         width: size, height: size, fontSize: size * 0.46,
-        background: "var(--brand-grad)", color: "#fff", letterSpacing: "-0.04em",
+        background: "var(--brand-grad)", color: "var(--on-primary)", letterSpacing: "-0.04em",
       }}
       aria-hidden
     >

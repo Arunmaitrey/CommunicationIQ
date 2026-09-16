@@ -1,4 +1,4 @@
-"""Tier 1 — content coverage and staying on topic (ENG-11).
+"""Content coverage and staying on topic (ENG-11).
 
 Two different questions wearing one contract:
 
@@ -81,7 +81,7 @@ class RubricRelevance:
     def analyse(self, transcript: str, rubric: dict,
                 task_type: str = "") -> RelevanceResult:
         meta = ProviderMeta(provider_id="", provider_key=self.provider_key,
-                            version=self.version, tier=1)
+                            version=self.version, tier=1)  # ML-assisted
 
         said = content_words(transcript)
         spoken_words = len((transcript or "").split())

@@ -237,7 +237,7 @@ function CreateAssessmentModal({ onClose, onCreated }: { onClose: () => void; on
                     <input value={s.title} onChange={(e) => setSection(i, "title", e.target.value)}
                       className="text-[11px] font-bold bg-transparent border-b border-transparent focus:border-current outline-none" style={{ borderColor: "var(--border)" }} />
                     {sections.length > 1 && (
-                      <button onClick={() => removeSection(i)} className="text-muted hover:text-red-500"><Trash2 size={11} /></button>
+                      <button onClick={() => removeSection(i)} className="text-muted hover:text-ragRed"><Trash2 size={11} /></button>
                     )}
                   </div>
                   <div className="grid grid-cols-3 gap-2">

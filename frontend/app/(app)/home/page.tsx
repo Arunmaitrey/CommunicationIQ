@@ -73,7 +73,7 @@ function NextAction({ quest, baselineDone, consent, hasAttempts }: {
               style={{ background: "color-mix(in srgb, var(--primary) 14%, transparent)" }}>
           <Play size={20} style={{ color: "var(--primary)" }} />
         </span>
-        <div className="flex-1 min-w-[16rem]">
+        <div className="flex-1 min-w-0">
           <div className="text-[11px] font-bold uppercase tracking-wider"
                style={{ color: "var(--primary)" }}>
             Do this next
@@ -215,10 +215,10 @@ function Home() {
                 )}
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide
                   ${a.status === "scored"
-                    ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                    ? "status-pill status-ok"
                     : a.status === "in_progress"
-                    ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                    : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"}`}>
+                    ? "status-pill status-warn"
+                    : "bg-surface2 text-muted"}`}>
                   {a.status}
                 </span>
                 {a.status === "scored" && (
@@ -244,20 +244,20 @@ function Home() {
       {/* Tips */}
       <div className="ds-card p-5 mt-4">
         <div className="flex items-center gap-2 mb-3">
-          <Lightbulb size={16} className="text-amber-500" />
+          <Lightbulb size={16} className="text-ragAmber" />
           <span className="text-sm font-bold">Tips for improvement</span>
         </div>
         <ul className="space-y-2">
           <li className="text-xs text-muted leading-relaxed flex gap-2">
-            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-amber-400" />
+            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-ragAmber" />
             Practice daily for at least 10 minutes.
           </li>
           <li className="text-xs text-muted leading-relaxed flex gap-2">
-            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-amber-400" />
+            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-ragAmber" />
             Record in a quiet environment for best scoring.
           </li>
           <li className="text-xs text-muted leading-relaxed flex gap-2">
-            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-amber-400" />
+            <span className="shrink-0 mt-1 w-1 h-1 rounded-full bg-ragAmber" />
             Review your reports to identify patterns.
           </li>
         </ul>
@@ -384,7 +384,7 @@ function Doorway({ href, title, detail }: {
 }) {
   return (
     <Link href={href}
-          className="ds-card p-4 hover:bg-surface2 transition-colors ds-focus block">
+          className="ds-card card-interactive p-4 ds-focus block">
       <div className="flex items-center gap-2">
         <span className="text-sm font-bold">{title}</span>
         <ArrowRight size={14} className="text-muted ml-auto" />
@@ -399,7 +399,7 @@ function QuickAction({ href, icon: Icon, label }: {
 }) {
   return (
     <Link href={href}
-          className="ds-card p-3 hover:bg-surface2 transition-colors ds-focus flex items-center gap-3 group">
+          className="ds-card card-interactive p-3 ds-focus flex items-center gap-3 group">
       <span className="rounded-lg p-2 shrink-0 transition-colors"
             style={{ background: "color-mix(in srgb, var(--primary) 10%, transparent)" }}>
         <Icon size={16} style={{ color: "var(--primary)" }} />

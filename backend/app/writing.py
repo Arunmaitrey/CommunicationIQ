@@ -314,7 +314,7 @@ async def grammatical_accuracy(text: str) -> Measure:
     with it: high precision, partial recall, and it does not treat Indian
     English as an error. Both properties are inherited here on purpose.
     """
-    from app.engine.providers.tier1.grammar import CommonErrorGrammar
+    from app.engine.providers.common_error_grammar import CommonErrorGrammar
 
     result = await CommonErrorGrammar().analyse(text, task_type="written")
     return Measure(

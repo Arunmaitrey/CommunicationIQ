@@ -142,18 +142,37 @@ async def change_password(body: ChangePasswordRequest,
     return {"ok": True}
 
 
+@router.post("/forgot-password")
+async def forgot_password(body: dict) -> dict:
+    """Request a password reset link. Always returns ok to prevent email enumeration."""
+    email = body.get("email", "").strip().lower()
+    if not email:
+        return {"ok": True}
+    # In a production system this would send an email with a reset link.
+    # For now, we just acknowledge the request without revealing whether
+    # the email exists.
+    return {"ok": True}
+
+
 @router.post("/preferences")
-async def save_preferences(body: dict, principal: Principal) -> dict:
+async def save_preferences(body: dict, principal: Principal,
+                          request: Request) -> dict:
     """Save user preferences (theme, profile fields) to the DB."""
+    ip = request.client.host if request.client else ""
     if principal.scope == "platform":
         staff = await PlatformUser.get(principal.user_id)
         if staff is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+        before = {"full_name": staff.full_name, "preferred_theme": staff.preferred_theme}
         if "preferred_theme" in body:
             staff.preferred_theme = body["preferred_theme"]
         if "full_name" in body:
             staff.full_name = body["full_name"]
         await staff.save()
+        after = {"full_name": staff.full_name, "preferred_theme": staff.preferred_theme}
+        await audit.record(principal, "user.preferences_updated",
+                           entity="PlatformUser", entity_id=staff.id,
+                           before=before, after=after, ip_address=ip)
     else:
         tenant = await Tenant.get(principal.tenant_id or "")
         if tenant is None:
@@ -162,6 +181,10 @@ async def save_preferences(body: dict, principal: Principal) -> dict:
         user = await models.User.get(principal.user_id)
         if user is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "User not found")
+        before = {"full_name": user.full_name, "roll_number": user.roll_number,
+                  "branch": user.branch, "year_of_study": user.year_of_study,
+                  "l1_language": user.l1_language, "avatar_url": user.avatar_url,
+                  "preferred_theme": user.preferred_theme}
         if "preferred_theme" in body:
             user.preferred_theme = body["preferred_theme"]
         if "full_name" in body:
@@ -177,21 +200,38 @@ async def save_preferences(body: dict, principal: Principal) -> dict:
         if "avatar_url" in body:
             user.avatar_url = body["avatar_url"]
         await user.save()
+        after = {"full_name": user.full_name, "roll_number": user.roll_number,
+                 "branch": user.branch, "year_of_study": user.year_of_study,
+                 "l1_language": user.l1_language, "avatar_url": user.avatar_url,
+                 "preferred_theme": user.preferred_theme}
+        await audit.record(principal, "user.preferences_updated",
+                           entity="User", entity_id=user.id,
+                           before=before, after=after, ip_address=ip,
+                           tenant_id=tenant.id)
     return {"ok": True}
 
 
 @router.post("/avatar")
-async def upload_avatar(file: "UploadFile", principal: Principal) -> dict:
+async def upload_avatar(file: "UploadFile", principal: Principal,
+                        request: Request) -> dict:
     """Upload a student avatar image."""
     import uuid as _uuid, os
     from app.db import ensure_tenant_models
     from app.models.platform import Tenant
+    ip = request.client.host if request.client else ""
     ext = os.path.splitext(file.filename or "avatar.jpg")[1] or ".jpg"
+    ALLOWED_AVATAR_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
+    if ext.lower() not in ALLOWED_AVATAR_EXTS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Avatar must be an image ({', '.join(ALLOWED_AVATAR_EXTS)})")
+    # Reject SVG (script container) even if extension is allowed
+    content = await file.read()
+    if content[:5].lower() == b"<svg " or content[:5].lower() == b"<?xml":
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "SVG files are not allowed")
     key = f"avatars/{_uuid.uuid4().hex}{ext}"
     upload_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "avatars")
     os.makedirs(upload_dir, exist_ok=True)
     dest = os.path.join(upload_dir, key.replace("avatars/", ""))
-    content = await file.read()
     if len(content) > 5 * 1024 * 1024:
         raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Avatar must be under 5 MB")
     with open(dest, "wb") as f:
@@ -201,16 +241,27 @@ async def upload_avatar(file: "UploadFile", principal: Principal) -> dict:
         from app.models.platform import PlatformUser
         staff = await PlatformUser.get(principal.user_id)
         if staff:
+            old_url = staff.avatar_url
             staff.avatar_url = avatar_url
             await staff.save()
+            await audit.record(principal, "user.avatar_updated",
+                               entity="PlatformUser", entity_id=staff.id,
+                               before={"avatar_url": old_url},
+                               after={"avatar_url": avatar_url}, ip_address=ip)
     else:
         tenant = await Tenant.get(principal.tenant_id or "")
         if tenant:
             models = await ensure_tenant_models(tenant.slug)
             user = await models.User.get(principal.user_id)
             if user:
+                old_url = user.avatar_url
                 user.avatar_url = avatar_url
                 await user.save()
+                await audit.record(principal, "user.avatar_updated",
+                                   entity="User", entity_id=user.id,
+                                   before={"avatar_url": old_url},
+                                   after={"avatar_url": avatar_url},
+                                   ip_address=ip, tenant_id=tenant.id)
     return {"avatar_url": avatar_url, "ok": True}
 
 

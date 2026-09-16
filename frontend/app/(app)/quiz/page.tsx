@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertCircle, Check, ChevronRight, Loader2, RotateCcw, Zap,
 } from "lucide-react";
@@ -12,7 +12,6 @@ import {
   ApiError, practiceApi, type QuizItem, type QuizResult,
 } from "@/lib/api";
 import { FullscreenPrompt } from "@/components/FullscreenPrompt";
-import { ExamSidebar, type ExamQuestionStatus } from "@/components/ExamSidebar";
 import { ReviewCard } from "@/components/ReviewCard";
 import { useProctoring } from "@/lib/proctoring";
 import { markAttempted } from "@/lib/setTracker";
@@ -41,18 +40,19 @@ function Quiz() {
   const [error, setError] = useState("");
   const [showInstructions, setShowInstructions] = useState(false);
   const [difficulty, setDifficulty] = useState<string>("");
+  const submitting = useRef(false);
 
   const item = items[index];
 
+  // Clean up examMode on unmount
+  useEffect(() => {
+    return () => {
+      setExamMode(false);
+    };
+  }, []);
+
   const progress = useMemo(
     () => (items.length ? (index / items.length) * 100 : 0), [index, items.length]);
-
-  const questionStatuses: ExamQuestionStatus[] = useMemo(() =>
-    items.map((q, i) => ({
-      id: q.id, index: i + 1, answered: answers[q.id] != null, selectedOption: answers[q.id] ?? null,
-    })),
-    [items, answers]
-  );
 
   async function autoStart() {
     setStage("loading");
@@ -157,7 +157,7 @@ function Quiz() {
   }
 
   function answer(choice: number | null) {
-    if (!item) return;
+    if (!item || submitting.current) return;
     const updated = { ...answers, [item.id]: choice };
     setAnswers(updated);
 
@@ -177,6 +177,8 @@ function Quiz() {
   }
 
   async function submit(final: Record<string, number | null>) {
+    if (submitting.current) return;
+    submitting.current = true;
     setStage("loading");
     try {
       setResult(await practiceApi.submitQuiz(

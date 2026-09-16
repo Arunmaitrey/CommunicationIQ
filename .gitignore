@@ -35,10 +35,6 @@ backend/app/reseed_formats.py
 backend/app/import_all_questions.py
 backend/app/import_company_qs.py
 backend/app/import_company_questions.py
-backend/app/question_importer.py
-backend/app/email_sender.py
-backend/app/plan_access.py
-backend/app/company_questions/
 
 # Export / dump JSONs
 db_export_*.json

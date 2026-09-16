@@ -14,7 +14,6 @@ import {
 import { FullscreenPrompt } from "@/components/FullscreenPrompt";
 import { FullscreenGuard } from "@/components/FullscreenGuard";
 import { CameraPreview } from "@/components/proctoring/CameraPreview";
-import { ExamSidebar, type ExamQuestionStatus } from "@/components/ExamSidebar";
 import { ReviewCard } from "@/components/ReviewCard";
 import { LevelSelect, type DifficultyLevel } from "@/components/LevelSelect";
 import { useProctoring } from "@/lib/proctoring";
@@ -60,6 +59,21 @@ function Reading() {
 
   const openedAt = useRef<number>(0);
   const readMs = useRef<number>(0);
+
+  // Clean up examMode on unmount
+  useEffect(() => {
+    return () => {
+      setExamMode(false);
+      proctoring.stopCamera();
+    };
+  }, []);
+
+  // Answer-phase timer: increments every second while in "answer" stage
+  useEffect(() => {
+    if (stage !== "answer") return;
+    const timer = setInterval(() => setAnswerSeconds((s) => s + 1), 1000);
+    return () => clearInterval(timer);
+  }, [stage]);
 
   // Auto-start: fetch a random passage with questions and begin immediately
   async function autoStart() {
@@ -198,10 +212,6 @@ function Reading() {
     const isCompany = session.kind !== "general" && session.kind !== "article" && session.kind !== "email" && session.kind !== "notice" && session.kind !== "report";
     const companyLabel = isCompany ? `${session.kind} Round` : "General";
 
-    const questionStatuses: ExamQuestionStatus[] = questions.map((q, i) => ({
-      id: q.id, index: i + 1, answered: answers[q.id] != null, selectedOption: answers[q.id] ?? null,
-    }));
-
     const navigateForward = (newIndex: number) => {
       if (newIndex > currentQuestionIndex && newIndex < questions.length) {
         setCurrentQuestionIndex(newIndex);
@@ -234,6 +244,15 @@ function Reading() {
 
         <PageHeader title={session.title}
                     sub="Choose one answer for each question. The passage is no longer available." />
+
+        {isCompany && (
+          <div className="flex items-center gap-2 mb-3">
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+                  style={{ background: "color-mix(in srgb, var(--secondary) 15%, var(--surface))", color: "var(--secondary)" }}>
+              {companyLabel}
+            </span>
+          </div>
+        )}
 
         <div className="flex items-center gap-3 mb-4">
           <span className="text-[11px] font-bold uppercase tracking-wider text-muted">

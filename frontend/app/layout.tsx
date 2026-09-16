@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { RoleProvider } from "@/components/RoleProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
@@ -17,6 +17,12 @@ import { LoadingProvider } from "@/components/LoadingProvider";
  *  `display: swap` so text is readable immediately rather than invisible
  *  while a face loads. Only the weights actually used are requested.
  */
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+};
+
 export const metadata: Metadata = {
   title: "Fluenzee",
   description:

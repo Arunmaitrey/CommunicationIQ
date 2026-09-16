@@ -1,11 +1,11 @@
-"""Tier 0 — energy-threshold voice activity detection (ENG-02).
+"""Energy-threshold voice activity detection (ENG-02).
 
 Boring, and load-bearing. Response latency, pause structure and speech rate
 all come out of this one measurement, and those are the features that
 actually fail students in a timed spoken test — long before pronunciation
 does.
 
-Silero (Tier 1) will replace it and be better in noise. What this provides
+ML models (Silero VAD) will replace it and be better in noise. What this provides
 today is real: the segments are computed from the samples, not assumed.
 """
 from __future__ import annotations
@@ -43,7 +43,7 @@ class EnergyVAD:
     def analyse(self, wave: Waveform, *, prompt_end_ms: int = 0) -> VADResult:
         quality = signal_quality(wave)
         meta = ProviderMeta(provider_id="", provider_key=self.provider_key,
-                            version=self.version, tier=0)
+                            version=self.version, tier=0)  # heuristic, no ML
 
         if quality.silent:
             return VADResult(segments=[], speech_ms=0,

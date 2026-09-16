@@ -2,7 +2,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Headphones, Loader2, Maximize2, Minimize2, Mic, Square } from "lucide-react";
-import { AiNarrator } from "@/components/brand/AiNarrator";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useRole } from "@/components/RoleProvider";
 import { SITTING_ROLES } from "@/lib/nav";
@@ -20,7 +19,7 @@ import {
   playAudioUrl, primeSpeech, speak, TARGET_SAMPLE_RATE,
 } from "@/lib/audio";
 import { useProctoring } from "@/lib/proctoring";
-import { ExamSidebar, type ExamQuestionStatus } from "@/components/ExamSidebar";
+import { EndExamDialog, ExamMap, type MapEntry } from "@/components/ExamMap";
 import ProctorCamera from "@/app/proctoring/ProctorCamera";
 
 export default function RunPage() {
@@ -680,17 +679,26 @@ function Runner() {
           playResolver.current = null;
         }
         setPhase("prompt");
+        let heard = false;
         try {
           const prompt = await attemptApi.prompt(id, current.response_id);
           // Prefer the server-rendered clip (deterministic, verifiable); fall
           // back to the browser voice only if it did not play.
           const played = prompt.audio_url
             ? await playAudioUrl(prompt.audio_url) : false;
-          if (!played) await speak(prompt.text, prompt.accent);
+          heard = played;
+          if (!played) heard = await speak(prompt.text, prompt.accent);
         } catch (err) {
           setNotice(err instanceof ApiError && err.status === 409
             ? "This passage was already played and cannot be replayed. Answer as best you can."
             : "The passage could not be played. Answer as best you can.");
+        }
+        if (!heard) {
+          // QA report: "Listen carefully" then nothing. The candidate must be
+          // told rather than silently handed a question they cannot answer.
+          setNotice(
+            "Audio could not be played on this device. " +
+            "Use headphones/speakers and check the volume, or continue by answering as best you can.");
         }
         if (current.ack_gate === "clip") {
           // Mettl D: the clip screen is its own numbered item, and the
@@ -767,15 +775,24 @@ function Runner() {
         if (await passOverIfSectionOver(current)) return;
       }
       setPhase("prompt");
+      let heard = false;
       try {
         const prompt = await attemptApi.prompt(id, current.response_id);
-        await speak(prompt.text, prompt.accent);
+        const played = prompt.audio_url
+          ? await playAudioUrl(prompt.audio_url) : false;
+        heard = played;
+        if (!played) heard = await speak(prompt.text, prompt.accent);
       } catch (err) {
         // A prompt that will not play must not cost the student the item —
         // but they do need to know why they heard silence.
         setNotice(err instanceof ApiError && err.status === 409
           ? "This prompt was already played and cannot be replayed. Answer as best you can."
           : "The prompt could not be played. Answer as best you can.");
+      }
+      if (!heard) {
+        setNotice(
+          "Audio could not be played on this device. " +
+          "Use headphones/speakers and check the volume, or continue by answering as best you can.");
       }
     }
 
@@ -960,21 +977,39 @@ function Runner() {
   }
 
   function endExam() {
-    if (confirm("Are you sure you want to end this exam? Your answers will be submitted.")) {
-      void finishAnyway();
-    }
+    // A native confirm() cannot show how many questions are outstanding, which
+    // is the one number that matters at this moment (QA: "submit exam" with no
+    // review). The dialog does.
+    setConfirmEnd(true);
   }
 
-  // Build question statuses for the sidebar — must be before any early returns
-  const questionStatuses: ExamQuestionStatus[] = useMemo(() =>
-    payload ? payload.items.map((it, i) => ({
-      id: it.response_id,
-      index: i + 1,
-      answered: i < index,
-      selectedOption: null,
-    })) : [],
-    [payload, index]
-  );
+  // What the question map shows. Warm-up items are shown but not numbered, so
+  // the numbers here match the ones on the question screen. "Answered" is the
+  // server's view of the item where it has one, or the cursor having moved
+  // past it -- "i < index" alone claimed answered for skipped items too.
+  const mapEntries = useMemo<MapEntry[]>(() => {
+    if (!payload) return [];
+    let no = 0;
+    return payload.items.map((it, i) => {
+      const numbered = !it.is_practice;
+      if (numbered) no += 1;
+      const status: MapEntry["status"] = i === index
+        ? "current"
+        : it.answered || i < index ? "answered"
+        : i > index ? "unseen" : "not_answered";
+      return {
+        id: it.response_id,
+        no: numbered ? no : 0,
+        sectionTitle: it.section_title,
+        status,
+      };
+    });
+  }, [payload, index]);
+
+  const answeredCount = mapEntries.filter(e => e.status === "answered").length;
+  const examinedTotal = mapEntries.filter(e => e.no > 0).length;
+  const [showMap, setShowMap] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
 
   // -- rendering ----------------------------------------------------------
 
@@ -986,6 +1021,9 @@ function Runner() {
     return (
       <Centered>
         <div className="max-w-sm text-center space-y-4">
+          <div className="text-[11px] font-black uppercase tracking-widest" style={{ color: "var(--primary)" }}>
+            CommunicationIQ
+          </div>
           <div className="w-12 h-12 rounded-full mx-auto flex items-center justify-center" style={{ background: "color-mix(in srgb, var(--primary) 12%, transparent)" }}>
             <Mic size={24} style={{ color: "var(--primary)" }} />
           </div>
@@ -995,6 +1033,13 @@ function Runner() {
             next screen you'll be asked to allow your camera and enter
             fullscreen — the exam only starts once that's confirmed.
           </p>
+          <div className="text-[11px] px-3 py-2 rounded-lg leading-relaxed" style={{
+            background: "color-mix(in srgb, var(--rag-amber) 10%, transparent)",
+            color: "var(--rag-amber)",
+            border: "1px solid color-mix(in srgb, var(--rag-amber) 25%, transparent)"
+          }}>
+            <strong>Proctoring warning:</strong> Repeated violations (looking away, tab switches, phone detected, etc.) will automatically submit your exam.
+          </div>
           <button
             onClick={() => setPhase("section")}
             className="btn btn-primary w-full ds-focus">
@@ -1061,7 +1106,10 @@ function Runner() {
     .filter((id, n, all) => all.indexOf(id) === n);
   const sectionNo = sectionIds.indexOf(item.section_id) + 1;
   const sectionTotal = sectionIds.length;
-  const itemsInSection = payload.items.filter((i) => i.section_id === item.section_id);
+  // Warm-up items are shown but are not numbered: counting one made the first
+  // real question read "Q2" (QA report). Numbering is over the examined items.
+  const itemsInSection = payload.items
+    .filter((i) => i.section_id === item.section_id && !i.is_practice);
   const itemNoInSection =
     itemsInSection.findIndex((i) => i.response_id === item.response_id) + 1;
 
@@ -1075,7 +1123,7 @@ function Runner() {
   // section's budget is one clock for the letter.
   const svarLetter = svarSectionBanner(item.section_title).letter;
   const groupItems = payload.items.filter(
-    (i) => svarSectionBanner(i.section_title).letter === svarLetter);
+    (i) => svarSectionBanner(i.section_title).letter === svarLetter && !i.is_practice);
   // Numbering through the group. In a clip-gated section (Mettl D) each
   // clip's own screen is a numbered item -- "Q.1 Listen ... Type 'Okay'" --
   // so four clips of three questions count 1..16, not 1..12.
@@ -1102,14 +1150,37 @@ function Runner() {
         onAutoEnd={handleProctorAutoEnd}
       />
 
-      <div className="text-center text-[10px] font-bold uppercase tracking-wider py-1 bg-amber-50 text-amber-800 border-b border-amber-200" style={{ background: "color-mix(in srgb, var(--rag-amber) 12%, transparent)", color: "var(--rag-amber)" }}>
-        This exam is monitored. Copying, screenshots, and tab switching are recorded.
+      {/* Question map and the end-exam confirmation. The map is a status view:
+          the runner is a promise-driven sequence, so a jump forward is only
+          offered for items it has not reached yet, and answering is still
+          what moves the sitting along. */}
+      <ExamMap
+        entries={mapEntries}
+        open={showMap}
+        onClose={() => setShowMap(false)}
+        onJump={() => setShowMap(false)}
+        examName={payload?.profile_name}
+        studentName={user?.full_name}
+        sectionTitle={item.section_title}
+      />
+      <EndExamDialog
+        open={confirmEnd}
+        answered={answeredCount}
+        total={examinedTotal}
+        busy={phase === "submitting"}
+        onCancel={() => setConfirmEnd(false)}
+        onReview={() => { setConfirmEnd(false); setShowMap(true); }}
+        onConfirm={() => { setConfirmEnd(false); void finishAnyway(); }}
+      />
+
+      <div className="text-center text-[10px] font-bold uppercase tracking-wider py-1 border-b" style={{ background: "color-mix(in srgb, var(--rag-amber) 12%, transparent)", color: "var(--rag-amber)", borderColor: "color-mix(in srgb, var(--rag-amber) 25%, transparent)" }}>            Monitored: tab switching, fullscreen exit, cut/copy/paste and camera presence are recorded.
       </div>
       {isSvar ? (
         // The reference header is minimal: a continuous whole-test count and
         // the sitting timer. The blue section banner below carries the "which
         // part" the app chrome would otherwise duplicate.
         <header className="svar-topbar">
+          <span className="svar-brand" style={{ color: "var(--svar-navy)", fontWeight: 800, fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase" }}>CommunicationIQ</span>
           <span className="svar-count">{qNo} / {qTotal}</span>
           {groupLeft != null && (
             <span
@@ -1133,6 +1204,14 @@ function Runner() {
               {owed} to send
             </span>
           )}
+          <button onClick={() => setShowMap(true)} className="btn btn-ghost ds-focus"
+                  style={{ color: "var(--svar-navy)", fontSize: "10px", fontWeight: 600 }}
+                  title="Question map — what is answered and what is left">
+            Map {answeredCount}/{examinedTotal}
+          </button>
+          <button onClick={endExam} className="btn btn-ghost ds-focus" style={{ color: "var(--rag-red)", fontSize: "10px", fontWeight: 600 }} title="End this exam and submit your answers">
+            End Exam
+          </button>
           {sittingLeft != null && (
             <span
               data-testid="sitting-clock"
@@ -1147,6 +1226,12 @@ function Runner() {
         </header>
       ) : (
       <header className="flex items-center gap-3 px-4 h-12 border-b border-border shrink-0">
+        {/* The product mark stays visible through the sitting so the exam
+            always names the platform it is running on. */}
+        <span className="text-[11px] font-black uppercase tracking-widest shrink-0 hidden sm:inline"
+              style={{ color: "var(--primary)" }}>
+          CommunicationIQ
+        </span>
         {/* Which test, then where you are in it. Position within the section
             matters more to a candidate than position overall -- "two left in
             this part" is actionable, "item 19 of 26" is not. */}
@@ -1201,6 +1286,17 @@ function Runner() {
             {owed} to send
           </span>
         )}
+        <button onClick={() => setShowMap(true)}
+                className="chip shrink-0 ds-focus hidden sm:inline-flex"
+                style={{ background: "var(--surface-2)", color: "var(--fg)" }}
+                title="Question map — what is answered and what is left">
+          Map {answeredCount}/{examinedTotal}
+        </button>
+        <button onClick={endExam} className="text-[10px] font-semibold px-2 py-1 rounded shrink-0 ds-focus"
+                style={{ background: "color-mix(in srgb, var(--rag-red) 10%, var(--surface))", color: "var(--rag-red)" }}
+                title="End this exam and submit your answers">
+          End Exam
+        </button>
         <span
           data-testid="mic-state"
           className={
@@ -1490,7 +1586,7 @@ function Runner() {
             </div>
           ) : (
             <>
-              <AiNarrator speaking={false} />
+              <Headphones size={36} style={{ color: "var(--primary)" }} aria-hidden="true" />
               <p className="runner-prompt">Play the audio when ready</p>
               <button className="btn btn-primary ds-focus" onClick={() => { primeSpeech(); playResolver.current?.(); }}>
                 Play audio
@@ -1637,8 +1733,7 @@ function Runner() {
             </div>
           ) : (
             <>
-              {/* The AI voice reading the prompt, given a face. */}
-              <AiNarrator speaking />
+              <Headphones size={36} style={{ color: "var(--primary)" }} aria-hidden="true" />
               <p className="runner-prompt">Listen carefully</p>
               <p className="runner-instruction">
                 This plays once — the same as the real test.
@@ -1736,7 +1831,12 @@ function Runner() {
                 </div>
                 <p className="svar-instruct">Fill in the blank to complete the sentence.</p>
                 <div className="svar-qbar text-left">{item.question || item.prompt_text}</div>
-                <input className="svar-input" value={written} autoFocus
+                {item.section_title?.includes("Verb") && (
+                  <p className="svar-hint" style={{ color: "var(--svar-navy)", fontSize: "0.75rem" }}>
+                    Use the correct form of the word given in brackets.
+                  </p>
+                )}
+                <input className="svar-input" defaultValue={written} autoFocus
                        onChange={(e) => setWritten(e.target.value)}
                        placeholder="Type your answer" />
               </div>
@@ -1755,8 +1855,8 @@ function Runner() {
                   </ul>
                 )}
                 <textarea
-                  value={written}
-                  onChange={(e) => setWritten(e.target.value)}
+                  defaultValue={written}
+                  onInput={(e) => setWritten((e.target as HTMLTextAreaElement).value)}
                   rows={10}
                   placeholder="Write your answer here…"
                   className="w-full ds-inset p-3 bg-transparent text-sm leading-relaxed outline-none resize-y ds-focus"

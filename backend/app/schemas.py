@@ -464,6 +464,10 @@ class RunnerItem(BaseModel):
     # item where this is false -- a reload used to restart at item 1 and
     # make the candidate redo everything (hardware UAT, D7).
     answered: bool = False
+    # An unscored warm-up item prepended to some sittings (app.formats
+    # practice_item). It is shown but must not consume a question number:
+    # counting it made the first real question read "Q2" (QA report).
+    is_practice: bool = False
     # Which passage this item belongs to, for grouping a listening event. Empty
     # for everything that is not a grouped listening question. The runner plays
     # the audio once for the first item carrying a given ref and not again for
@@ -571,7 +575,7 @@ class ResponseMetrics(BaseModel):
     ended_by: str = ""
 
     # Annotated listen-back (DIAG-02). Present only once a transcript exists —
-    # at Tier 0 these stay empty rather than being faked from the reference.
+    # without ASR these stay empty rather than being faked from the reference.
     transcript: str = ""
     words: list[WordTimingOut] = []
     pauses: list[dict] = []
@@ -853,27 +857,6 @@ class ProfileRequest(BaseModel):
         return v
 
 
-class NarrationOut(BaseModel):
-    """The AI explanation, and its job state, for the result page.
-
-    status is always present; the content fields are populated only when
-    status is "ready". The frontend shows a "being prepared" card for
-    pending/processing, a "couldn't generate" note for failed, and the real
-    explanation for ready — it never renders deterministic text as if the AI
-    wrote it.
-    """
-    # pending | processing | retry_pending | ready | failed
-    status: str
-    headline: str = ""
-    summary: str = ""
-    primary_focus: str = ""
-    practice_action: str = ""
-    caveats: list[str] = []
-    # Provenance, so a screenshot of AI text is always identifiable as such.
-    model_version: str = ""
-    generated_at: datetime | None = None
-
-
 class HighlightOut(BaseModel):
     dimension: str
     score: float
@@ -1022,7 +1005,7 @@ class AttemptResult(BaseModel):
     scale_max: float = 100
     dimensions: dict[str, float] = {}
     confidence: dict[str, float] = {}
-    # Dimension → why it is not scored yet. Shown, not hidden.
+    # Dimension -> why it is not scored yet. Shown, not hidden.
     unscored: dict[str, str] = {}
     # Present only where the profile configured its own weights or a pass
     # mark. Absent for practice, which should not pass or fail anybody.
@@ -1038,6 +1021,8 @@ class AttemptResult(BaseModel):
     # Proctoring data
     proctor_events: list[dict] = []
     proctor_strikes: int = 0
+    # Institution / tenant name for the report header.
+    institution_name: str = ""
     # The frozen engine's weakest-composite-dimension figure. Retained as
     # engine output (SCORING_PATH); NOT a diagnosis surface -- the page does
     # not render it, and narration is not given it. See primary_diagnosis.
@@ -1084,11 +1069,6 @@ class AttemptResult(BaseModel):
     responses: list[ResponseMetrics] = []
     scored_at: datetime | None = None
     scoring_ms: int | None = None
-    # The AI explanation of this result. None only when narration is disabled
-    # or the student has not consented — never a hidden dependency of the
-    # score, which is complete with or without this field.
-    narration: NarrationOut | None = None
-
     # -- reporting (Phase 8) ----------------------------------------------
     #
     # All derived from measurements already above, above the frozen scoring

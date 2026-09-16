@@ -1,8 +1,12 @@
 
-export const CONFIRM_DURATION_MS = 1000; // default / fallback
-export const MAX_VIOLATIONS = 4;
-export const DETECTION_INTERVAL_MS = 200;
-export const PHONE_DETECTION_INTERVAL_MS = 600; // YOLOv8n (wasm) inference is heavier than face-mesh — poll slower. Raise this further (e.g. 1500-2000) on low-end devices if the UI feels sluggish.
+export const CONFIRM_DURATION_MS = 1500; // default / fallback
+// One strike policy for the whole app. This used to be 6 here while
+// lib/proctoring used 3, so the same sitting could end after three warnings
+// or after six depending on which surface was watching (QA: "no proper
+// counts of proctoring"). Three, and the copy says three.
+export const MAX_VIOLATIONS = 3;
+export const DETECTION_INTERVAL_MS = 300;
+export const PHONE_DETECTION_INTERVAL_MS = 800; // YOLOv8n (wasm) inference is heavier than face-mesh — poll slower. Raise this further (e.g. 1500-2000) on low-end devices if the UI feels sluggish.
 
 export const VIOLATION_TYPES = {
   NO_FACE: 'no_face',
@@ -20,11 +24,15 @@ export const VIOLATION_TYPES = {
 // backgrounded, not after a grace window — see detectors/tabSwitch.js for
 // why a duration-based confirm doesn't work reliably for a hidden tab.
 export const CONFIRM_DURATIONS_MS = {
-  [VIOLATION_TYPES.NO_FACE]: 1000,
-  [VIOLATION_TYPES.MULTIPLE_FACES]: 1000,
-  [VIOLATION_TYPES.LOOKING_AWAY]: 1000,
-  [VIOLATION_TYPES.FULLSCREEN_EXIT]: 2000,
-  [VIOLATION_TYPES.MOBILE_PHONE]: 1000,
+  [VIOLATION_TYPES.NO_FACE]: 2000,
+  // Faces in view: believed quickly. A *body* count alone is a weaker
+  // signal (see detectors/multipleFaces.js) and has to persist much longer
+  // before it costs the candidate a strike.
+  [VIOLATION_TYPES.MULTIPLE_FACES]: 1500,
+  MULTIPLE_FACES_BODIES: 5000,
+  [VIOLATION_TYPES.LOOKING_AWAY]: 2000,
+  [VIOLATION_TYPES.FULLSCREEN_EXIT]: 3000,
+  [VIOLATION_TYPES.MOBILE_PHONE]: 1500,
   [VIOLATION_TYPES.TAB_SWITCH]: 0
 };
 

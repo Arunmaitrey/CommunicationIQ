@@ -375,11 +375,13 @@ class ExamTest(Document):
     listening_questions: int = 10
     writing_questions: int = 10
     speaking_questions: int = 0
+    quiz_questions: int = 0
     # Timing per section in seconds
     reading_seconds: int = 600
     listening_seconds: int = 600
     writing_seconds: int = 600
     speaking_seconds: int = 0
+    quiz_seconds: int = 300
     # Restrictions
     allow_pause: bool = False
     show_timer: bool = True

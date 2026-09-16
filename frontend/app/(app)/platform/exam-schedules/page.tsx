@@ -311,7 +311,7 @@ function ExamSchedules() {
                       style={{ background: `color-mix(in srgb, ${statusTone(s.status)} 14%, transparent)`, color: statusTone(s.status) }}>
                       {s.status}
                     </span>
-                    {!s.is_active && <span className="px-1.5 py-0.5 rounded text-[9px] bg-gray-100 text-gray-600">Inactive</span>}
+                    {!s.is_active && <span className="px-1.5 py-0.5 rounded text-[9px] bg-surface2 text-muted">Inactive</span>}
                   </div>
 
                   {s.test?.description && (
@@ -367,7 +367,7 @@ function ExamSchedules() {
                   <button onClick={() => openEdit(s)} className="p-1.5 rounded hover:bg-surface2 text-muted">
                     <Edit size={13} />
                   </button>
-                  <button onClick={() => remove(s.id)} className="p-1.5 rounded hover:bg-surface2 text-muted hover:text-red-500">
+                  <button onClick={() => remove(s.id)} className="p-1.5 rounded hover:bg-surface2 text-muted hover:text-ragRed">
                     <Trash2 size={13} />
                   </button>
                 </div>

@@ -17,7 +17,7 @@ function Stars({ rating }: { rating: number }) {
         <Star
           key={i}
           size={14}
-          className={i <= rating ? "text-amber-400 fill-amber-400" : "text-muted/30"}
+          className={i <= rating ? "text-ragAmber fill-ragAmber" : "text-ghost"}
         />
       ))}
     </span>
@@ -28,10 +28,10 @@ function DifficultyBadge({ d }: { d: string }) {
   const label = d === "easy" ? "Easy" : d === "hard" ? "Hard" : "Just Right";
   const cls =
     d === "easy"
-      ? "bg-emerald-500/15 text-emerald-400"
+      ? "status-pill status-ok"
       : d === "hard"
-        ? "bg-rose-500/15 text-rose-400"
-        : "bg-amber-500/15 text-amber-400";
+        ? "status-pill status-bad"
+        : "status-pill status-warn";
   return <span className={`badge text-[10px] ${cls}`}>{label}</span>;
 }
 

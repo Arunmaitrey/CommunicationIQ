@@ -956,14 +956,14 @@ VENDOR_BLUEPRINTS: tuple[FormatBlueprint, ...] = (
                 title="Section D - Listen & Answer",
                 task_type="listening_comprehension", item_count=12,
                 prep_seconds=0, response_seconds=0, prompt_plays_allowed=1,
-                budget_seconds=600, ack_gate="clip", continuous_numbering=True,
+                budget_seconds=600, ack_gate="section", continuous_numbering=True,
                 instructions=("In this section you will be presented with audio "
                               "clips and questions based on the audio clips. "
                               "You are given 10 minutes to complete all the "
                               "questions. You can play each clip once and "
                               "cannot pause it; the next three questions are "
-                              "based on it. Type 'Okay' after each clip to "
-                              "proceed to its questions."),
+                              "based on it. Type 'Okay' to proceed to the "
+                              "questions."),
             ),
         ),
         what_to_expect=(

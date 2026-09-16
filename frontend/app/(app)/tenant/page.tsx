@@ -36,7 +36,7 @@ function Overview() {
     <>
       <PageHeader title={data.tenant_name} sub={data.tenant_slug} />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4 reveal-stagger">
         <StatCard icon={Users} label="Students" value={data.students} />
         <StatCard icon={GraduationCap} label="Cohorts" value={data.cohorts} tone="var(--secondary)" />
         <StatCard icon={Wallet} label="Seats used" value={`${data.seats_used}/${data.seat_limit}`}
@@ -49,15 +49,7 @@ function Overview() {
       <Workflow title="Setting up, in order"
                 steps={tenantSteps(data, (profiles.data ?? []).length)} />
 
-      <Section title="Seat usage" className="mb-4">
-        <Progress value={seatPct} />
-        <div className="text-[11px] text-muted mt-2">
-          {data.seats_used} of {data.seat_limit} seats — students and admins
-          count against the limit.
-        </div>
-      </Section>
-
-      <div className="grid lg:grid-cols-2 gap-4 mb-4">
+      <div className="grid lg:grid-cols-2 gap-4 mb-4 reveal-stagger">
         <Section title="Consent status">
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
@@ -87,7 +79,13 @@ function Overview() {
         </Section>
 
         <Section title="Seat usage">
-          <div className="h-48">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="text-2xl font-bold" style={{ color: seatPct >= 90 ? "var(--rag-amber)" : "var(--primary)" }}>
+              {Math.round(seatPct)}%
+            </div>
+            <Progress value={seatPct} />
+          </div>
+          <div className="h-40">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={[
                 { name: "Used", value: data.seats_used },
@@ -102,6 +100,10 @@ function Overview() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+          </div>
+          <div className="text-[11px] text-muted mt-2">
+            {data.seats_used} of {data.seat_limit} seats — students and admins
+            count against the limit.
           </div>
         </Section>
       </div>

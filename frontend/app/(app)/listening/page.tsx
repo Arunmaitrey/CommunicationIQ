@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Check, Ear, Flame, Loader2, Play, RotateCcw, Square, X, Zap,
 } from "lucide-react";
-import { AiNarrator } from "@/components/brand/AiNarrator";
 import { VoicePicker } from "@/components/VoicePicker";
 import { RequireAuth } from "@/components/RequireAuth";
 import { useToast } from "@/components/Toast";
@@ -96,15 +95,19 @@ function Listening() {
     setPlaying(true);
     setPlaysUsed((n) => n + 1);
     if (session.audio_key) {
-      const url = `${API_BASE.replace('/api/v1', '')}/media/${session.audio_key}`;
+      const url = `${API_BASE}/platform/assets/${session.audio_key}`;
       const audio = new Audio(url);
       setAudioEl(audio);
       audio.onended = () => { setPlaying(false); setAudioPlaying(false); setAudioEl(null); };
-      audio.onerror = () => { setPlaying(false); setAudioPlaying(false); setAudioEl(null); };
-      audio.play().then(() => setAudioPlaying(true)).catch(() => setPlaying(false));
+      audio.onerror = () => { setPlaying(false); setAudioPlaying(false); setAudioEl(null); toast("error", "Audio could not be played. Check volume and try again."); };
+      audio.play().then(() => setAudioPlaying(true)).catch(() => { setPlaying(false); toast("error", "Audio could not be played. Check volume and try again."); });
     } else {
-      await speak(session.transcript, session.accent);
+      // speak() now reports whether the engine actually spoke. Chrome parks
+      // the engine once a mic is open; without this check the student sees
+      // "playing" while hearing nothing.
+      const heard = await speak(session.transcript, session.accent);
       setPlaying(false);
+      if (!heard) toast("error", "Audio could not be played on this device. Check volume/speakers and try again.");
     }
   }
 
@@ -219,14 +222,10 @@ function Listening() {
         />
         <Section>
           <div className="text-center py-6">
-            {session.audio_key ? (
-              <span className="rounded-full p-4 inline-flex mb-4"
-                    style={{ background: "color-mix(in srgb, var(--primary) 12%, transparent)" }}>
-                <Ear size={28} style={{ color: "var(--primary)" }} />
-              </span>
-            ) : (
-              <AiNarrator speaking={playing} />
-            )}
+            <span className="rounded-full p-4 inline-flex mb-4"
+                  style={{ background: "color-mix(in srgb, var(--primary) 12%, transparent)" }}>
+              <Ear size={28} style={{ color: "var(--primary)" }} />
+            </span>
             <p className="text-xs text-muted max-w-md mx-auto leading-relaxed mb-1">
               You will hear this {playsLeft === session.plays_allowed ? "once" : "again"}.
               The questions come afterwards — listen for what it is about, not just for names and numbers.
@@ -351,13 +350,15 @@ function Listening() {
           })}
         </div>
         {problem && <div className="mt-4"><ErrorNote message={problem} /></div>}
-        <button onClick={submit} disabled={busy || answered === 0}
-                className="btn btn-primary w-full ds-focus mt-4">
-          {busy ? "Marking…"
-                : answered < questions.length
-                  ? `Submit — ${questions.length - answered} still unanswered`
-                  : "Submit answers"}
-        </button>
+        <div className="pb-20">
+          <button onClick={submit} disabled={busy || answered === 0}
+                  className="btn btn-primary w-full ds-focus mt-4">
+            {busy ? "Marking…"
+                  : answered < questions.length
+                    ? `Submit — ${questions.length - answered} still unanswered`
+                    : "Submit answers"}
+          </button>
+        </div>
       </ExamSidebar>
     );
   }

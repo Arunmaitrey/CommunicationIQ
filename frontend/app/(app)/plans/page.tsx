@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { Check, CreditCard, Star, Zap, Building2, Crown } from "lucide-react";
+import { Check } from "lucide-react";
 import { RequireAuth } from "@/components/RequireAuth";
 import { PageHeader, Skeleton, ErrorNote } from "@/components/ui";
 import { useToast } from "@/components/Toast";
@@ -38,6 +38,7 @@ function Plans() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [subscribing, setSubscribing] = useState<string | null>(null);
+  const [billing, setBilling] = useState<"monthly" | "yearly">("monthly");
   const { toast } = useToast();
 
   useEffect(() => {
@@ -51,7 +52,7 @@ function Plans() {
           const data = await res.json();
           setPlans(data.filter((p: Plan) => p.is_active));
         }
-      } catch (e) {
+      } catch {
         setError("Failed to load plans");
       } finally {
         setLoading(false);
@@ -88,103 +89,181 @@ function Plans() {
   if (loading) return <Skeleton rows={4} />;
   if (error) return <ErrorNote message={error} />;
 
-  const getPlanIcon = (slug: string) => {
-    switch (slug) {
-      case "free-trial": return <Star className="w-6 h-6" />;
-      case "weekly-trial": return <Zap className="w-6 h-6" />;
-      case "monthly-pro": return <Crown className="w-6 h-6" />;
-      case "custom-enterprise": return <Building2 className="w-6 h-6" />;
-      default: return <CreditCard className="w-6 h-6" />;
-    }
+  const getAccentColor = (plan: Plan) => {
+    if (plan.is_default) return "#059669";
+    const slug = plan.slug.toLowerCase();
+    if (slug.includes("enterprise") || slug.includes("custom")) return "#c026d3";
+    if (slug.includes("pro") || slug.includes("premium")) return "#059669";
+    if (slug.includes("starter") || slug.includes("basic")) return "#0891b2";
+    return "var(--primary)";
   };
 
-  const getPlanColor = (slug: string) => {
-    switch (slug) {
-      case "free-trial": return "var(--rag-green)";
-      case "weekly-trial": return "var(--primary)";
-      case "monthly-pro": return "var(--rag-amber)";
-      case "custom-enterprise": return "var(--rag-violet)";
-      default: return "var(--primary)";
-    }
+  const getSavings = (plan: Plan) => {
+    if (!plan.price_yearly || !plan.price_monthly) return 0;
+    return Math.round((1 - plan.price_yearly / (plan.price_monthly * 12)) * 100);
   };
+
+  const hasPaidPlans = plans.some((p) => p.price_monthly > 0);
+  const maxSavings = hasPaidPlans ? Math.max(...plans.map(getSavings)) : 0;
 
   return (
     <>
       <PageHeader
-        title="Subscription Plans"
+        title="Pricing Plans"
         sub="Choose a plan that works for you. Upgrade anytime."
       />
 
-      <div className="space-y-4">
-        {plans.map((plan) => (
-          <div
-            key={plan.id}
-            className="ds-card p-5"
-            style={{ borderColor: plan.is_default ? "var(--rag-green)" : undefined }}
+      {hasPaidPlans && (
+        <div className="pricing-billing-toggle">
+          <button
+            onClick={() => setBilling("monthly")}
+            className={`pricing-billing-btn ${billing === "monthly" ? "pricing-billing-btn-active" : "pricing-billing-btn-inactive"}`}
+            style={{ background: billing === "monthly" ? "var(--primary)" : undefined }}
           >
-            <div className="flex flex-col md:flex-row md:items-start gap-4">
-              {/* Left: Icon + Name + Price */}
-              <div className="md:w-48 shrink-0">
-                <div className="flex items-center gap-3 mb-2">
-                  <div
-                    className="p-2 rounded-full"
-                    style={{ backgroundColor: `${getPlanColor(plan.slug)}20`, color: getPlanColor(plan.slug) }}
-                  >
-                    {getPlanIcon(plan.slug)}
-                  </div>
-                  <div>
-                    <div className="font-bold text-sm">{plan.name}</div>
-                    {plan.is_default && (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
-                        style={{ backgroundColor: "var(--rag-green)", color: "white" }}>
-                        RECOMMENDED
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="mt-2">
-                  {plan.price_monthly === 0 ? (
-                    <div className="text-2xl font-bold">Free</div>
-                  ) : (
-                    <div>
-                      <span className="text-2xl font-bold">{'\u20B9'}{plan.price_monthly.toLocaleString()}</span>
-                      <span className="text-xs text-muted">/month</span>
-                      {plan.price_yearly > 0 && (
-                        <div className="text-[10px] text-muted">
-                          or {'\u20B9'}{plan.price_yearly.toLocaleString()}/year (save {Math.round((1 - plan.price_yearly / (plan.price_monthly * 12)) * 100)}%)
-                        </div>
-                      )}
+            Monthly
+          </button>
+          <button
+            onClick={() => setBilling("yearly")}
+            className={`pricing-billing-btn ${billing === "yearly" ? "pricing-billing-btn-active" : "pricing-billing-btn-inactive"}`}
+            style={{ background: billing === "yearly" ? "var(--primary)" : undefined }}
+          >
+            Yearly
+            {maxSavings > 0 && (
+              <span className="pricing-billing-save">
+                Save up to {maxSavings}%
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
+      <div className="pricing-plans">
+        {plans.map((plan) => {
+          const accent = getAccentColor(plan);
+          const isFeatured = plan.is_default;
+          const price = billing === "yearly" && plan.price_yearly > 0
+            ? plan.price_yearly
+            : plan.price_monthly;
+          const isYearly = billing === "yearly" && plan.price_yearly > 0;
+          const savings = getSavings(plan);
+
+          return (
+            <div
+              key={plan.id}
+              className={`pricing-card ${isFeatured ? "pricing-featured" : ""}`}
+              style={{ borderColor: isFeatured ? accent : undefined }}
+              onMouseEnter={(e) => {
+                if (!isFeatured) e.currentTarget.style.borderColor = accent;
+              }}
+              onMouseLeave={(e) => {
+                if (!isFeatured) e.currentTarget.style.borderColor = "";
+              }}
+            >
+              <div className="pricing-heading" style={{ color: accent }}>
+                <h4 style={{ color: accent }}>{plan.name}</h4>
+                <p>{plan.description}</p>
+              </div>
+
+              <div>
+                {price === 0 ? (
+                  <div className="pricing-price" style={{ color: accent }}>Free</div>
+                ) : (
+                  <>
+                    <div className="pricing-price" style={{ color: accent }}>
+                      {'\u20B9'}{price.toLocaleString()}
                     </div>
-                  )}
-                </div>
+                    <div className="pricing-price-sub">
+                      /mo{isYearly ? " (billed yearly)" : ""}
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Middle: Description + Features */}
-              <div className="flex-1 min-w-0">
-                <p className="text-xs text-muted mb-3 leading-relaxed">{plan.description}</p>
-                <ul className="space-y-1.5">
-                  {plan.features.map((feature, i) => (
-                    <li key={i} className="flex items-start gap-2 text-xs">
-                      <Check size={14} className="shrink-0 mt-0.5" style={{ color: "var(--rag-green)" }} />
-                      <span>{feature}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              {/* Right: Subscribe button */}
-              <div className="md:w-36 shrink-0 flex md:justify-end">
-                <button
-                  onClick={() => handleSubscribe(plan.id, plan.name)}
-                  disabled={subscribing === plan.id}
-                  className="btn btn-primary btn-sm w-full md:w-auto"
+              {isYearly && savings > 0 && (
+                <div
+                  className="pricing-savings"
+                  style={{ background: `${accent}18`, color: accent }}
                 >
-                  {subscribing === plan.id ? "Subscribing..." : plan.price_monthly === 0 ? "Get Started" : "Subscribe"}
-                </button>
-              </div>
+                  Save {savings}% vs monthly
+                </div>
+              )}
+
+              <ul className="pricing-features">
+                {plan.features.map((feature, i) => (
+                  <li key={i}>
+                    <Check size={14} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+                    <span>{feature}</span>
+                  </li>
+                ))}
+                {plan.max_questions > 0 && (
+                  <li>
+                    <Check size={14} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+                    <span><strong>{plan.max_questions.toLocaleString()}</strong> questions</span>
+                  </li>
+                )}
+                {plan.max_exams_per_day > 0 && (
+                  <li>
+                    <Check size={14} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+                    <span><strong>{plan.max_exams_per_day}</strong> exams/day</span>
+                  </li>
+                )}
+                {plan.seat_limit > 0 && (
+                  <li>
+                    <Check size={14} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+                    <span><strong>{plan.seat_limit.toLocaleString()}</strong> seats</span>
+                  </li>
+                )}
+                {plan.has_proctoring && (
+                  <li>
+                    <Check size={14} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+                    <span><strong>Proctoring</strong> included</span>
+                  </li>
+                )}
+                {plan.has_analytics && (
+                  <li>
+                    <Check size={14} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+                    <span><strong>Analytics</strong> dashboard</span>
+                  </li>
+                )}
+                {plan.has_custom_branding && (
+                  <li>
+                    <Check size={14} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+                    <span><strong>Custom</strong> branding</span>
+                  </li>
+                )}
+                {plan.has_api_access && (
+                  <li>
+                    <Check size={14} style={{ color: accent, flexShrink: 0, marginTop: 2 }} />
+                    <span><strong>API</strong> access</span>
+                  </li>
+                )}
+              </ul>
+
+              <button
+                className="pricing-cta"
+                style={{ borderColor: accent, background: accent, color: "#fff" }}
+                onClick={() => handleSubscribe(plan.id, plan.name)}
+                disabled={subscribing === plan.id}
+                onMouseEnter={(e) => {
+                  if (subscribing !== plan.id) {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.color = accent;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = accent;
+                  e.currentTarget.style.color = "#fff";
+                }}
+              >
+                {subscribing === plan.id
+                  ? "Subscribing..."
+                  : price === 0
+                    ? "Get Started"
+                    : "Subscribe Now"}
+              </button>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {plans.length === 0 && !loading && (

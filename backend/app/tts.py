@@ -6,12 +6,12 @@ voice availability varies by machine, and there is no way to verify it from the
 server. This synthesises the prompt to a real audio file the browser just plays
 -- deterministic, verifiable, and independent of the client's speech engine.
 
-The engine here is the platform's own `say` (macOS), converted to compact AAC
-with `afconvert`. Both ship with the OS, so nothing new is installed for local
-and UAT use. On a host without them -- a Linux production box -- `synthesize`
-returns None and the caller falls back to the browser voice, so audio still
-works, just less reliably, until a Linux engine is wired in. That fallback is
-the reason this never raises.
+The engine depends on the host: macOS uses the platform's own `say` converted
+to compact AAC with `afconvert`; Windows uses SAPI via one PowerShell call
+writing a WAV. Both ship with the OS, so nothing new is installed. On a host
+with neither engine `synthesize` returns None and the caller falls back to the
+browser voice, so audio still works, just less reliably. That fallback is the
+reason this never raises.
 
 Output is cached by (text, voice) so a passage is generated once and served to
 every candidate and every replay from memory.
@@ -22,12 +22,23 @@ import base64
 import hashlib
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 # Accent -> a natural, female-where-available system voice. Falls back to the
 # system default if the named voice is not installed.
 _VOICE = {"indian": "Tara", "us": "Samantha", "uk": "Daniel"}
+
+# The Windows SAPI voices matching those accents. Zira (female, en-US) reads as
+# the closest built-in match to the macOS picks; David is the male alternative
+# for the UK voice. If a name is missing on a given machine SAPI speaks with
+# its default voice rather than failing.
+_SAPI_VOICE = {
+    "Tara": "Microsoft Zira Desktop",
+    "Samantha": "Microsoft Zira Desktop",
+    "Daniel": "Microsoft David Desktop",
+}
 
 # Bounds so a malformed prompt can neither hang the synthesiser nor be used to
 # run the tool on megabytes of text.
@@ -41,12 +52,29 @@ _disk = Path(tempfile.gettempdir()) / "commiq_tts"
 
 # A committed bank of pre-rendered clips, shipped with the app. This is what
 # makes audio work on a host that cannot synthesise (Linux production, which
-# has no `say`): the fixed prompt banks are rendered once, here, and served
-# from disk everywhere. Populate it with `python -m app.prerender_audio`.
+# has no `say` or SAPI): the fixed prompt banks are rendered once, here, and
+# served from disk everywhere. Populate it with `python -m app.prerender_audio`.
 _prerendered = Path(__file__).resolve().parent / "prompt_audio"
+
+# The SAPI script runs with -File, so text never crosses a command line: it is
+# piped to the process on stdin and read with [Console]::In. Passing user
+# content through argv or an interpolated -Command string is where Windows
+# quoting bugs are born.
+_SAPI_PS1 = """\
+Add-Type -AssemblyName System.Speech
+$s = New-Object System.Speech.Synthesis.SpeechSynthesizer
+try {
+  $s.SelectVoice('{voice}')
+} catch { }
+$s.SetOutputToWaveFile('{wav}')
+$s.Speak([Console]::In.ReadToEnd())
+$s.Dispose()
+"""
 
 
 def _available() -> bool:
+    if sys.platform == "win32":
+        return True  # SAPI ships with every Windows install
     return bool(shutil.which("say") and shutil.which("afconvert"))
 
 
@@ -55,7 +83,7 @@ def _key(text: str, voice: str) -> str:
 
 
 def synthesize(text: str, accent: str = "indian") -> bytes | None:
-    """AAC/m4a bytes for the prompt, or None if this host cannot synthesise.
+    """Audio bytes for the prompt, or None if this host cannot synthesise.
 
     Never raises: any failure degrades to the browser-voice fallback.
     """
@@ -85,18 +113,10 @@ def synthesize(text: str, accent: str = "indian") -> bytes | None:
         return None
 
     try:
-        with tempfile.TemporaryDirectory() as tmp:
-            aiff = Path(tmp) / "p.aiff"
-            m4a = Path(tmp) / "p.m4a"
-            # text is passed as an argv element, never through a shell.
-            subprocess.run(["say", "-v", voice, "-o", str(aiff), text],
-                           check=True, timeout=_TIMEOUT_S,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            subprocess.run(["afconvert", str(aiff), str(m4a),
-                            "-d", "aac", "-f", "m4af", "-b", "48000"],
-                           check=True, timeout=_TIMEOUT_S,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            data = m4a.read_bytes()
+        if sys.platform == "win32":
+            data = _synthesize_windows(text, _SAPI_VOICE.get(voice, voice))
+        else:
+            data = _synthesize_macos(text, voice)
     except (subprocess.SubprocessError, OSError):
         return None
 
@@ -105,10 +125,53 @@ def synthesize(text: str, accent: str = "indian") -> bytes | None:
     _cache[key] = data
     try:
         _disk.mkdir(parents=True, exist_ok=True)
-        disk.write_bytes(data)
+        ( _disk / f"{key}.m4a").write_bytes(data)
     except OSError:
         pass  # memory cache is enough; disk is only a cross-restart optimisation
     return data
+
+
+def _synthesize_windows(text: str, sapi_voice: str) -> bytes | None:
+    """One PowerShell invocation against SAPI, WAV out.
+
+    Serves the exact same role as the macOS branch: a real, bounded synthesis
+    the caller can hand to the browser as bytes.
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = Path(tmp) / "p.wav"
+        ps1 = Path(tmp) / "tts.ps1"
+        ps1.write_text(
+            _SAPI_PS1.replace("{voice}", sapi_voice).replace("{wav}", str(wav)),
+            encoding="utf-8-sig",  # BOM so Windows PowerShell parses it as UTF-8
+        )
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-File", str(ps1)],
+            input=text.encode("utf-8"),
+            check=True, timeout=_TIMEOUT_S,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        data = wav.read_bytes()
+    # A silent synthesiser still writes a ~100-byte header; treat tiny outputs
+    # as a failure so the fallback engages rather than playing silence.
+    if len(data) < 100:
+        return None
+    return data
+
+
+def _synthesize_macos(text: str, voice: str) -> bytes:
+    with tempfile.TemporaryDirectory() as tmp:
+        aiff = Path(tmp) / "p.aiff"
+        m4a = Path(tmp) / "p.m4a"
+        # text is passed as an argv element, never through a shell.
+        subprocess.run(["say", "-v", voice, "-o", str(aiff), text],
+                       check=True, timeout=_TIMEOUT_S,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.run(["afconvert", str(aiff), str(m4a),
+                        "-d", "aac", "-f", "m4af", "-b", "48000"],
+                       check=True, timeout=_TIMEOUT_S,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return m4a.read_bytes()
 
 
 def data_uri(text: str, accent: str = "indian") -> str | None:
@@ -116,7 +179,11 @@ def data_uri(text: str, accent: str = "indian") -> str | None:
     data = synthesize(text, accent)
     if not data:
         return None
-    return "data:audio/mp4;base64," + base64.b64encode(data).decode("ascii")
+    # SAPI writes RIFF/WAVE on Windows; macOS writes AAC in an m4a container.
+    # The mime type must match the bytes or the browser's decoder rejects the
+    # clip and the runner falls back even though synthesis succeeded.
+    mime = "audio/wav" if data[:4] == b"RIFF" else "audio/mp4"
+    return "data:" + mime + ";base64," + base64.b64encode(data).decode("ascii")
 
 
 def render_to_bank(text: str, accent: str = "indian") -> bool:

@@ -1,8 +1,8 @@
-"""Tier 0 — feature-based fluency and prosody (ENG-05).
+"""Feature-based fluency and prosody (ENG-05).
 
 Interpretable by construction: the score is a weighted sum of four features a
 student can be shown directly. There is no model here to be opaque about, and
-when Tier 1 replaces the feature extraction the explanation stays the same
+when ML providers replace the feature extraction the explanation stays the same
 shape.
 
 What it does not do is guess. Without a transcript there is no word count, so
@@ -55,7 +55,7 @@ class FeatureFluency:
     def analyse(self, wave: Waveform, *, vad: VADResult,
                 task_type: str = "") -> FluencyResult:
         meta = ProviderMeta(provider_id="", provider_key=self.provider_key,
-                            version=self.version, tier=0)
+                            version=self.version, tier=0)  # heuristic, no ML
 
         quality = signal_quality(wave)
         speech_s = vad.speech_ms / 1000.0
@@ -112,7 +112,7 @@ class FeatureFluency:
             pause_count=pause_count,
             mean_pause_ms=round(mean_pause, 1),
             longest_pause_ms=longest_pause,
-            # Pitch needs an F0 tracker, which is Tier 1 work. Reported as
+            # Pitch needs an F0 tracker, which is ML work. Reported as
             # zero rather than invented.
             pitch_range_semitones=0.0,
             confidence=round(confidence, 2),

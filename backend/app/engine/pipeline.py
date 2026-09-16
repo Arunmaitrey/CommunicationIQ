@@ -43,7 +43,7 @@ SCALE_MAX = 100.0
 
 # How the overall number is composed. Only dimensions that were actually
 # measured take part, and the weights are renormalised over those — so an
-# attempt scored by Tier 0 alone still produces an honest overall from the two
+# attempt scored by heuristic providers alone still produces an honest overall from the two
 # dimensions it could reach.
 WEIGHTS = {"pronunciation": 0.20, "accuracy": 0.20, "fluency": 0.17,
            "latency": 0.11, "disfluency": 0.08, "grammar": 0.09, "content": 0.07,
@@ -132,7 +132,7 @@ SCRIPTED_FOR_PRONUNCIATION = {"read_aloud", "repeat_sentence", "sentence_build",
 # provider rather than restated, because a task type in one list and not the
 # other would be scored for accuracy against a reference and for completeness
 # against nothing.
-from app.engine.providers.tier1.accuracy import (  # noqa: E402
+from app.engine.providers.reference_accuracy import (  # noqa: E402
     SCRIPTED_TASKS as ACCURACY_SCRIPTED)
 
 # Items with no reference at all, where the only signal is whether they spoke
@@ -275,7 +275,7 @@ async def score_response(tenant: Session, providers: Providers,
             lambda impl: impl.transcribe(ref, language="en"),
         )
     except ProviderUnavailable:
-        # Tier 0 has no ASR. Everything transcript-shaped stays unscored -- and
+        # No ASR available. Everything transcript-shaped stays unscored -- and
         # now says so, instead of vanishing.
         for dimension in ("accuracy", "disfluency", "grammar", "content"):
             unscored[dimension] = NO_TRANSCRIPT
@@ -800,7 +800,7 @@ def _snr_of(audio: ResponseAudio) -> float | None:
 
 def _snr_penalty(snr_db: float) -> float:
     """Mirrors the provider's own scale. Kept here so the pipeline can apply
-    it without importing a Tier-1 module directly — the whole point of the
+    it without importing an ML module directly — the whole point of the
     contract layer is that consumers do not know which provider ran."""
     if snr_db >= 20:
         return 1.0
@@ -838,7 +838,7 @@ def to_unit(score: float) -> float:
 _biggest_lever = biggest_lever
 _latency_score = latency_score
 _band_label = band_label
-UNSCORED_AT_TIER0 = UNSCORED
+UNSCORED_HEURISTIC = UNSCORED
 
 
 def _completeness(*, task_type: str, item, reference: str,
@@ -862,7 +862,7 @@ def _completeness(*, task_type: str, item, reference: str,
     complete would look like, and scoring that as incomplete would fail
     candidates for the bank's silence.
     """
-    from app.engine.providers.tier1.accuracy import _coverage, normalise
+    from app.engine.providers.reference_accuracy import _coverage, normalise
 
     if reference and task_type in ACCURACY_SCRIPTED:
         expected = normalise(reference)

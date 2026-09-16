@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app import formats, skills
+from app import audit
 from app import deadline as app_deadline
 from app.deps import Principal, TenantModels, require_roles
 from app.schemas import (AttemptOut, ConsentRequest, MasteryOut,
@@ -352,10 +353,8 @@ async def give_consent(body: ConsentRequest, principal: Principal,
     what a student had agreed to on any past date stays answerable.
     """
     granted = set(body.scopes)
-    # ai_explanation covers sending a student's *scores* (never their words or
-    # identity — see app/narration/evidence.py) to an external AI service that
-    # writes a plain-language explanation of the result. Opting out is fully
-    # non-blocking: the assessment and the deterministic report are unaffected.
+    # Scoring and the report are fully deterministic — there is no external AI
+    # service. Scope names are kept stable so older consents stay readable.
     known = {"recording", "training_data", "outcome_sharing", "notifications",
              "ai_explanation"}
     unknown = granted - known
@@ -540,6 +539,13 @@ async def subscribe_to_plan(body: SubscribeRequest, principal: Principal) -> dic
             "plan_expires_at": expires,
         }}
     )
+
+    await audit.record(principal, "plan.subscribed",
+                       entity="Tenant", entity_id=tenant_doc["_id"],
+                       before={"plan_id": str(tenant_doc.get("plan_id", ""))},
+                       after={"plan_id": body.plan_id,
+                              "plan_name": plan_doc.get("name", ""),
+                              "expires_at": expires.isoformat() if expires else None})
     
     return {"ok": True, "plan": plan_doc.get("name", "")}
 

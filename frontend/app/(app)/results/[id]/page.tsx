@@ -26,7 +26,7 @@ import {
   type PracticeOutcome, type PrimaryDiagnosis, type ResponseMetrics,
   type ResultPriority,
 } from "@/lib/api";
-import { Evidence, Export, Highlights, NarrationCard, Skills, Summary, answerLabel,
+import { Evidence, Export, Highlights, Skills, Summary, answerLabel,
          itemsFootnote } from "@/components/Report";
 import { useData } from "@/lib/useData";
 
@@ -74,24 +74,7 @@ function Result() {
     return () => clearTimeout(timer);
   }, [data, reload]);
 
-  // Poll while the AI explanation is still being generated, so the card
-  // swaps from "being prepared" to the real thing without a manual refresh.
-  // Bounded to a couple of minutes: after that the sweeper is still working
-  // and the page can be reopened, but we stop hitting the endpoint.
-  const [narrationPolls, setNarrationPolls] = useState(0);
-  const narrationStatus = data?.narration?.status;
-  useEffect(() => {
-    if (!data || data.status !== "scored") return;
-    const inFlight = narrationStatus === "pending"
-      || narrationStatus === "processing"
-      || narrationStatus === "retry_pending";
-    if (!inFlight || narrationPolls > 40) return;
-    const timer = setTimeout(() => {
-      setNarrationPolls((n) => n + 1);
-      reload();
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, [data, narrationStatus, narrationPolls, reload]);
+
 
   if (loading) return <Skeleton rows={6} />;
   if (error) return <ErrorNote message={error} />;
@@ -119,8 +102,10 @@ function Result() {
     <>
       <PageHeader
         title={data.profile_name}
-        sub={`Attempt ${data.attempt_number}${data.is_baseline ? " · baseline" : ""}${
-          data.mode === "practice" ? " · practice" : ""}`}
+        sub={`${data.institution_name ? data.institution_name + " · " : ""}${user?.full_name || "Student"}${
+          user?.roll_number ? ` · ${user.roll_number}` : ""}${
+          data.mode === "practice" ? " · Practice" : ""}${
+          data.is_baseline ? " · Baseline" : ""} — Attempt ${data.attempt_number}`}
         // Students only.
         //
         // An invited candidate cannot take another -- the server refuses a
@@ -137,8 +122,6 @@ function Result() {
       {data.previous && (
         <DeltaCard previous={data.previous} overall={data.overall} />
       )}
-
-      <NarrationCard narration={data.narration} />
 
       <Summary text={data.summary} />
 

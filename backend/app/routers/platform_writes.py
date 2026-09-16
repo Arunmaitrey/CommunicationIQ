@@ -56,29 +56,6 @@ MAX_QUIZ_CAP_PERCENT = 60
 
 
 # --------------------------------------------------------------------------
-# AI narration configuration
-# --------------------------------------------------------------------------
-
-@router.put("/narration/settings",
-            dependencies=[Depends(require_platform("super_admin"))])
-async def update_narration_settings(body: dict) -> dict:
-    """Save AI-narration configuration and apply it live.
-
-    super_admin only: the document holds provider API keys. Field contract:
-    a value changes the setting, null leaves it unchanged, "" clears it back
-    to the environment default. Unknown fields are ignored (the whitelist in
-    app.ai_settings is the boundary). Secrets are stored whole and returned
-    masked -- the console never sees a key again after saving it.
-    """
-    from app import ai_settings
-    try:
-        overrides = await ai_settings.save(body or {})
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
-    return ai_settings.masked_view(overrides)
-
-
-# --------------------------------------------------------------------------
 # Providers
 # --------------------------------------------------------------------------
 
@@ -174,7 +151,7 @@ def _importable(entrypoint: str) -> str:
     with the fallback quietly carrying the load.
     """
     if ":" not in entrypoint:
-        return "Expected module:attribute, e.g. app.engine.providers.tier1.pronunciation:Wav2VecGOP"
+        return "Expected module:attribute, e.g. app.engine.providers.wav2vec_gop:Wav2VecGOP"
     module_name, _, attribute = entrypoint.partition(":")
     try:
         module = importlib.import_module(module_name)
@@ -686,8 +663,12 @@ async def create_plan(body: dict, principal: Principal) -> dict:
 async def update_plan(plan_id: str, body: dict, principal: Principal) -> dict:
     from app.db import control_db
     db = control_db()
-    updates = {k: v for k, v in body.items() if k not in ("_id", "id")}
+    ALLOWED_PLAN_FIELDS = {"name", "slug", "price_monthly", "currency", "is_active",
+                           "features", "description", "trial_days", "question_limit"}
+    updates = {k: v for k, v in body.items() if k in ALLOWED_PLAN_FIELDS}
     updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+    if not updates:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "No valid fields to update")
     await db["plans"].update_one({"_id": plan_id}, {"$set": updates})
     await audit.record(principal, "plan.updated", entity="Plan", entity_id=plan_id)
     return {"ok": True}
@@ -697,6 +678,11 @@ async def update_plan(plan_id: str, body: dict, principal: Principal) -> dict:
 async def delete_plan(plan_id: str, principal: Principal) -> dict:
     from app.db import control_db
     db = control_db()
+    # Check if any tenants are assigned to this plan
+    assigned = await db["tenants"].count_documents({"plan_id": plan_id})
+    if assigned > 0:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST,
+                            f"Cannot delete: {assigned} tenant(s) are assigned to this plan. Unassign them first.")
     await db["plans"].delete_one({"_id": plan_id})
     await audit.record(principal, "plan.deleted", entity="Plan", entity_id=plan_id)
     return {"ok": True}
@@ -790,51 +776,6 @@ async def save_payment_config(body: dict, principal: Principal) -> dict:
         doc["_id"] = str(uuid.uuid4())
         await db["payment_configs"].insert_one(doc)
     await audit.record(principal, "payment.configured", entity="PaymentConfig")
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------------------
-# Email Templates
-# ---------------------------------------------------------------------------
-
-@router.post("/email-templates")
-async def create_email_template(body: dict, principal: Principal) -> dict:
-    from app.db import control_db
-    db = control_db()
-    import uuid
-    tpl_id = str(uuid.uuid4())
-    doc = {
-        "_id": tpl_id,
-        "key": body.get("key", ""),
-        "name": body.get("name", ""),
-        "subject": body.get("subject", ""),
-        "body_html": body.get("body_html", ""),
-        "body_text": body.get("body_text", ""),
-        "category": body.get("category", "transactional"),
-        "is_active": body.get("is_active", True),
-    }
-    await db["email_templates"].insert_one(doc)
-    await audit.record(principal, "template.created", entity="EmailTemplate", entity_id=tpl_id)
-    return {"id": tpl_id, "ok": True}
-
-
-@router.patch("/email-templates/{template_id}")
-async def update_email_template(template_id: str, body: dict, principal: Principal) -> dict:
-    from app.db import control_db
-    db = control_db()
-    updates = {k: v for k, v in body.items() if k not in ("_id", "id")}
-    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
-    await db["email_templates"].update_one({"_id": template_id}, {"$set": updates})
-    await audit.record(principal, "template.updated", entity="EmailTemplate", entity_id=template_id)
-    return {"ok": True}
-
-
-@router.delete("/email-templates/{template_id}")
-async def delete_email_template(template_id: str, principal: Principal) -> dict:
-    from app.db import control_db
-    db = control_db()
-    await db["email_templates"].delete_one({"_id": template_id})
-    await audit.record(principal, "template.deleted", entity="EmailTemplate", entity_id=template_id)
     return {"ok": True}
 
 
@@ -995,175 +936,311 @@ async def delete_exam_test(test_id: str, principal: Principal) -> dict:
 
 
 # --------------------------------------------------------------------------
-# Question Sets (exactly 10 questions per set)
+# Exam Test Question Management
 # --------------------------------------------------------------------------
 
-@router.post("/question-sets/generate", status_code=status.HTTP_201_CREATED)
-async def generate_question_sets(module: str, principal: Principal, count: int = 1) -> dict:
-    """Auto-generate question sets from the question bank for a module.
-    Each set contains exactly 10 questions from the same module.
-    """
-    import re as _re
-    from app.models.platform import QuestionSet
+@router.get("/exam-tests/{test_id}/questions")
+async def get_exam_test_questions(test_id: str, module: str = "") -> dict:
+    """List questions assigned to an exam test, optionally filtered by module."""
     from app.db import control_db
-
-    if module not in ("reading", "writing", "listening", "speaking", "quiz"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Invalid module")
-
+    from bson import ObjectId
     db = control_db()
-    # Map module to collection
-    coll_map = {
+    
+    # Try string ID first, then ObjectId
+    test_doc = await db.exam_tests.find_one({"_id": test_id})
+    if not test_doc:
+        try:
+            test_doc = await db.exam_tests.find_one({"_id": ObjectId(test_id)})
+        except Exception:
+            pass
+    if not test_doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Test not found")
+    
+    print(f"DEBUG: test_id={test_id}, test.name={test_doc.get('name')}, test.question_ids keys={list((test_doc.get('question_ids') or {}).keys())}")
+    print(f"DEBUG: quiz qids={test_doc.get('question_ids', {}).get('quiz', []) if test_doc.get('question_ids') else 'NONE'}")
+    
+    qids = test_doc.get("question_ids") or {}
+    MODULE_COLL = {
         "reading": "reading_passages",
         "listening": "listening_passages",
         "writing": "writing_prompts",
         "speaking": "task_items",
         "quiz": "quiz_items",
     }
-    coll_name = coll_map[module]
-    coll = db[coll_name]
-
-    # Count existing questions
-    total = await coll.count_documents({})
-    needed = count * 10
-    if total < needed:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                            f"Need {needed} {module} questions but only {total} exist")
-
-    # Count existing sets to determine numbering
-    existing_count = await QuestionSet.find(QuestionSet.module == module).count()
-
-    created_sets = []
-    for i in range(count):
-        set_num = existing_count + i + 1
-        prefix = module[:4].upper()
-        set_number = f"{prefix}-SET-{set_num:03d}"
-
-        # Find questions not already in an active set for this module
-        active_sets = await QuestionSet.find(
-            QuestionSet.module == module,
-            QuestionSet.status.in_(["active", "draft"]),
-        ).to_list()
-        used_ids = set()
-        for s in active_sets:
-            used_ids.update(s.question_ids)
-
-        # Get eligible questions
-        query = {"_id": {"$nin": list(used_ids)}} if used_ids else {}
-        cursor = coll.find(query).limit(10)
-        questions = await cursor.to_list()
-
-        if len(questions) < 10:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST,
-                                f"Not enough unused {module} questions for set {set_num}")
-
-        q_ids = [str(q["_id"]) for q in questions]
-
-        qs = QuestionSet(
-            set_number=set_number,
-            module=module,
-            question_ids=q_ids,
-            question_count=10,
-            status="draft",
-        )
-        await qs.create()
-        created_sets.append({"id": qs.id, "set_number": set_number, "module": module})
-
-    await audit.record(principal, "question_sets.generated", entity="QuestionSet",
-                       after={"module": module, "count": len(created_sets)})
-    return {"created": len(created_sets), "sets": created_sets, "ok": True}
-
-
-@router.patch("/question-sets/{set_id}")
-async def update_question_set(set_id: str, body: dict, principal: Principal) -> dict:
-    """Update a question set (status, etc.)."""
-    from app.models.platform import QuestionSet
-    qs = await QuestionSet.get(set_id)
-    if not qs:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
-    if "status" in body:
-        qs.status = body["status"]
-    qs.updated_at = datetime.now(timezone.utc)
-    await qs.save()
-    await audit.record(principal, "question_set.updated", entity="QuestionSet",
-                       entity_id=set_id, after={"status": qs.status})
-    return {"ok": True}
-
-
-@router.delete("/question-sets/{set_id}")
-async def delete_question_set(set_id: str, principal: Principal) -> dict:
-    """Delete a question set (only if draft)."""
-    from app.models.platform import QuestionSet
-    qs = await QuestionSet.get(set_id)
-    if not qs:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
-    if qs.status not in ("draft", "inactive"):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Can only delete draft/inactive sets")
-    await QuestionSet.delete(QuestionSet.id == set_id)
-    await audit.record(principal, "question_set.deleted", entity="QuestionSet", entity_id=set_id)
-    return {"ok": True}
-
-
-@router.post("/question-sets/auto-create")
-async def auto_create_sets(principal: Principal) -> dict:
-    """Auto-create sets for all modules where we have enough questions (10+)."""
-    from app.models.platform import QuestionSet
-    from app.db import control_db
-
-    db = control_db()
-    coll_map = {
-        "reading": "reading_passages",
-        "listening": "listening_passages",
-        "writing": "writing_prompts",
-        "speaking": "task_items",
-        "quiz": "quiz_items",
+    # For reading/listening, the comprehension questions live in quiz_items
+    COMP_COLL = {
+        "reading": "quiz_items",
+        "listening": "quiz_items",
     }
-    results = {}
-    for module, coll_name in coll_map.items():
-        coll = db[coll_name]
-        total = await coll.count_documents({})
-        # Count existing sets for this module
-        existing = await QuestionSet.find(QuestionSet.module == module).count()
-        # How many sets of 10 can we make from unused questions?
-        active_sets = await QuestionSet.find(
-            QuestionSet.module == module,
-            QuestionSet.status.in_(["active", "draft"]),
-        ).to_list()
-        used_ids = set()
-        for s in active_sets:
-            used_ids.update(s.question_ids)
-        available = total - len(used_ids)
-        can_create = available // 10
-        sets_to_create = min(can_create, 50)  # cap at 50 per call
-
-        if sets_to_create <= 0:
-            results[module] = {"total_questions": total, "existing_sets": existing, "created": 0}
+    result = {}
+    modules = [module] if module else ["reading", "listening", "writing", "speaking", "quiz"]
+    for mod in modules:
+        ids = qids.get(mod, [])
+        print(f"DEBUG: mod={mod}, ids={ids[:3]}...")
+        if not ids:
+            result[mod] = []
             continue
+        # Fetch passage/prompt from module collection
+        pass_coll_name = MODULE_COLL.get(mod)
+        comp_coll_name = COMP_COLL.get(mod)
+        items = []
+        for qid in ids[:50]:  # cap to avoid huge responses
+            doc = None
+            if pass_coll_name:
+                doc = await db[pass_coll_name].find_one({"_id": str(qid)})
+            if not doc and comp_coll_name:
+                doc = await db[comp_coll_name].find_one({"_id": str(qid)})
+            if doc:
+                items.append({
+                    "id": str(doc["_id"]),
+                    "title": doc.get("title") or doc.get("stem") or doc.get("prompt_text") or doc.get("prompt") or "",
+                    "category": doc.get("category") or doc.get("task_type") or mod,
+                    "options": doc.get("options", []),
+                    "correct_index": doc.get("correct_index", 0),
+                    "explanation": doc.get("explanation", ""),
+                    "audio_key": doc.get("audio_key") or doc.get("prompt_audio_key") or "",
+                    "body": doc.get("body") or doc.get("transcript") or "",
+                    "prompt_text": doc.get("prompt_text") or "",
+                    "prompt": doc.get("prompt") or "",
+                    "stem": doc.get("stem") or "",
+                })
+        print(f"DEBUG: mod={mod}, found {len(items)} items")
+        result[mod] = items
+    return {"test_id": test_id, "question_ids": qids, "questions": result}
 
-        prefix = module[:4].upper()
-        created = []
-        for i in range(sets_to_create):
-            set_num = existing + i + 1
-            set_number = f"{prefix}-SET-{set_num:03d}"
 
-            query = {"_id": {"$nin": list(used_ids)}} if used_ids else {}
-            questions = await coll.find(query).limit(10).to_list()
-            if len(questions) < 10:
+@router.get("/exam-tests/{test_id}/sets")
+async def get_exam_test_sets(test_id: str) -> list:
+    """Return QuestionSets linked to this exam test, with questions resolved."""
+    from app.models.platform import ExamTest, QuestionSet
+    from app.db import control_db
+    from bson import ObjectId
+    db = control_db()
+    # Try string ID first, then ObjectId
+    test_doc = await db.exam_tests.find_one({"_id": test_id})
+    if not test_doc:
+        try:
+            test_doc = await db.exam_tests.find_one({"_id": ObjectId(test_id)})
+        except Exception:
+            pass
+    if not test_doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Test not found")
+    test_company = test_doc.get("company", "") or ""
+    if test_company:
+        sets = await QuestionSet.find(
+            {"company": test_company, "status": "active"}
+        ).sort("set_number").to_list(500)
+    else:
+        sets = await QuestionSet.find(
+            {"company": {"$in": ["", None]}, "status": "active"}
+        ).sort("set_number").to_list(500)
+    MODULE_COLL = {
+        "reading": "reading_passages",
+        "listening": "listening_passages",
+        "writing": "writing_prompts",
+        "speaking": "task_items",
+        "quiz": "quiz_items",
+    }
+    COMP_COLL = {"reading": "quiz_items", "listening": "quiz_items"}
+    result = []
+    for s in sets:
+        mod = s.module
+        qids = s.question_ids or []
+        qnums = s.question_numbers or []
+        result.append({
+            "id": str(s.id),
+            "set_number": s.set_number,
+            "module": mod,
+            "company": s.company,
+            "question_count": s.question_count,
+            "question_numbers": qnums,
+            "question_ids": qids,
+            "is_used": s.is_used,
+            "usage_count": s.usage_count,
+        })
+    return result
+
+
+@router.get("/exam-tests/{test_id}/sets-grouped")
+async def get_exam_test_sets_grouped(test_id: str) -> list:
+    """Return QuestionSets grouped by set number, only for sets that have questions from this test's pool."""
+    from app.models.platform import ExamTest, QuestionSet
+    from app.db import control_db
+    from bson import ObjectId
+    import re
+    db = control_db()
+    test_doc = await db.exam_tests.find_one({"_id": test_id})
+    if not test_doc:
+        try:
+            test_doc = await db.exam_tests.find_one({"_id": ObjectId(test_id)})
+        except Exception:
+            pass
+    if not test_doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Test not found")
+
+    # Collect all question IDs assigned to this test
+    test_qids: set[str] = set()
+    qids_dict = test_doc.get("question_ids") or {}
+    for qid_list in qids_dict.values():
+        if isinstance(qid_list, list):
+            for qid in qid_list:
+                test_qids.add(str(qid))
+
+    if not test_qids:
+        return []
+
+    # Find sets that share at least one question with this test
+    test_company = test_doc.get("company", "") or ""
+    base_filter = {"status": "active", "question_ids": {"$in": list(test_qids)}}
+    if test_company:
+        base_filter["company"] = test_company
+    else:
+        base_filter["company"] = {"$in": ["", None]}
+
+    sets = await QuestionSet.find(base_filter).sort("set_number").to_list(200)
+
+    # Group by numeric suffix (e.g. SET-001 → "001")
+    groups: dict[str, dict] = {}
+    for s in sets:
+        m = re.search(r"SET-(\d+)$", s.set_number or "")
+        num = m.group(1) if m else s.set_number
+        if num not in groups:
+            groups[num] = {"set_number": num, "modules": {}}
+        groups[num]["modules"][s.module] = {
+            "id": str(s.id),
+            "set_number": s.set_number,
+            "module": s.module,
+            "company": s.company,
+            "question_count": s.question_count,
+            "is_used": s.is_used,
+            "usage_count": s.usage_count,
+        }
+    result = sorted(groups.values(), key=lambda g: g["set_number"])
+    return result[:50]
+
+
+@router.get("/exam-tests/{test_id}/sets/{set_id}/questions")
+async def get_set_questions(test_id: str, set_id: str) -> list:
+    """Return resolved questions for a specific set."""
+    from app.models.platform import QuestionSet
+    from app.db import control_db
+    from bson import ObjectId
+    db = control_db()
+    # Try string ID first, then ObjectId
+    s_doc = await db.question_sets.find_one({"_id": set_id})
+    if not s_doc:
+        try:
+            s_doc = await db.question_sets.find_one({"_id": ObjectId(set_id)})
+        except Exception:
+            pass
+    if not s_doc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Set not found")
+    MODULE_COLL = {
+        "reading": "reading_passages",
+        "listening": "listening_passages",
+        "writing": "writing_prompts",
+        "speaking": "task_items",
+        "quiz": "quiz_items",
+    }
+    COMP_COLL = {"reading": "quiz_items", "listening": "quiz_items"}
+    mod = s_doc.get("module", "")
+    qids = s_doc.get("question_ids", []) or []
+    coll_name = MODULE_COLL.get(mod)
+    comp_name = COMP_COLL.get(mod)
+    questions = []
+    for qid in qids[:20]:
+        doc = None
+        if coll_name:
+            doc = await db[coll_name].find_one({"_id": str(qid)})
+        if not doc and comp_name:
+            doc = await db[comp_name].find_one({"_id": str(qid)})
+        if doc:
+            questions.append({
+                "id": str(doc["_id"]),
+                "title": doc.get("title") or doc.get("stem") or doc.get("prompt_text") or doc.get("prompt") or "",
+                "category": doc.get("category") or doc.get("task_type") or mod,
+                "options": doc.get("options", []),
+                "correct_index": doc.get("correct_index", 0),
+                "explanation": doc.get("explanation", ""),
+                "audio_key": doc.get("audio_key") or doc.get("prompt_audio_key") or "",
+                "body": doc.get("body") or doc.get("transcript") or "",
+            })
+    return questions
+
+
+@router.post("/exam-tests/{test_id}/questions")
+async def add_question_to_exam_test(test_id: str, body: dict,
+                                     principal: Principal) -> dict:
+    """Add a question to an exam test's question pool."""
+    from app.models.platform import ExamTest
+    from app.db import control_db
+    test = await ExamTest.get(test_id)
+    if not test:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Test not found")
+    module = body.get("module", "")
+    question_id = body.get("question_id", "")
+    if not module or not question_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "module and question_id required")
+    MODULE_COLL = {
+        "reading": "reading_passages",
+        "listening": "listening_passages",
+        "writing": "writing_prompts",
+        "speaking": "task_items",
+    }
+    COMP_COLL = {"reading": "quiz_items", "listening": "quiz_items"}
+    db = control_db()
+    # Verify question exists
+    found = False
+    for coll_name in [MODULE_COLL.get(module), COMP_COLL.get(module)]:
+        if coll_name:
+            doc = await db[coll_name].find_one({"_id": str(question_id)})
+            if doc:
+                found = True
                 break
-            q_ids = [str(q["_id"]) for q in questions]
-            used_ids.update(q_ids)
+    if not found:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Question not found in this module's bank")
+    qids = test.question_ids or {}
+    if module not in qids:
+        qids[module] = []
+    if question_id not in qids[module]:
+        qids[module].append(question_id)
+    test.question_ids = qids
+    test.updated_at = datetime.now(timezone.utc)
+    await test.save()
+    # Sync profile
+    try:
+        from app.main import _sync_exam_test_profiles
+        await _sync_exam_test_profiles()
+    except Exception:
+        pass
+    return {"ok": True, "count": len(qids[module])}
 
-            qs = QuestionSet(
-                set_number=set_number, module=module,
-                question_ids=q_ids, question_count=10, status="active",
-            )
-            await qs.create()
-            created.append(set_number)
 
-        results[module] = {"total_questions": total, "existing_sets": existing, "created": len(created), "sets": created}
+@router.delete("/exam-tests/{test_id}/questions")
+async def remove_question_from_exam_test(test_id: str, body: dict,
+                                          principal: Principal) -> dict:
+    """Remove a question from an exam test's question pool."""
+    from app.models.platform import ExamTest
+    test = await ExamTest.get(test_id)
+    if not test:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Test not found")
+    module = body.get("module", "")
+    question_id = body.get("question_id", "")
+    if not module or not question_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "module and question_id required")
+    qids = test.question_ids or {}
+    if module in qids and question_id in qids[module]:
+        qids[module].remove(question_id)
+        test.question_ids = qids
+        test.updated_at = datetime.now(timezone.utc)
+        await test.save()
+    return {"ok": True, "count": len(qids.get(module, []))}
 
-    await audit.record(principal, "question_sets.auto_created", entity="QuestionSet",
-                       after=results)
-    return {"results": results, "ok": True}
+
+# The /question-sets family used to live here as a second implementation of the
+# same three operations. Sets are managed by the /sets endpoints in
+# platform_admin (list, detail, create, patch, delete) and created by
+# app.set_engine, so the duplicate pair only risked the two drifting apart.
 
 
 # --------------------------------------------------------------------------
