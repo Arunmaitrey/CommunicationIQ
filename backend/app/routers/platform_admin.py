@@ -1733,7 +1733,7 @@ async def list_contact_messages(status: str = "") -> list[dict]:
 async def list_exam_tests() -> list[dict]:
     """List all custom exam tests with set counts per module."""
     from app.models.platform import ExamTest, QuestionSet
-    tests = await ExamTest.find_all().to_list()
+    tests = await ExamTest.find(ExamTest.is_active == True).to_list()
     tests.sort(key=lambda t: t.created_at or t.updated_at or "", reverse=True)
     # Batch-fetch set counts per company
     all_sets = await QuestionSet.find({"status": "active"}).to_list(5000)
