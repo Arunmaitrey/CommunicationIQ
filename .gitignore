@@ -20,37 +20,12 @@ next-env.d.ts
 
 # Temporary / debug / test / seed scripts (not needed for production)
 tmp/
-backend/check_*.py
-backend/verify_*.py
-backend/test_*.py
-backend/fix_*.py
-backend/probe_*.py
-backend/debug_*.py
-backend/tmp_*.py
-backend/export_*.py
-backend/audit_full.py
-backend/audit_verify.py
-backend/app/seed_*.py
-backend/app/reseed_formats.py
-backend/app/import_all_questions.py
-backend/app/import_company_qs.py
-backend/app/import_company_questions.py
-
-# Export / dump JSONs
-db_export_*.json
-full_db_export.json
-communicationiq_export.json
-communicationiq_full_export.json
-*.json.bak
 
 # Validation baselines
 backend/validation_baselines/
 
 # TLS material
 backend/certs/
-
-# Render/local build output
-.render/
 
 # Logs
 *.log

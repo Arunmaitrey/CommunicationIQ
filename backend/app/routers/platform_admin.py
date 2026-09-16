@@ -1734,6 +1734,10 @@ async def list_exam_tests() -> list[dict]:
     """List all custom exam tests with set counts per module."""
     from app.models.platform import ExamTest, QuestionSet
     tests = await ExamTest.find(ExamTest.is_active == True).to_list()
+    print(f"DEBUG list_exam_tests: found {len(tests)} active tests")
+    for t in tests:
+        if not t.company:
+            print(f"  {t.id} - {t.name} - is_active: {t.is_active}")
     tests.sort(key=lambda t: t.created_at or t.updated_at or "", reverse=True)
     # Batch-fetch set counts per company
     all_sets = await QuestionSet.find({"status": "active"}).to_list(5000)
@@ -1952,7 +1956,7 @@ async def serve_prompt_audio(key: str) -> HttpResponse:
 
 
 @router.get("/sets")
-async def list_sets(module: str = "", status: str = "", company: str = "",
+async def list_sets(module: str = "", status: str = "", company: str | None = None,
                     include_archived: bool = False) -> list[dict]:
     """List question sets with optional filters.
 
@@ -1962,6 +1966,7 @@ async def list_sets(module: str = "", status: str = "", company: str = "",
     bury the sets an admin can actually assign.
     """
     from app.models.platform import QuestionSet, ExamTest
+    print(f"DEBUG list_sets: company={repr(company)}")
     query = {}
     if module:
         query["module"] = module
@@ -1969,8 +1974,18 @@ async def list_sets(module: str = "", status: str = "", company: str = "",
         query["status"] = status
     elif not include_archived:
         query["status"] = {"$in": ["active", "draft"]}
-    if company:
+    # Handle company filter: "general" or empty/None means general (no company)
+    if company and company not in ("general", ""):
         query["company"] = company
+    elif company in ("general", "") or company is None:
+        # If explicitly "general", empty string, or None -> filter to general
+        # Only apply filter if it was explicitly provided
+        # We need to check if the parameter was actually passed
+        # For now, treat None as "all companies" and "general"/"" as general
+        if company in ("general", ""):
+            query["company"] = "general"
+            print(f"DEBUG: Setting company=general")
+    print(f"DEBUG: Final query: {query}")
     raw = await QuestionSet.find(query).to_list(5000)
     # Company first, then number: with one numbering sequence per company, a
     # flat sort by set_number would interleave READ-SET-001 of every company

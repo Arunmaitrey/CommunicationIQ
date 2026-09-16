@@ -664,7 +664,8 @@ function QuestionBank() {
 
   const loadSets = () => {
     const token = getToken();
-    fetch(`${API_BASE}/platform/sets`, {
+    // Only load general company sets for Question Bank
+    fetch(`${API_BASE}/platform/sets?company=general`, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).then((r) => r.ok ? r.json() : [])
       .then((d) => setSets(Array.isArray(d) ? d : []))

@@ -72,7 +72,9 @@ function Companies() {
     setLoadingSets(true);
     try {
       const token = getToken();
-      const res = await fetch(`${API_BASE}/platform/sets?company=${encodeURIComponent(companyName)}&status=active&limit=5000`,
+      // Use "general" for empty company name (general category)
+      const companyParam = companyName || "general";
+      const res = await fetch(`${API_BASE}/platform/sets?company=${encodeURIComponent(companyParam)}&status=active&limit=5000`,
         { headers: token ? { Authorization: `Bearer ${token}` } : {} });
       if (!res.ok) throw new Error("Failed");
       const d = await res.json();
